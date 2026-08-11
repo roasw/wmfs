@@ -1,0 +1,11 @@
+[general]
+# Optional: ignore merge commits
+ignore=merge-commit,B6,T3
+
+[title-max-length]
+line-length=72
+
+# Enforce: (doc|fix|feat|infra|refac|revert): <anything-none-empty>.
+# Must end with a dot.
+[title-match-regex]
+regex=^(chore|doc|fix|feat|infra|refac|revert): .+\.$
