@@ -1,0 +1,6 @@
+[plugin]
+name = "reference"
+version = "0.1.0"
+schema = "schemas/wmfs-reference/reference.capnp"
+interface = "ReferencePlugin"
+worker = "wmfs-reference-worker"

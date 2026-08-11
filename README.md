@@ -31,3 +31,21 @@ d = add_scalar(c, 1.0)
 ```
 
 The public calls will remain unchanged when the isolated backend is added.
+
+## Plugin Discovery
+
+Plugin deployment metadata identifies a worker module and its Cap'n Proto
+schema. Operation signatures are declared once in the schema and discovered
+over RPC when the plugin is registered:
+
+```python
+from pathlib import Path
+
+from wmfs import runtime
+
+runtime.discover_plugins(Path("plugins"))
+print(runtime.operation_names)
+```
+
+Tensor payload transport is not part of this milestone. Discovered operations
+continue to execute through the explicitly selected backend.

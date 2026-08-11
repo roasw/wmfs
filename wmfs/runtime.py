@@ -1,6 +1,9 @@
+from pathlib import Path
 from typing import Protocol
 
 from wmfs.backends.local import LocalBackend
+from wmfs.plugins import discover_plugins
+from wmfs.registry import OperationMetadata, OperationRegistry
 
 
 class Backend(Protocol):
@@ -14,10 +17,21 @@ class Runtime:
     def __init__(self) -> None:
         self._backends: dict[str, Backend] = {"local": LocalBackend()}
         self._backend_name = "local"
+        self._registry = OperationRegistry()
 
     @property
     def backend_name(self) -> str:
         return self._backend_name
+
+    @property
+    def operation_names(self) -> tuple[str, ...]:
+        return self._registry.operation_names
+
+    def operation_metadata(self, name: str) -> OperationMetadata:
+        return self._registry.operation(name)
+
+    def discover_plugins(self, *plugin_directories: Path) -> None:
+        self._registry = discover_plugins(list(plugin_directories))
 
     def use_backend(self, name: str) -> None:
         if name not in self._backends:

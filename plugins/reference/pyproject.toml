@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wmfs-reference"
+version = "0.1.0"
+description = "Reference numerical plugin for wmfs"
+requires-python = ">=3.11"
+dependencies = ["pycapnp", "torch"]
+
+[project.scripts]
+wmfs-reference-worker = "wmfs_reference.worker:main"
+
+[tool.setuptools.packages.find]
+include = ["wmfs_reference*"]
+
+[tool.setuptools.data-files]
+"share/wmfs/plugins/reference" = [
+    "plugin.toml",
+    "schemas/wmfs-reference/reference.capnp",
+]
