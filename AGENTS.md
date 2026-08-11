@@ -1,8 +1,14 @@
 # AGENTS.md
 
-## Goal
+## Project Conventions
 
-The project is called `wmfs`, and the Python module should placed in `wmfs` in project root.
+- The Python package is named `wmfs` and is located in `wmfs` at the project root.
+- Implement the runtime in Python first.
+- Use nanobind instead of pybind11 for future Python/C++ bindings.
+- Use C++20 or newer for all C++ code.
+- Commit messages must follow the rules in `.gitlint`.
+
+## Goal
 
 Prototype a scientific-computing runtime where users write ordinary Python code, while selected function calls transparently execute in isolated worker processes.
 
