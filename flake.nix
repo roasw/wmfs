@@ -27,6 +27,27 @@
         };
     in
     {
+      packages = forSystems (
+        system:
+        let
+          pkgs = pkgsFactory system nixpkgs;
+        in
+        {
+          default = pkgs.python3Packages.buildPythonPackage {
+            pname = "wmfs";
+            version = "0.1.0";
+            pyproject = true;
+            src = ./.;
+
+            build-system = [ pkgs.python3Packages.setuptools ];
+            dependencies = [ pkgs.python3Packages.torch ];
+
+            nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook ];
+            pythonImportsCheck = [ "wmfs" ];
+          };
+        }
+      );
+
       checks = forSystems (
         system:
         let
@@ -56,6 +77,8 @@
               ruff-format.enable = true;
             };
           };
+
+          package = self.packages.${system}.default;
         }
       );
 
@@ -63,29 +86,37 @@
         system:
         let
           pkgs = pkgsFactory system nixpkgs;
-          inherit (self.checks.${system}.pre-commit-check) shellHook;
+          pre-commit-check = self.checks.${system}.pre-commit-check;
+          python = pkgs.python3.withPackages (
+            ps: with ps; [
+              matplotlib
+              nanobind
+              pycapnp
+              pytest
+              torch
+            ]
+          );
         in
         {
           default = pkgs.mkShell {
             name = "wmfs-dev";
 
-            nativeBuildInputs = with pkgs; [
-              cmake
-              ninja
-              doxygen
-              graphviz
-            ];
+            nativeBuildInputs =
+              pre-commit-check.enabledPackages
+              ++ (with pkgs; [
+                capnproto
+                cmake
+                ninja
+                doxygen
+                graphviz
+              ]);
 
-            buildInputs = with pkgs; [
-              python3
-              python3Packages.torch
-              python3Packages.pybind11
-              python3Packages.matplotlib
-            ];
+            buildInputs = [ python ];
 
-            shellHook = shellHook + ''
-              export PATH=$(pwd)/tools:$(pwd)/build/Debug:$PATH
-              export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+            shellHook = pre-commit-check.shellHook + ''
+              repo_root="$(git rev-parse --show-toplevel)"
+              export PATH="$repo_root/tools:$repo_root/build/Debug:$PATH"
+              export PYTHONPATH="$repo_root''${PYTHONPATH:+:$PYTHONPATH}"
             '';
           };
         }
