@@ -5,7 +5,9 @@ from pathlib import Path
 from types import ModuleType
 
 import capnp
+import torch
 
+from wmfs_reference import kernels
 from wmfs_reference.fd_transport import FdReceiver, MappedBufferCache
 
 
@@ -34,6 +36,71 @@ def _make_server(
         ) -> tuple[float]:
             checksum = mapped_buffers.tensor(tensor).sum().item()
             return (float(checksum),)
+
+        async def matmul(
+            self,
+            a: object,
+            b: object,
+            allocator: object,
+            _context: object,
+            **_kwargs: object,
+        ) -> tuple[object]:
+            a_tensor = mapped_buffers.tensor(a)
+            b_tensor = mapped_buffers.tensor(b)
+            if a_tensor.ndim != 2 or b_tensor.ndim != 2:
+                raise ValueError("matmul initially supports two-dimensional tensors")
+            if a_tensor.shape[1] != b_tensor.shape[0]:
+                raise ValueError("matmul input dimensions are incompatible")
+            allocated = await allocator.allocate(
+                shape=[a_tensor.shape[0], b_tensor.shape[1]], dtype=str(a.dtype)
+            )
+            result = mapped_buffers.tensor(allocated.tensor, require_writable=True)
+            kernels.matmul(a_tensor, b_tensor, out=result)
+            return (allocated.tensor,)
+
+        async def svd(
+            self,
+            a: object,
+            fullMatrices: bool,
+            allocator: object,
+            _context: object,
+            **_kwargs: object,
+        ) -> tuple[object, object, object]:
+            a_tensor = mapped_buffers.tensor(a)
+            if a_tensor.ndim != 2:
+                raise ValueError("svd initially supports two-dimensional tensors")
+            rows, columns = a_tensor.shape
+            rank = min(rows, columns)
+            u_shape = [rows, rows if fullMatrices else rank]
+            vh_shape = [columns if fullMatrices else rank, columns]
+            allocated_u = await allocator.allocate(shape=u_shape, dtype=str(a.dtype))
+            allocated_s = await allocator.allocate(shape=[rank], dtype=str(a.dtype))
+            allocated_vh = await allocator.allocate(shape=vh_shape, dtype=str(a.dtype))
+            outputs = tuple(
+                mapped_buffers.tensor(item.tensor, require_writable=True)
+                for item in (allocated_u, allocated_s, allocated_vh)
+            )
+            kernels.svd(a_tensor, full_matrices=fullMatrices, out=outputs)
+            return (allocated_u.tensor, allocated_s.tensor, allocated_vh.tensor)
+
+        async def addScalar(
+            self,
+            a: object,
+            value: float,
+            allocator: object,
+            _context: object,
+            **_kwargs: object,
+        ) -> tuple[object]:
+            a_tensor = mapped_buffers.tensor(a)
+            result_dtype = str(torch.result_type(a_tensor, value)).removeprefix(
+                "torch."
+            )
+            allocated = await allocator.allocate(
+                shape=list(a_tensor.shape), dtype=result_dtype
+            )
+            result = mapped_buffers.tensor(allocated.tensor, require_writable=True)
+            kernels.add_scalar(a_tensor, value, out=result)
+            return (allocated.tensor,)
 
     return ReferencePlugin()
 

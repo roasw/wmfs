@@ -61,3 +61,24 @@ metadata; numerical payload bytes never enter the RPC message.
 Ordinary Torch allocations require one ingress copy into managed storage.
 Managed results can be reused across worker calls without copying or repeatedly
 passing the same FD.
+
+## Isolated Execution
+
+After discovery, selecting the isolated backend starts a persistent worker on
+first use. Inputs and runtime-owned outputs are mapped once per worker, and the
+worker writes operation results directly into storage allocated by the runtime:
+
+```python
+from pathlib import Path
+
+from wmfs import matmul, runtime
+
+runtime.discover_plugins(Path("plugins"))
+runtime.use_backend("isolated")
+result = matmul(a, b)
+runtime.close()
+```
+
+`matmul`, `svd`, and `add_scalar` expose the same public API in local and
+isolated modes. The current prototype supports contiguous CPU tensors and
+serializes calls within each worker.

@@ -34,6 +34,7 @@ class OperationRegistry:
     def __init__(self) -> None:
         self._plugins: dict[str, PluginMetadata] = {}
         self._operations: dict[str, OperationMetadata] = {}
+        self._operation_plugins: dict[str, str] = {}
 
     @property
     def plugin_names(self) -> tuple[str, ...]:
@@ -46,6 +47,12 @@ class OperationRegistry:
     def operation(self, name: str) -> OperationMetadata:
         try:
             return self._operations[name]
+        except KeyError:
+            raise KeyError(f"Operation {name!r} is not registered") from None
+
+    def plugin_for_operation(self, name: str) -> str:
+        try:
+            return self._operation_plugins[name]
         except KeyError:
             raise KeyError(f"Operation {name!r} is not registered") from None
 
@@ -62,3 +69,6 @@ class OperationRegistry:
 
         self._plugins[plugin.name] = plugin
         self._operations.update((item.name, item) for item in plugin.operations)
+        self._operation_plugins.update(
+            (item.name, plugin.name) for item in plugin.operations
+        )

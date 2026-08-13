@@ -1,6 +1,8 @@
 @0xe52414e8e3d32b51;
 
-const protocolVersion :UInt16 = 1;
+using Tensor = import "/wmfs/tensor.capnp";
+
+const protocolVersion :UInt16 = 2;
 
 enum TensorAccess {
   readOnly @0;
@@ -37,6 +39,11 @@ struct PluginMetadata {
   version @1 :Text;
   protocolVersion @2 :UInt16;
   operations @3 :List(OperationMetadata);
+}
+
+interface OutputAllocator {
+  allocate @0 (shape :List(UInt64), dtype :Tensor.DType) ->
+      (tensor :Tensor.TensorDescriptor);
 }
 
 interface Plugin {

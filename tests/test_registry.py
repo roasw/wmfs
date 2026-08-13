@@ -40,3 +40,10 @@ def test_registry_reports_missing_operation() -> None:
 
     with pytest.raises(KeyError, match="Operation 'missing' is not registered"):
         registry.operation("missing")
+
+
+def test_registry_reports_operation_owner() -> None:
+    registry = OperationRegistry()
+    registry.register(_plugin("example", "operation"))
+
+    assert registry.plugin_for_operation("operation") == "example"

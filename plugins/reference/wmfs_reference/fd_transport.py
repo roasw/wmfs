@@ -59,19 +59,27 @@ class MappedBufferCache:
             if existing is not None and existing.generation >= generation:
                 candidate.close()
                 if existing.generation == generation:
+                    if writable and not existing.writable:
+                        raise ValueError(
+                            "Cannot upgrade an existing read-only buffer mapping"
+                        )
                     return
                 raise ValueError("Transferred buffer generation is stale")
             self._buffers[buffer_id] = candidate
         if existing is not None:
             existing.close()
 
-    def tensor(self, descriptor: object) -> torch.Tensor:
+    def tensor(
+        self, descriptor: object, *, require_writable: bool = False
+    ) -> torch.Tensor:
         with self._lock:
             buffer = self._buffers.get(int(descriptor.bufferId))
         if buffer is None:
             raise ValueError("Tensor references an unmapped buffer")
         if buffer.generation != int(descriptor.generation):
             raise ValueError("Tensor references a stale buffer generation")
+        if require_writable and not buffer.writable:
+            raise ValueError("Tensor output is not mapped writable")
 
         dtype_name = str(descriptor.dtype)
         try:

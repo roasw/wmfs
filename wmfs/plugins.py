@@ -43,12 +43,20 @@ def find_manifests(plugin_directories: list[Path]) -> tuple[PluginManifest, ...]
 
 
 def discover_plugins(plugin_directories: list[Path]) -> OperationRegistry:
+    registry, _manifests = discover_plugin_manifests(plugin_directories)
+    return registry
+
+
+def discover_plugin_manifests(
+    plugin_directories: list[Path],
+) -> tuple[OperationRegistry, tuple[PluginManifest, ...]]:
     registry = OperationRegistry()
-    for manifest in find_manifests(plugin_directories):
+    manifests = find_manifests(plugin_directories)
+    for manifest in manifests:
         metadata = inspect_plugin(manifest)
         _validate_manifest(manifest, metadata)
         registry.register(metadata)
-    return registry
+    return registry, manifests
 
 
 def _validate_manifest(manifest: PluginManifest, metadata: PluginMetadata) -> None:

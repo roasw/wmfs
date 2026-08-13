@@ -4,6 +4,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -12,8 +13,9 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 import capnp
+import torch
 
-from wmfs.memory.buffers import ManagedTensor
+from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
 from wmfs.registry import (
     OperationMetadata,
     PluginMetadata,
@@ -25,8 +27,7 @@ from wmfs.transport.fd_broker import FdSender
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
 
-
-_RPC_TIMEOUT_SECONDS = 5.0
+_RPC_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,197 @@ def _load_plugin_schema(manifest: "PluginManifest") -> ModuleType:
     )
 
 
+class _OutputAllocator:
+    def __init__(
+        self,
+        schema: ModuleType,
+        buffers: BufferManager,
+        fd_sender: FdSender,
+        invocation_id: int,
+    ) -> None:
+        allocator = self
+
+        class Server(schema.OutputAllocator.Server):
+            async def allocate(
+                self,
+                shape: object,
+                dtype: object,
+                _context: object,
+                **_kwargs: object,
+            ) -> tuple[dict[str, object]]:
+                managed = allocator._allocate(
+                    tuple(int(item) for item in shape), str(dtype)
+                )
+                await asyncio.to_thread(
+                    fd_sender.ensure_mapped,
+                    managed.buffer,
+                    invocation_id=invocation_id,
+                    writable=True,
+                )
+                return (managed.descriptor.as_capnp(),)
+
+        self.server = Server()
+        self._buffers = buffers
+        self.allocations: dict[int, ManagedTensor] = {}
+
+    def _allocate(self, shape: tuple[int, ...], dtype: str) -> ManagedTensor:
+        if len(self.allocations) >= 8:
+            raise ValueError("Operation output allocation limit exceeded")
+        managed = self._buffers.empty_named(shape, dtype)
+        self.allocations[managed.buffer.id] = managed
+        return managed
+
+    def resolve(self, descriptor: object) -> ManagedTensor:
+        parsed = TensorDescriptor.from_capnp(descriptor)
+        managed = self.allocations.get(parsed.buffer_id)
+        if managed is None or managed.descriptor != parsed:
+            raise ValueError("Worker returned an output it did not allocate")
+        return managed
+
+    def rollback(self) -> None:
+        for managed in self.allocations.values():
+            self._buffers.release(managed)
+        self.allocations.clear()
+
+
+class WorkerSession:
+    def __init__(self, manifest: "PluginManifest", buffers: BufferManager) -> None:
+        self._manifest = manifest
+        self._buffers = buffers
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._plugin: object | None = None
+        self._fd_sender: FdSender | None = None
+        self._startup_error: BaseException | None = None
+        self._shutdown: asyncio.Event | None = None
+        self._invoke_lock: asyncio.Lock | None = None
+        self._closed = False
+        self._thread.start()
+        if not self._ready.wait(_RPC_TIMEOUT_SECONDS):
+            raise RuntimeError("Worker session did not start")
+        if self._startup_error is not None:
+            raise RuntimeError(
+                "Worker session failed to start"
+            ) from self._startup_error
+
+    def invoke(self, operation: str, /, *args: object, **kwargs: object) -> object:
+        if self._closed or self._loop is None:
+            raise RuntimeError("Worker session is closed")
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("Worker session cannot synchronously invoke itself")
+        future = asyncio.run_coroutine_threadsafe(
+            self._invoke(operation, args, kwargs), self._loop
+        )
+        return future.result(timeout=_RPC_TIMEOUT_SECONDS)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._loop is not None and self._shutdown is not None:
+            self._loop.call_soon_threadsafe(self._shutdown.set)
+        self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+        if self._thread.is_alive():
+            raise RuntimeError("Worker session did not stop")
+
+    def _run(self) -> None:
+        try:
+            asyncio.run(capnp.run(self._serve()))
+        except BaseException as error:
+            if not self._ready.is_set():
+                self._startup_error = error
+                self._ready.set()
+
+    async def _serve(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._shutdown = asyncio.Event()
+        self._invoke_lock = asyncio.Lock()
+        async with _worker_connection(self._manifest) as (plugin, fd_sender):
+            await _validate_worker(plugin)
+            self._plugin = plugin
+            self._fd_sender = fd_sender
+            self._ready.set()
+            await self._shutdown.wait()
+
+    async def _invoke(
+        self, operation: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> object:
+        if self._invoke_lock is None or self._plugin is None or self._fd_sender is None:
+            raise RuntimeError("Worker session is not ready")
+        async with self._invoke_lock:
+            invocation_id = secrets.randbits(64)
+            inputs = [
+                await self._prepare_input(item, invocation_id)
+                for item in args
+                if isinstance(item, torch.Tensor)
+            ]
+            allocator = _OutputAllocator(
+                _load_runtime_schema(),
+                self._buffers,
+                self._fd_sender,
+                invocation_id,
+            )
+            try:
+                response = await self._call_operation(
+                    operation, inputs, args, kwargs, allocator
+                )
+                return self._resolve_outputs(operation, response, allocator)
+            except Exception:
+                allocator.rollback()
+                raise
+
+    async def _prepare_input(
+        self, tensor: torch.Tensor, invocation_id: int
+    ) -> ManagedTensor:
+        managed = self._buffers.managed(tensor)
+        if managed is None:
+            managed = self._buffers.from_tensor(tensor.contiguous())
+        await asyncio.to_thread(
+            self._fd_sender.ensure_mapped,
+            managed.buffer,
+            invocation_id=invocation_id,
+            writable=False,
+        )
+        return managed
+
+    async def _call_operation(
+        self,
+        operation: str,
+        inputs: list[ManagedTensor],
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        allocator: _OutputAllocator,
+    ) -> object:
+        descriptors = [item.descriptor.as_capnp() for item in inputs]
+        if operation == "matmul":
+            return await self._plugin.matmul(
+                a=descriptors[0], b=descriptors[1], allocator=allocator.server
+            )
+        if operation == "svd":
+            return await self._plugin.svd(
+                a=descriptors[0],
+                fullMatrices=bool(kwargs.get("full_matrices", True)),
+                allocator=allocator.server,
+            )
+        if operation == "add_scalar":
+            value = next(item for item in args if not isinstance(item, torch.Tensor))
+            return await self._plugin.addScalar(
+                a=descriptors[0], value=float(value), allocator=allocator.server
+            )
+        raise ValueError(f"Unknown isolated operation {operation!r}")
+
+    def _resolve_outputs(
+        self, operation: str, response: object, allocator: _OutputAllocator
+    ) -> object:
+        if operation == "svd":
+            return tuple(
+                allocator.resolve(item).tensor
+                for item in (response.u, response.s, response.vh)
+            )
+        return allocator.resolve(response.result).tensor
+
+
 def inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
     return asyncio.run(capnp.run(_inspect_plugin(manifest)))
 
@@ -67,21 +259,24 @@ def probe_shared_tensor(
 
 
 async def _inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
-    runtime_schema = _load_runtime_schema()
     async with _worker_connection(manifest) as (plugin, _fd_sender):
-        nonce = secrets.randbits(64)
-        ping = await asyncio.wait_for(plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS)
-        if ping.nonce != nonce:
-            raise RuntimeError("Worker returned an invalid ping response")
+        return await _validate_worker(plugin)
 
-        response = await asyncio.wait_for(plugin.getMetadata(), _RPC_TIMEOUT_SECONDS)
-        metadata = _metadata_from_reader(response.metadata)
-        if metadata.protocol_version != runtime_schema.protocolVersion:
-            raise RuntimeError(
-                f"Worker uses protocol {metadata.protocol_version}, but runtime uses "
-                f"{runtime_schema.protocolVersion}"
-            )
-        return metadata
+
+async def _validate_worker(plugin: object) -> PluginMetadata:
+    runtime_schema = _load_runtime_schema()
+    nonce = secrets.randbits(64)
+    ping = await asyncio.wait_for(plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS)
+    if ping.nonce != nonce:
+        raise RuntimeError("Worker returned an invalid ping response")
+    response = await asyncio.wait_for(plugin.getMetadata(), _RPC_TIMEOUT_SECONDS)
+    metadata = _metadata_from_reader(response.metadata)
+    if metadata.protocol_version != runtime_schema.protocolVersion:
+        raise RuntimeError(
+            f"Worker uses protocol {metadata.protocol_version}, but runtime uses "
+            f"{runtime_schema.protocolVersion}"
+        )
+    return metadata
 
 
 async def _probe_shared_tensor(
@@ -176,30 +371,24 @@ def _start_worker(
         env=environment,
         pass_fds=(rpc_fd, fd_socket_fd),
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=None,
         text=True,
     )
 
 
 async def _wait_for_worker(process: subprocess.Popen[str]) -> None:
     try:
-        _, stderr = await asyncio.to_thread(
-            process.communicate, timeout=_RPC_TIMEOUT_SECONDS
-        )
+        await asyncio.to_thread(process.wait, timeout=_RPC_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         process.terminate()
         try:
-            _, stderr = await asyncio.to_thread(
-                process.communicate, timeout=_RPC_TIMEOUT_SECONDS
-            )
+            await asyncio.to_thread(process.wait, timeout=_RPC_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             process.kill()
-            _, stderr = await asyncio.to_thread(process.communicate)
+            await asyncio.to_thread(process.wait)
         raise RuntimeError("Worker did not stop after its RPC connection closed")
-
     if process.returncode != 0:
-        detail = stderr.strip() or f"exit status {process.returncode}"
-        raise RuntimeError(f"Worker failed: {detail}")
+        raise RuntimeError(f"Worker failed with exit status {process.returncode}")
 
 
 def _metadata_from_reader(metadata: object) -> PluginMetadata:

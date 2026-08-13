@@ -6,7 +6,7 @@ using Tensor = import "/wmfs/tensor.capnp";
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
-  protocolVersion = 1,
+  protocolVersion = 2,
   operations = [
     (
       name = "matmul",
@@ -39,4 +39,23 @@ const pluginMetadata :Runtime.PluginMetadata = (
 
 interface ReferencePlugin extends(Runtime.Plugin) {
   tensorChecksum @0 (tensor :Tensor.TensorDescriptor) -> (checksum :Float64);
+  matmul @1 (
+    a :Tensor.TensorDescriptor,
+    b :Tensor.TensorDescriptor,
+    allocator :Runtime.OutputAllocator,
+  ) -> (result :Tensor.TensorDescriptor);
+  svd @2 (
+    a :Tensor.TensorDescriptor,
+    fullMatrices :Bool = true,
+    allocator :Runtime.OutputAllocator,
+  ) -> (
+    u :Tensor.TensorDescriptor,
+    s :Tensor.TensorDescriptor,
+    vh :Tensor.TensorDescriptor,
+  );
+  addScalar @3 (
+    a :Tensor.TensorDescriptor,
+    value :Float64,
+    allocator :Runtime.OutputAllocator,
+  ) -> (result :Tensor.TensorDescriptor);
 }

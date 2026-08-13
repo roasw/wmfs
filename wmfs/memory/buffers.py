@@ -11,6 +11,7 @@ _DTYPE_NAMES: dict[torch.dtype, str] = {
     torch.int64: "int64",
     torch.uint8: "uint8",
 }
+_DTYPES = {name: dtype for dtype, name in _DTYPE_NAMES.items()}
 _BUFFER_IDS = itertools.count(1)
 
 
@@ -34,6 +35,18 @@ class TensorDescriptor:
             "shape": self.shape,
             "strides": self.strides,
         }
+
+    @classmethod
+    def from_capnp(cls, descriptor: object) -> "TensorDescriptor":
+        return cls(
+            buffer_id=int(descriptor.bufferId),
+            generation=int(descriptor.generation),
+            offset=int(descriptor.offset),
+            byte_length=int(descriptor.byteLength),
+            dtype=str(descriptor.dtype),
+            shape=tuple(int(item) for item in descriptor.shape),
+            strides=tuple(int(item) for item in descriptor.strides),
+        )
 
 
 class SharedBuffer:
@@ -65,6 +78,10 @@ class SharedBuffer:
         os.close(self._fd)
         self._closed = True
 
+    def __del__(self) -> None:
+        if hasattr(self, "_closed"):
+            self.close()
+
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("Shared buffer is closed")
@@ -77,9 +94,16 @@ class ManagedTensor:
     buffer: SharedBuffer
 
 
+@dataclass(frozen=True)
+class AllocationLease:
+    descriptor: TensorDescriptor
+    buffer: SharedBuffer
+
+
 class BufferManager:
     def __init__(self) -> None:
         self._buffers: dict[int, SharedBuffer] = {}
+        self._managed: dict[int, ManagedTensor] = {}
 
     def empty(
         self, shape: tuple[int, ...], *, dtype: torch.dtype = torch.float32
@@ -104,7 +128,17 @@ class BufferManager:
             shape=shape,
             strides=tuple(stride * item_size for stride in strides),
         )
-        return ManagedTensor(tensor=tensor, descriptor=descriptor, buffer=buffer)
+        managed = ManagedTensor(tensor=tensor, descriptor=descriptor, buffer=buffer)
+        tensor._wmfs_allocation = AllocationLease(descriptor, buffer)
+        self._managed[buffer.id] = managed
+        return managed
+
+    def empty_named(self, shape: tuple[int, ...], dtype: str) -> ManagedTensor:
+        try:
+            torch_dtype = _DTYPES[dtype]
+        except KeyError:
+            raise TypeError(f"Unsupported shared tensor dtype: {dtype}") from None
+        return self.empty(shape, dtype=torch_dtype)
 
     def from_tensor(self, tensor: torch.Tensor) -> ManagedTensor:
         if tensor.device.type != "cpu":
@@ -115,10 +149,32 @@ class BufferManager:
         managed.tensor.copy_(tensor)
         return managed
 
+    def managed(self, tensor: torch.Tensor) -> ManagedTensor | None:
+        lease = getattr(tensor, "_wmfs_allocation", None)
+        if not isinstance(lease, AllocationLease):
+            return None
+        if lease.buffer.id not in self._buffers:
+            return None
+        return ManagedTensor(tensor, lease.descriptor, lease.buffer)
+
+    def resolve(self, descriptor: TensorDescriptor) -> ManagedTensor:
+        buffer = self._buffers.get(descriptor.buffer_id)
+        if buffer is None or buffer.generation != descriptor.generation:
+            raise ValueError("Tensor descriptor does not identify a runtime allocation")
+        managed = self._managed.get(buffer.id)
+        if managed is not None and managed.descriptor == descriptor:
+            return managed
+        raise ValueError("Tensor descriptor does not identify a live tensor")
+
+    def release(self, managed: ManagedTensor) -> None:
+        current = self._managed.pop(managed.buffer.id, None)
+        self._buffers.pop(managed.buffer.id, None)
+        if current is not None:
+            current.buffer.close()
+
     def close(self) -> None:
-        for buffer in self._buffers.values():
-            buffer.close()
         self._buffers.clear()
+        self._managed.clear()
 
     def __enter__(self) -> "BufferManager":
         return self
