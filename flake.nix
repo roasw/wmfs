@@ -116,6 +116,10 @@
               --import-path=${./wmfs/schemas} \
               ${./wmfs/schemas/wmfs/runtime.capnp} >/dev/null
             capnp compile -o- \
+              --src-prefix=${./wmfs/schemas} \
+              --import-path=${./wmfs/schemas} \
+              ${./wmfs/schemas/wmfs/tensor.capnp} >/dev/null
+            capnp compile -o- \
               --src-prefix=${./plugins/reference/schemas} \
               --import-path=${./wmfs/schemas} \
               --import-path=${./plugins/reference/schemas} \

@@ -4,24 +4,35 @@ import secrets
 import shutil
 import socket
 import subprocess
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
 import capnp
 
+from wmfs.memory.buffers import ManagedTensor
 from wmfs.registry import (
     OperationMetadata,
     PluginMetadata,
     ScalarParameter,
     TensorParameter,
 )
+from wmfs.transport.fd_broker import FdSender
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
 
 
 _RPC_TIMEOUT_SECONDS = 5.0
+
+
+@dataclass(frozen=True)
+class TensorProbe:
+    checksum: float
+    fd_transfers: int
 
 
 def _schema_root() -> Path:
@@ -31,6 +42,11 @@ def _schema_root() -> Path:
 def _load_runtime_schema() -> ModuleType:
     root = _schema_root()
     return capnp.load(str(root / "wmfs" / "runtime.capnp"), imports=[str(root)])
+
+
+def _load_tensor_schema() -> ModuleType:
+    root = _schema_root()
+    return capnp.load(str(root / "wmfs" / "tensor.capnp"), imports=[str(root)])
 
 
 def _load_plugin_schema(manifest: "PluginManifest") -> ModuleType:
@@ -44,25 +60,15 @@ def inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
     return asyncio.run(capnp.run(_inspect_plugin(manifest)))
 
 
-async def _inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
-    parent_socket, child_socket = socket.socketpair()
-    try:
-        process = _start_worker(manifest, child_socket.fileno())
-    except Exception:
-        parent_socket.close()
-        raise
-    finally:
-        child_socket.close()
-    stream = None
-    client = None
-    try:
-        runtime_schema = _load_runtime_schema()
-        plugin_schema = _load_plugin_schema(manifest)
-        interface = getattr(plugin_schema, manifest.interface)
-        stream = await capnp.AsyncIoStream.create_unix_connection(sock=parent_socket)
-        client = capnp.TwoPartyClient(stream)
-        plugin = client.bootstrap().cast_as(interface)
+def probe_shared_tensor(
+    manifest: "PluginManifest", managed_tensor: ManagedTensor
+) -> TensorProbe:
+    return asyncio.run(capnp.run(_probe_shared_tensor(manifest, managed_tensor)))
 
+
+async def _inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
+    runtime_schema = _load_runtime_schema()
+    async with _worker_connection(manifest) as (plugin, _fd_sender):
         nonce = secrets.randbits(64)
         ping = await asyncio.wait_for(plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS)
         if ping.nonce != nonce:
@@ -76,17 +82,67 @@ async def _inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
                 f"{runtime_schema.protocolVersion}"
             )
         return metadata
+
+
+async def _probe_shared_tensor(
+    manifest: "PluginManifest", managed_tensor: ManagedTensor
+) -> TensorProbe:
+    async with _worker_connection(manifest) as (plugin, fd_sender):
+        fd_sender.ensure_mapped(managed_tensor.buffer, invocation_id=1, writable=False)
+        fd_sender.ensure_mapped(managed_tensor.buffer, invocation_id=1, writable=False)
+        response = await asyncio.wait_for(
+            plugin.tensorChecksum(tensor=managed_tensor.descriptor.as_capnp()),
+            _RPC_TIMEOUT_SECONDS,
+        )
+        return TensorProbe(
+            checksum=float(response.checksum),
+            fd_transfers=fd_sender.transfer_count,
+        )
+
+
+@asynccontextmanager
+async def _worker_connection(
+    manifest: "PluginManifest",
+) -> AsyncIterator[tuple[object, FdSender]]:
+    rpc_parent, rpc_child = socket.socketpair()
+    fd_parent, fd_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    try:
+        process = _start_worker(manifest, rpc_child.fileno(), fd_child.fileno())
+    except Exception:
+        rpc_parent.close()
+        fd_parent.close()
+        raise
+    finally:
+        rpc_child.close()
+        fd_child.close()
+
+    stream = None
+    client = None
+    fd_sender = None
+    try:
+        fd_sender = FdSender(fd_parent, _load_tensor_schema())
+        plugin_schema = _load_plugin_schema(manifest)
+        interface = getattr(plugin_schema, manifest.interface)
+        stream = await capnp.AsyncIoStream.create_unix_connection(sock=rpc_parent)
+        client = capnp.TwoPartyClient(stream)
+        yield client.bootstrap().cast_as(interface), fd_sender
     finally:
         if client is not None:
             client.close()
         if stream is not None:
             stream.close()
         else:
-            parent_socket.close()
+            rpc_parent.close()
+        if fd_sender is not None:
+            fd_sender.close()
+        else:
+            fd_parent.close()
         await _wait_for_worker(process)
 
 
-def _start_worker(manifest: "PluginManifest", rpc_fd: int) -> subprocess.Popen[str]:
+def _start_worker(
+    manifest: "PluginManifest", rpc_fd: int, fd_socket_fd: int
+) -> subprocess.Popen[str]:
     schema_root = _schema_root().resolve()
     environment = os.environ.copy()
     project_root = Path(__file__).parents[2].resolve()
@@ -105,6 +161,8 @@ def _start_worker(manifest: "PluginManifest", rpc_fd: int) -> subprocess.Popen[s
             worker,
             "--rpc-fd",
             str(rpc_fd),
+            "--fd-socket-fd",
+            str(fd_socket_fd),
             "--schema",
             str(manifest.schema_path),
             "--interface",
@@ -116,7 +174,7 @@ def _start_worker(manifest: "PluginManifest", rpc_fd: int) -> subprocess.Popen[s
         ],
         cwd=manifest.root,
         env=environment,
-        pass_fds=(rpc_fd,),
+        pass_fds=(rpc_fd, fd_socket_fd),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,

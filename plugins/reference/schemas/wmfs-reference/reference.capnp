@@ -1,6 +1,7 @@
 @0x8b425a52f499e38a;
 
 using Runtime = import "/wmfs/runtime.capnp";
+using Tensor = import "/wmfs/tensor.capnp";
 
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
@@ -36,4 +37,6 @@ const pluginMetadata :Runtime.PluginMetadata = (
   ],
 );
 
-interface ReferencePlugin extends(Runtime.Plugin) {}
+interface ReferencePlugin extends(Runtime.Plugin) {
+  tensorChecksum @0 (tensor :Tensor.TensorDescriptor) -> (checksum :Float64);
+}

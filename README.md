@@ -47,5 +47,17 @@ runtime.discover_plugins(Path("plugins"))
 print(runtime.operation_names)
 ```
 
-Tensor payload transport is not part of this milestone. Discovered operations
-continue to execute through the explicitly selected backend.
+Discovery exchanges metadata only. Discovered operations continue to execute
+through the explicitly selected backend until isolated operation dispatch is
+enabled.
+
+## Shared CPU Tensors
+
+The runtime can move a contiguous CPU tensor into runtime-owned memfd storage.
+Workers receive a read-only descriptor through `SCM_RIGHTS`, map it once, and
+construct a Torch view from the mapped memory. Cap'n Proto carries only tensor
+metadata; numerical payload bytes never enter the RPC message.
+
+Ordinary Torch allocations require one ingress copy into managed storage.
+Managed results can be reused across worker calls without copying or repeatedly
+passing the same FD.
