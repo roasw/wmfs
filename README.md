@@ -82,3 +82,26 @@ runtime.close()
 `matmul`, `svd`, and `add_scalar` expose the same public API in local and
 isolated modes. The current prototype supports contiguous CPU tensors and
 serializes calls within each worker.
+
+## Incompatible Worker Environment
+
+`environments/nixos-25.05` is an independent nested flake that rebuilds the
+reference worker with NixOS 25.05, glibc 2.40, Python 3.12, and its own Torch
+closure. The root runtime remains built from its separately pinned unstable
+Nixpkgs input.
+
+Run the cross-environment integration check from the repository root:
+
+```console
+nix flake check ./environments/nixos-25.05
+```
+
+The check confirms the runtime and worker report different glibc versions and
+then executes an isolated tensor operation through Cap'n Proto and shared
+memory. It also verifies that plugin modules and native libraries from the old
+worker closure are not loaded into the main process. Enter the old worker
+development shell with:
+
+```console
+nix develop ./environments/nixos-25.05
+```

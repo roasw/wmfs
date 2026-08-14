@@ -30,6 +30,14 @@ class PluginMetadata:
     operations: tuple[OperationMetadata, ...]
 
 
+@dataclass(frozen=True)
+class EnvironmentMetadata:
+    python_version: str
+    torch_version: str
+    glibc_version: str
+    executable: str
+
+
 class OperationRegistry:
     def __init__(self) -> None:
         self._plugins: dict[str, PluginMetadata] = {}

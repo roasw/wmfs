@@ -17,6 +17,7 @@ import torch
 
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
 from wmfs.registry import (
+    EnvironmentMetadata,
     OperationMetadata,
     PluginMetadata,
     ScalarParameter,
@@ -258,9 +259,30 @@ def probe_shared_tensor(
     return asyncio.run(capnp.run(_probe_shared_tensor(manifest, managed_tensor)))
 
 
+def inspect_worker_environment(
+    manifest: "PluginManifest",
+) -> EnvironmentMetadata:
+    return asyncio.run(capnp.run(_inspect_worker_environment(manifest)))
+
+
 async def _inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
     async with _worker_connection(manifest) as (plugin, _fd_sender):
         return await _validate_worker(plugin)
+
+
+async def _inspect_worker_environment(
+    manifest: "PluginManifest",
+) -> EnvironmentMetadata:
+    async with _worker_connection(manifest) as (plugin, _fd_sender):
+        await _validate_worker(plugin)
+        response = await asyncio.wait_for(plugin.getEnvironment(), _RPC_TIMEOUT_SECONDS)
+        environment = response.environment
+        return EnvironmentMetadata(
+            python_version=str(environment.pythonVersion),
+            torch_version=str(environment.torchVersion),
+            glibc_version=str(environment.glibcVersion),
+            executable=str(environment.executable),
+        )
 
 
 async def _validate_worker(plugin: object) -> PluginMetadata:
@@ -340,14 +362,8 @@ def _start_worker(
 ) -> subprocess.Popen[str]:
     schema_root = _schema_root().resolve()
     environment = os.environ.copy()
-    project_root = Path(__file__).parents[2].resolve()
-    python_path = environment.get("PYTHONPATH", "")
-    if (project_root / "pyproject.toml").is_file():
-        environment["PYTHONPATH"] = os.pathsep.join(
-            entry
-            for entry in python_path.split(os.pathsep)
-            if entry and Path(entry).resolve() != project_root
-        )
+    for variable in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH"):
+        environment.pop(variable, None)
     worker = shutil.which(manifest.worker, path=environment.get("PATH"))
     if worker is None:
         raise RuntimeError(f"Worker executable {manifest.worker!r} was not found")

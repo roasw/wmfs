@@ -1,6 +1,8 @@
 import argparse
 import asyncio
+import ctypes
 import socket
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -30,6 +32,18 @@ def _make_server(
             self, nonce: int, _context: object, **_kwargs: object
         ) -> tuple[int]:
             return (nonce,)
+
+        async def getEnvironment(
+            self, _context: object, **_kwargs: object
+        ) -> tuple[dict[str, str]]:
+            return (
+                {
+                    "pythonVersion": sys.version.split()[0],
+                    "torchVersion": torch.__version__,
+                    "glibcVersion": _glibc_version(),
+                    "executable": sys.executable,
+                },
+            )
 
         async def tensorChecksum(
             self, tensor: object, _context: object, **_kwargs: object
@@ -103,6 +117,15 @@ def _make_server(
             return (allocated.tensor,)
 
     return ReferencePlugin()
+
+
+def _glibc_version() -> str:
+    libc = ctypes.CDLL(None)
+    libc.gnu_get_libc_version.restype = ctypes.c_char_p
+    version = libc.gnu_get_libc_version()
+    if version is None:
+        raise RuntimeError("glibc did not report a version")
+    return version.decode()
 
 
 async def _serve(

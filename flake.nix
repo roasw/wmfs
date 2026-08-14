@@ -44,6 +44,19 @@
             ];
 
             pythonImportsCheck = [ "wmfs_reference" ];
+
+            postInstall = ''
+              install -Dm444 \
+                ${./plugins/reference/plugin.toml} \
+                "$out/share/wmfs/plugins/reference/plugin.toml"
+              substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \
+                --replace-fail \
+                'worker = "wmfs-reference-worker"' \
+                'worker = "'"$out"'/bin/wmfs-reference-worker"'
+              install -Dm444 \
+                ${./plugins/reference/schemas/wmfs-reference/reference.capnp} \
+                "$out/share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp"
+            '';
           };
         in
         {

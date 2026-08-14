@@ -2,7 +2,7 @@
 
 using Tensor = import "/wmfs/tensor.capnp";
 
-const protocolVersion :UInt16 = 2;
+const protocolVersion :UInt16 = 3;
 
 enum TensorAccess {
   readOnly @0;
@@ -41,6 +41,13 @@ struct PluginMetadata {
   operations @3 :List(OperationMetadata);
 }
 
+struct EnvironmentMetadata {
+  pythonVersion @0 :Text;
+  torchVersion @1 :Text;
+  glibcVersion @2 :Text;
+  executable @3 :Text;
+}
+
 interface OutputAllocator {
   allocate @0 (shape :List(UInt64), dtype :Tensor.DType) ->
       (tensor :Tensor.TensorDescriptor);
@@ -49,4 +56,5 @@ interface OutputAllocator {
 interface Plugin {
   getMetadata @0 () -> (metadata :PluginMetadata);
   ping @1 (nonce :UInt64) -> (nonce :UInt64);
+  getEnvironment @2 () -> (environment :EnvironmentMetadata);
 }
