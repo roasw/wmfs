@@ -105,3 +105,38 @@ development shell with:
 ```console
 nix develop ./environments/nixos-25.05
 ```
+
+## Benchmarking
+
+Run the local-versus-isolated benchmark from the development shell:
+
+```console
+wmfs-benchmark --plugin-directory plugins
+```
+
+The default run covers small, medium, and large inputs for `matmul`, `svd`, and
+the deliberately cheap `add_scalar` operation. It reports median and standard
+deviation for local kernel execution and isolated end-to-end execution, plus
+absolute and percentage overhead. JSON output also records nearest-rank p95.
+
+Separate diagnostics report worker startup, RPC-only round trips, shared-memory
+allocation, uncached input preparation, first-use FD passing and worker mapping,
+cached mapping checks, and runtime-owned output allocation. Input preparation
+includes memfd allocation, the runtime mapping and Torch view, and the ingress
+copy. Ensure-mapped timings include the event-loop handoff, FD transfer, worker
+mapping, and acknowledgement. Numerical-library warmup and worker startup are
+excluded from steady-state operation timings.
+
+Write a machine-readable report with:
+
+```console
+wmfs-benchmark --plugin-directory plugins --format json --output benchmark.json
+```
+
+Sizes, iteration counts, dtype, and Torch thread count are configurable; run
+`wmfs-benchmark --help` for all options. The output allocator service metric
+measures runtime allocation and output FD mapping inside the callback handler;
+lazy page faults and callback transit remain part of isolated end-to-end time.
+The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) records a
+complete reference run and [`benchmarks/README.md`](benchmarks/README.md)
+summarizes its primary results.

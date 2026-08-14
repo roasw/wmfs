@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter_ns
 from types import ModuleType
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,29 @@ _RPC_TIMEOUT_SECONDS = 30.0
 class TensorProbe:
     checksum: float
     fd_transfers: int
+
+
+@dataclass(frozen=True)
+class InputPreparationMetrics:
+    byte_length: int
+    shared_copy_ns: int
+    mapping_ns: int
+    fd_transferred: bool
+
+
+@dataclass(frozen=True)
+class OutputAllocationMetrics:
+    byte_length: int
+    shared_allocation_ns: int
+    mapping_ns: int
+    service_ns: int
+    fd_transferred: bool
+
+
+@dataclass(frozen=True)
+class InvocationMetrics:
+    inputs: tuple[InputPreparationMetrics, ...]
+    outputs: tuple[OutputAllocationMetrics, ...]
 
 
 def _schema_root() -> Path:
@@ -65,6 +89,7 @@ class _OutputAllocator:
         buffers: BufferManager,
         fd_sender: FdSender,
         invocation_id: int,
+        metrics: list[OutputAllocationMetrics] | None = None,
     ) -> None:
         allocator = self
 
@@ -76,15 +101,30 @@ class _OutputAllocator:
                 _context: object,
                 **_kwargs: object,
             ) -> tuple[dict[str, object]]:
+                service_start = perf_counter_ns()
+                allocation_start = perf_counter_ns()
                 managed = allocator._allocate(
                     tuple(int(item) for item in shape), str(dtype)
                 )
-                await asyncio.to_thread(
+                allocation_ns = perf_counter_ns() - allocation_start
+                mapping_start = perf_counter_ns()
+                transferred = await asyncio.to_thread(
                     fd_sender.ensure_mapped,
                     managed.buffer,
                     invocation_id=invocation_id,
                     writable=True,
                 )
+                mapping_ns = perf_counter_ns() - mapping_start
+                if metrics is not None:
+                    metrics.append(
+                        OutputAllocationMetrics(
+                            byte_length=managed.buffer.byte_length,
+                            shared_allocation_ns=allocation_ns,
+                            mapping_ns=mapping_ns,
+                            service_ns=perf_counter_ns() - service_start,
+                            fd_transferred=transferred,
+                        )
+                    )
                 return (managed.descriptor.as_capnp(),)
 
         self.server = Server()
@@ -123,24 +163,36 @@ class WorkerSession:
         self._startup_error: BaseException | None = None
         self._shutdown: asyncio.Event | None = None
         self._invoke_lock: asyncio.Lock | None = None
+        self._serve_task: asyncio.Task[None] | None = None
         self._closed = False
         self._thread.start()
         if not self._ready.wait(_RPC_TIMEOUT_SECONDS):
+            self._abort_startup()
             raise RuntimeError("Worker session did not start")
         if self._startup_error is not None:
+            self._closed = True
+            self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
             raise RuntimeError(
                 "Worker session failed to start"
             ) from self._startup_error
 
     def invoke(self, operation: str, /, *args: object, **kwargs: object) -> object:
+        result, _metrics = self._submit_invocation(operation, args, kwargs, False)
+        return result
+
+    def invoke_profiled(
+        self, operation: str, /, *args: object, **kwargs: object
+    ) -> tuple[object, InvocationMetrics]:
+        result, metrics = self._submit_invocation(operation, args, kwargs, True)
+        return result, metrics
+
+    def ping(self) -> None:
         if self._closed or self._loop is None:
             raise RuntimeError("Worker session is closed")
         if threading.current_thread() is self._thread:
-            raise RuntimeError("Worker session cannot synchronously invoke itself")
-        future = asyncio.run_coroutine_threadsafe(
-            self._invoke(operation, args, kwargs), self._loop
-        )
-        return future.result(timeout=_RPC_TIMEOUT_SECONDS)
+            raise RuntimeError("Worker session cannot synchronously call itself")
+        future = asyncio.run_coroutine_threadsafe(self._ping(), self._loop)
+        future.result(timeout=_RPC_TIMEOUT_SECONDS)
 
     def close(self) -> None:
         if self._closed:
@@ -161,6 +213,7 @@ class WorkerSession:
                 self._ready.set()
 
     async def _serve(self) -> None:
+        self._serve_task = asyncio.current_task()
         self._loop = asyncio.get_running_loop()
         self._shutdown = asyncio.Event()
         self._invoke_lock = asyncio.Lock()
@@ -171,15 +224,31 @@ class WorkerSession:
             self._ready.set()
             await self._shutdown.wait()
 
+    def _abort_startup(self) -> None:
+        self._closed = True
+        if self._loop is not None and self._serve_task is not None:
+            self._loop.call_soon_threadsafe(self._serve_task.cancel)
+        self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+
     async def _invoke(
-        self, operation: str, args: tuple[object, ...], kwargs: dict[str, object]
-    ) -> object:
+        self,
+        operation: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        collect_metrics: bool,
+    ) -> tuple[object, InvocationMetrics]:
         if self._invoke_lock is None or self._plugin is None or self._fd_sender is None:
             raise RuntimeError("Worker session is not ready")
         async with self._invoke_lock:
             invocation_id = secrets.randbits(64)
+            input_metrics: list[InputPreparationMetrics] | None = (
+                [] if collect_metrics else None
+            )
+            output_metrics: list[OutputAllocationMetrics] | None = (
+                [] if collect_metrics else None
+            )
             inputs = [
-                await self._prepare_input(item, invocation_id)
+                await self._prepare_input(item, invocation_id, input_metrics)
                 for item in args
                 if isinstance(item, torch.Tensor)
             ]
@@ -188,29 +257,78 @@ class WorkerSession:
                 self._buffers,
                 self._fd_sender,
                 invocation_id,
+                output_metrics,
             )
             try:
                 response = await self._call_operation(
                     operation, inputs, args, kwargs, allocator
                 )
-                return self._resolve_outputs(operation, response, allocator)
+                result = self._resolve_outputs(operation, response, allocator)
+                return result, InvocationMetrics(
+                    inputs=tuple(input_metrics or ()),
+                    outputs=tuple(output_metrics or ()),
+                )
             except Exception:
                 allocator.rollback()
                 raise
 
     async def _prepare_input(
-        self, tensor: torch.Tensor, invocation_id: int
+        self,
+        tensor: torch.Tensor,
+        invocation_id: int,
+        metrics: list[InputPreparationMetrics] | None,
     ) -> ManagedTensor:
         managed = self._buffers.managed(tensor)
+        shared_copy_ns = 0
         if managed is None:
+            copy_start = perf_counter_ns()
             managed = self._buffers.from_tensor(tensor.contiguous())
-        await asyncio.to_thread(
+            shared_copy_ns = perf_counter_ns() - copy_start
+        mapping_start = perf_counter_ns()
+        transferred = await asyncio.to_thread(
             self._fd_sender.ensure_mapped,
             managed.buffer,
             invocation_id=invocation_id,
             writable=False,
         )
+        mapping_ns = perf_counter_ns() - mapping_start
+        if metrics is not None:
+            metrics.append(
+                InputPreparationMetrics(
+                    byte_length=managed.buffer.byte_length,
+                    shared_copy_ns=shared_copy_ns,
+                    mapping_ns=mapping_ns,
+                    fd_transferred=transferred,
+                )
+            )
         return managed
+
+    async def _ping(self) -> None:
+        if self._invoke_lock is None or self._plugin is None:
+            raise RuntimeError("Worker session is not ready")
+        async with self._invoke_lock:
+            nonce = secrets.randbits(64)
+            response = await asyncio.wait_for(
+                self._plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS
+            )
+            if response.nonce != nonce:
+                raise RuntimeError("Worker returned an invalid ping response")
+
+    def _submit_invocation(
+        self,
+        operation: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        collect_metrics: bool,
+    ) -> tuple[object, InvocationMetrics]:
+        if self._closed or self._loop is None:
+            raise RuntimeError("Worker session is closed")
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("Worker session cannot synchronously invoke itself")
+        future = asyncio.run_coroutine_threadsafe(
+            self._invoke(operation, args, kwargs, collect_metrics), self._loop
+        )
+        return future.result(timeout=_RPC_TIMEOUT_SECONDS)
 
     async def _call_operation(
         self,

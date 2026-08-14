@@ -404,7 +404,7 @@ Implementation status:
 - [x] Milestone 4: isolated execution with the same Python-facing API.
 - [x] Milestone 5: verified execution in a separately pinned glibc/toolchain
   environment.
-- [ ] Milestone 6: local-versus-isolated benchmarking.
+- [x] Milestone 6: local-versus-isolated benchmarking.
 
 ### Milestone 1
 
@@ -441,6 +441,11 @@ Run the plugin worker in a deliberately different glibc/toolchain environment.
 ### Milestone 6
 
 Benchmark local versus isolated execution.
+
+Implemented by `wmfs-benchmark`, with a reproducible reference report in
+`benchmarks/baseline.json`. The benchmark covers small, medium, and large cases;
+reports median, p95, and standard deviation; and separates worker startup, RPC,
+shared-memory transport, cached mappings, and output allocation costs.
 
 The central success criterion is:
 
