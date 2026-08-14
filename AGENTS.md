@@ -395,6 +395,17 @@ Design interfaces so these can be added later, but do not block the prototype on
 
 ## Suggested Milestones
 
+Implementation status:
+
+- [x] Milestone 1: local PyTorch API.
+- [x] Milestone 2: Cap'n Proto worker RPC and dynamic plugin registration.
+- [x] Milestone 3: shared CPU tensor transport with `memfd_create`, FD passing,
+  and `mmap`.
+- [x] Milestone 4: isolated execution with the same Python-facing API.
+- [x] Milestone 5: verified execution in a separately pinned glibc/toolchain
+  environment.
+- [ ] Milestone 6: local-versus-isolated benchmarking.
+
 ### Milestone 1
 
 Implement local Python API using PyTorch.
