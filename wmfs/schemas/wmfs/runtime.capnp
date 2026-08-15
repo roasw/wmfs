@@ -2,7 +2,7 @@
 
 using Tensor = import "/wmfs/tensor.capnp";
 
-const protocolVersion :UInt16 = 3;
+const protocolVersion :UInt16 = 4;
 
 enum TensorAccess {
   readOnly @0;
@@ -57,4 +57,5 @@ interface Plugin {
   getMetadata @0 () -> (metadata :PluginMetadata);
   ping @1 (nonce :UInt64) -> (nonce :UInt64);
   getEnvironment @2 () -> (environment :EnvironmentMetadata);
+  getProtocolVersion @3 () -> (version :UInt16);
 }

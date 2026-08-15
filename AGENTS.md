@@ -130,6 +130,12 @@ DLPack is the numerical interoperability ABI after memory has been mapped into t
 
 Cache mappings/FDS where practical. Do not repeatedly pass and map the same shared buffer for every operation.
 
+The default allocator pools whole memfds rather than exposing one global arena.
+Reuse requires the last Torch storage alias to be released, worker mappings to
+be retired, and the buffer generation to advance. A trusted-plugin arena mode
+may trade per-buffer capabilities for one persistent writable mapping, but it
+must remain explicit and opt-in.
+
 ## Output Allocation
 
 Output ownership must remain with the runtime.

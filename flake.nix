@@ -39,6 +39,7 @@
 
             build-system = [ pkgs.python3Packages.setuptools ];
             dependencies = with pkgs.python3Packages; [
+              numpy
               pycapnp
               torch
             ];
@@ -68,6 +69,7 @@
 
             build-system = [ pkgs.python3Packages.setuptools ];
             dependencies = with pkgs.python3Packages; [
+              numpy
               pycapnp
               torch
             ];
@@ -151,6 +153,7 @@
             ps: with ps; [
               matplotlib
               nanobind
+              numpy
               pycapnp
               pytest
               torch

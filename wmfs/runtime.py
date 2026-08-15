@@ -20,6 +20,8 @@ class Runtime:
         self._backends: dict[str, Backend] = {"local": LocalBackend()}
         self._backend_name = "local"
         self._registry = OperationRegistry()
+        self._memory_mode = "pooled"
+        self._arena_bytes: int | None = None
 
     @property
     def backend_name(self) -> str:
@@ -40,7 +42,23 @@ class Runtime:
         if self._backend_name == "isolated":
             self._backend_name = "local"
         self._registry = registry
-        self._backends["isolated"] = IsolatedBackend(manifests, registry)
+        self._backends["isolated"] = IsolatedBackend(
+            manifests,
+            registry,
+            memory_mode=self._memory_mode,
+            arena_bytes=self._arena_bytes,
+        )
+
+    def configure_memory(
+        self, mode: str = "pooled", *, arena_bytes: int | None = None
+    ) -> None:
+        """Configure isolated shared memory before plugin discovery."""
+        if "isolated" in self._backends:
+            raise RuntimeError("Configure memory before discovering plugins")
+        if mode not in {"pooled", "arena"}:
+            raise ValueError("Memory mode must be 'pooled' or 'arena'")
+        self._memory_mode = mode
+        self._arena_bytes = arena_bytes
 
     def use_backend(self, name: str) -> None:
         if name not in self._backends:

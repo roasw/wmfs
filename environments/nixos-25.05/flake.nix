@@ -28,6 +28,7 @@
 
         build-system = [ pkgs.python3Packages.setuptools ];
         dependencies = with pkgs.python3Packages; [
+          numpy
           pycapnp
           torch
         ];
@@ -141,6 +142,7 @@
           reference-worker
           (pkgs.python3.withPackages (
             ps: with ps; [
+              numpy
               pycapnp
               pytest
               torch

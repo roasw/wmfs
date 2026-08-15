@@ -62,11 +62,30 @@ Ordinary Torch allocations require one ingress copy into managed storage.
 Managed results can be reused across worker calls without copying or repeatedly
 passing the same FD.
 
+The default memory mode pools whole memfds by exact size. A buffer returns to
+the pool only after its last Torch storage alias is gone, all worker mappings
+have acknowledged retirement, and its generation has advanced. Read-only input
+mappings may remain cached while the allocation is live; writable output
+mappings are scoped to one invocation. Pool limits bound idle FDs and bytes.
+
+For trusted plugins, an optional arena mode suballocates one writable memfd and
+maps it once per worker:
+
+```python
+runtime.configure_memory("arena", arena_bytes=256 * 1024 * 1024)
+runtime.discover_plugins(Path("plugins"))
+```
+
+Configuration must happen before plugin discovery. Arena mode minimizes FD
+passing and mapping overhead, but the worker can access every live allocation in
+the arena. Use the default `pooled` mode when per-buffer capability boundaries
+matter.
+
 ## Isolated Execution
 
 After discovery, selecting the isolated backend starts a persistent worker on
-first use. Inputs and runtime-owned outputs are mapped once per worker, and the
-worker writes operation results directly into storage allocated by the runtime:
+first use. The worker writes operation results directly into storage allocated
+by the runtime:
 
 ```python
 from pathlib import Path
@@ -133,10 +152,18 @@ Write a machine-readable report with:
 wmfs-benchmark --plugin-directory plugins --format json --output benchmark.json
 ```
 
+Compare the trusted single-FD arena with:
+
+```console
+wmfs-benchmark --plugin-directory plugins --memory-mode arena \
+  --arena-bytes 268435456 --format json --output arena.json
+```
+
 Sizes, iteration counts, dtype, and Torch thread count are configurable; run
 `wmfs-benchmark --help` for all options. The output allocator service metric
 measures runtime allocation and output FD mapping inside the callback handler;
 lazy page faults and callback transit remain part of isolated end-to-end time.
 The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) records a
-complete reference run and [`benchmarks/README.md`](benchmarks/README.md)
-summarizes its primary results.
+complete safe-pool run, [`benchmarks/arena.json`](benchmarks/arena.json) records
+the trusted-arena comparison, and
+[`benchmarks/README.md`](benchmarks/README.md) summarizes their primary results.

@@ -12,6 +12,8 @@ import torch
 from wmfs_reference import kernels
 from wmfs_reference.fd_transport import FdReceiver, MappedBufferCache
 
+_PROTOCOL_VERSION = 4
+
 
 def _load_schema(path: Path, import_paths: list[Path]) -> ModuleType:
     return capnp.load(str(path), imports=[str(item) for item in import_paths])
@@ -26,7 +28,14 @@ def _make_server(
 
     class ReferencePlugin(interface.Server):
         async def getMetadata(self, _context: object, **_kwargs: object) -> object:
+            if plugin_schema.pluginMetadata.protocolVersion != _PROTOCOL_VERSION:
+                raise RuntimeError("Worker schema does not match its protocol version")
             return plugin_schema.pluginMetadata
+
+        async def getProtocolVersion(
+            self, _context: object, **_kwargs: object
+        ) -> tuple[int]:
+            return (_PROTOCOL_VERSION,)
 
         async def ping(
             self, nonce: int, _context: object, **_kwargs: object
@@ -46,74 +55,121 @@ def _make_server(
             )
 
         async def tensorChecksum(
-            self, tensor: object, _context: object, **_kwargs: object
+            self,
+            invocationId: int,
+            tensor: object,
+            _context: object,
+            **_kwargs: object,
         ) -> tuple[float]:
-            checksum = mapped_buffers.tensor(tensor).sum().item()
+            checksum = (
+                mapped_buffers.tensor(tensor, invocation_id=invocationId).sum().item()
+            )
             return (float(checksum),)
 
         async def matmul(
             self,
+            invocationId: int,
             a: object,
             b: object,
             allocator: object,
             _context: object,
             **_kwargs: object,
         ) -> tuple[object]:
-            a_tensor = mapped_buffers.tensor(a)
-            b_tensor = mapped_buffers.tensor(b)
-            if a_tensor.ndim != 2 or b_tensor.ndim != 2:
+            a_shape = mapped_buffers.tensor(a, invocation_id=invocationId).shape
+            b_shape = mapped_buffers.tensor(b, invocation_id=invocationId).shape
+            if len(a_shape) != 2 or len(b_shape) != 2:
                 raise ValueError("matmul initially supports two-dimensional tensors")
-            if a_tensor.shape[1] != b_tensor.shape[0]:
+            if a_shape[1] != b_shape[0]:
                 raise ValueError("matmul input dimensions are incompatible")
             allocated = await allocator.allocate(
-                shape=[a_tensor.shape[0], b_tensor.shape[1]], dtype=str(a.dtype)
+                shape=[a_shape[0], b_shape[1]], dtype=str(a.dtype)
             )
-            result = mapped_buffers.tensor(allocated.tensor, require_writable=True)
-            kernels.matmul(a_tensor, b_tensor, out=result)
+
+            def execute() -> None:
+                a_tensor = mapped_buffers.tensor(a, invocation_id=invocationId)
+                b_tensor = mapped_buffers.tensor(b, invocation_id=invocationId)
+                result = mapped_buffers.tensor(
+                    allocated.tensor,
+                    invocation_id=invocationId,
+                    require_writable=True,
+                )
+                kernels.matmul(a_tensor, b_tensor, out=result)
+
+            try:
+                execute()
+            finally:
+                mapped_buffers.finish_invocation(invocationId)
             return (allocated.tensor,)
 
         async def svd(
             self,
+            invocationId: int,
             a: object,
             fullMatrices: bool,
             allocator: object,
             _context: object,
             **_kwargs: object,
         ) -> tuple[object, object, object]:
-            a_tensor = mapped_buffers.tensor(a)
-            if a_tensor.ndim != 2:
+            a_shape = mapped_buffers.tensor(a, invocation_id=invocationId).shape
+            if len(a_shape) != 2:
                 raise ValueError("svd initially supports two-dimensional tensors")
-            rows, columns = a_tensor.shape
+            rows, columns = a_shape
             rank = min(rows, columns)
             u_shape = [rows, rows if fullMatrices else rank]
             vh_shape = [columns if fullMatrices else rank, columns]
             allocated_u = await allocator.allocate(shape=u_shape, dtype=str(a.dtype))
             allocated_s = await allocator.allocate(shape=[rank], dtype=str(a.dtype))
             allocated_vh = await allocator.allocate(shape=vh_shape, dtype=str(a.dtype))
-            outputs = tuple(
-                mapped_buffers.tensor(item.tensor, require_writable=True)
-                for item in (allocated_u, allocated_s, allocated_vh)
-            )
-            kernels.svd(a_tensor, full_matrices=fullMatrices, out=outputs)
+
+            def execute() -> None:
+                a_tensor = mapped_buffers.tensor(a, invocation_id=invocationId)
+                outputs = tuple(
+                    mapped_buffers.tensor(
+                        item.tensor,
+                        invocation_id=invocationId,
+                        require_writable=True,
+                    )
+                    for item in (allocated_u, allocated_s, allocated_vh)
+                )
+                kernels.svd(a_tensor, full_matrices=fullMatrices, out=outputs)
+
+            try:
+                execute()
+            finally:
+                mapped_buffers.finish_invocation(invocationId)
             return (allocated_u.tensor, allocated_s.tensor, allocated_vh.tensor)
 
         async def addScalar(
             self,
+            invocationId: int,
             a: object,
             value: float,
             allocator: object,
             _context: object,
             **_kwargs: object,
         ) -> tuple[object]:
-            a_tensor = mapped_buffers.tensor(a)
-            result_dtype = str(torch.result_type(a_tensor, value)).removeprefix(
-                "torch."
-            )
+            result_dtype = str(
+                torch.result_type(
+                    mapped_buffers.tensor(a, invocation_id=invocationId), value
+                )
+            ).removeprefix("torch.")
             allocated = await allocator.allocate(
-                shape=list(a_tensor.shape), dtype=result_dtype
+                shape=list(a.shape), dtype=result_dtype
             )
-            result = mapped_buffers.tensor(allocated.tensor, require_writable=True)
-            kernels.add_scalar(a_tensor, value, out=result)
+
+            def execute() -> None:
+                a_tensor = mapped_buffers.tensor(a, invocation_id=invocationId)
+                result = mapped_buffers.tensor(
+                    allocated.tensor,
+                    invocation_id=invocationId,
+                    require_writable=True,
+                )
+                kernels.add_scalar(a_tensor, value, out=result)
+
+            try:
+                execute()
+            finally:
+                mapped_buffers.finish_invocation(invocationId)
             return (allocated.tensor,)
 
     return ReferencePlugin()

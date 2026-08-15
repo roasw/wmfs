@@ -50,6 +50,8 @@ class BenchmarkConfig:
     threads: int = 1
     dtype: torch.dtype = torch.float32
     seed: int = 1234
+    memory_mode: str = "pooled"
+    arena_bytes: int | None = None
 
     def validate(self) -> None:
         counts = (
@@ -65,6 +67,8 @@ class BenchmarkConfig:
             raise ValueError("Unknown benchmark operation")
         if any(tier not in _TIERS for tier in self.tiers):
             raise ValueError("Unknown benchmark size tier")
+        if self.memory_mode not in {"pooled", "arena"}:
+            raise ValueError("Unknown benchmark memory mode")
         if any(
             self.sizes[operation][tier] <= 0
             for operation in self.operations
@@ -104,7 +108,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         )
     manifest = manifests[0]
 
-    startup = _benchmark_startup(manifest, config.startup_iterations)
+    startup = _benchmark_startup(manifest, config)
     worker = inspect_worker_environment(manifest)
     rpc = _benchmark_rpc(manifest, config)
 
@@ -125,7 +129,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                 )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -160,6 +164,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "threads": config.threads,
             "dtype": str(config.dtype).removeprefix("torch."),
             "seed": config.seed,
+            "memory_mode": config.memory_mode,
+            "arena_bytes": config.arena_bytes,
             "sizes": config.sizes,
         },
         "worker_startup_ms": summarize(startup),
@@ -181,7 +187,10 @@ def render_table(report: dict[str, Any]) -> str:
             f"worker:  Python {worker['python_version']}, "
             f"Torch {worker['torch_version']}, glibc {worker['glibc_version']}"
         ),
-        f"dtype: {environment['dtype']}; threads: {environment['threads']}",
+        (
+            f"dtype: {environment['dtype']}; threads: {environment['threads']}; "
+            f"memory: {report['configuration']['memory_mode']}"
+        ),
         "",
         "Primary comparison (milliseconds; isolated inputs are already mapped)",
     ]
@@ -258,9 +267,13 @@ def render_table(report: dict[str, Any]) -> str:
                 _median(diagnostics, "first_use_fd_transfer_mmap_ms"),
                 _median(diagnostics, "cached_ensure_mapped_ms"),
                 _median(diagnostics, "shared_memory_allocation_ms"),
+                _median(diagnostics, "pooled_shared_memory_allocation_ms"),
+                _median(diagnostics, "buffer_reclamation_ms"),
                 _median(diagnostics, "output_allocator_service_ms"),
                 _median(diagnostics, "output_shared_allocation_ms"),
                 _median(diagnostics, "output_ensure_mapped_ms"),
+                f"{case['memory_pool']['pool_hit_rate'] * 100:.1f}%",
+                case["memory_pool"]["memfds_created"],
             )
         )
     lines.extend(
@@ -272,10 +285,14 @@ def render_table(report: dict[str, Any]) -> str:
                 "input prep",
                 "first FD+mmap",
                 "cached ensure",
-                "shm alloc",
+                "cold alloc",
+                "pool alloc",
+                "reclaim",
                 "output service",
                 "output alloc",
                 "output ensure",
+                "pool hits",
+                "memfds",
             ),
             diagnostic_rows,
         )
@@ -283,10 +300,10 @@ def render_table(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _benchmark_startup(manifest: Any, iterations: int) -> list[int]:
+def _benchmark_startup(manifest: Any, config: BenchmarkConfig) -> list[int]:
     samples = []
-    for _ in range(iterations):
-        buffers = BufferManager()
+    for _ in range(config.startup_iterations):
+        buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
         session = None
         try:
             start = perf_counter_ns()
@@ -302,7 +319,7 @@ def _benchmark_startup(manifest: Any, iterations: int) -> list[int]:
 
 
 def _benchmark_rpc(manifest: Any, config: BenchmarkConfig) -> list[int]:
-    buffers = BufferManager()
+    buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
     session = None
     try:
         session = WorkerSession(manifest, buffers)
@@ -330,7 +347,7 @@ def _benchmark_case(
         tuple(item.shape) for item in args if isinstance(item, torch.Tensor)
     ]
     local = LocalBackend()
-    buffers = BufferManager()
+    buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
     session = None
     try:
         session = WorkerSession(manifest, buffers)
@@ -339,37 +356,45 @@ def _benchmark_case(
             for item in args
         )
         local_result = local.invoke(operation, *managed_args, **kwargs)
-        isolated_result = session.invoke(operation, *managed_args, **kwargs)
+        isolated_result, _initial_metrics = session.invoke_profiled(
+            operation, *managed_args, **kwargs
+        )
         _validate_result(operation, managed_args, local_result, isolated_result)
-        retained_results = [local_result, isolated_result]
+        del local_result, isolated_result
+        buffers.collect()
 
         for _ in range(config.warmups):
-            retained_results.append(local.invoke(operation, *managed_args, **kwargs))
-            retained_results.append(session.invoke(operation, *managed_args, **kwargs))
+            local.invoke(operation, *managed_args, **kwargs)
+            session.invoke(operation, *managed_args, **kwargs)
+            buffers.collect()
 
         local_samples: list[int] = []
         isolated_samples: list[int] = []
         for iteration in range(config.iterations):
-            calls: tuple[tuple[list[int], Callable[[], object]], ...] = (
+            calls: tuple[tuple[list[int], Callable[[], object], bool], ...] = (
                 (
                     local_samples,
                     lambda: local.invoke(operation, *managed_args, **kwargs),
+                    False,
                 ),
                 (
                     isolated_samples,
                     lambda: session.invoke(operation, *managed_args, **kwargs),
+                    True,
                 ),
             )
             if iteration % 2:
                 calls = tuple(reversed(calls))
-            for samples, call in calls:
-                elapsed, result = _time_call(call)
-                samples.append(elapsed)
-                # The runtime retains isolated allocations for the session lifetime.
-                # Retain local outputs too so allocator reuse cannot bias this comparison.
-                retained_results.append(result)
+            for samples, call, isolated_call in calls:
+                start = perf_counter_ns()
+                result = call()
+                del result
+                if isolated_call:
+                    buffers.collect()
+                samples.append(perf_counter_ns() - start)
 
         diagnostics = _benchmark_diagnostics(
+            manifest,
             session,
             buffers,
             operation,
@@ -379,6 +404,8 @@ def _benchmark_case(
             tensor_shapes,
             config,
         )
+        buffers.collect()
+        pool_stats = buffers.stats()
     finally:
         try:
             if session is not None:
@@ -401,11 +428,13 @@ def _benchmark_case(
         "percentage_overhead": (
             absolute_overhead_ms / float(local_summary["median_ms"]) * 100
         ),
+        "memory_pool": pool_stats,
         "diagnostics": diagnostics,
     }
 
 
 def _benchmark_diagnostics(
+    manifest: Any,
     session: WorkerSession,
     buffers: BufferManager,
     operation: str,
@@ -423,19 +452,30 @@ def _benchmark_diagnostics(
     output_allocation = []
     output_mapping = []
     output_counts = []
+    reclamation = []
+    if config.memory_mode == "arena":
+        first_mapping.extend(
+            _benchmark_arena_first_mapping(manifest, operation, args, kwargs, config)
+        )
 
     for _ in range(config.diagnostic_iterations):
         elapsed, profiled = _time_call(
             lambda: session.invoke_profiled(operation, *args, **kwargs)
         )
         _result, metrics = profiled
-        if not metrics.inputs or not all(
-            item.fd_transferred for item in metrics.inputs
+        if config.memory_mode == "pooled" and (
+            not metrics.inputs
+            or not all(item.fd_transferred for item in metrics.inputs)
         ):
             raise RuntimeError("Fresh benchmark inputs were not transferred")
         uncached_elapsed.append(elapsed)
         input_copy.append(sum(item.shared_copy_ns for item in metrics.inputs))
-        first_mapping.append(sum(item.mapping_ns for item in metrics.inputs))
+        if config.memory_mode == "pooled":
+            first_mapping.append(sum(item.mapping_ns for item in metrics.inputs))
+        del _result, profiled
+        start = perf_counter_ns()
+        buffers.collect()
+        reclamation.append(perf_counter_ns() - start)
 
         _result, metrics = session.invoke_profiled(operation, *managed_args, **kwargs)
         if any(item.fd_transferred for item in metrics.inputs):
@@ -447,13 +487,37 @@ def _benchmark_diagnostics(
         )
         output_mapping.append(sum(item.mapping_ns for item in metrics.outputs))
         output_counts.append(len(metrics.outputs))
+        del _result
+        start = perf_counter_ns()
+        buffers.collect()
+        reclamation.append(perf_counter_ns() - start)
 
-    allocation_samples = []
+    pooled_allocation_samples = []
     for _ in range(config.diagnostic_iterations):
         start = perf_counter_ns()
-        for shape in tensor_shapes:
-            buffers.empty(shape, dtype=config.dtype)
-        allocation_samples.append(perf_counter_ns() - start)
+        allocations = [
+            buffers.empty(shape, dtype=config.dtype) for shape in tensor_shapes
+        ]
+        pooled_allocation_samples.append(perf_counter_ns() - start)
+        del allocations
+        buffers.collect()
+
+    cold_allocation_samples = []
+    for _ in range(config.diagnostic_iterations):
+        cold_buffers = BufferManager(
+            mode=config.memory_mode,
+            arena_bytes=config.arena_bytes,
+            max_cached_buffers=0,
+            max_cached_bytes=0,
+        )
+        start = perf_counter_ns()
+        allocations = [
+            cold_buffers.empty(shape, dtype=config.dtype) for shape in tensor_shapes
+        ]
+        cold_allocation_samples.append(perf_counter_ns() - start)
+        del allocations
+        cold_buffers.collect()
+        cold_buffers.close()
 
     if len(set(output_counts)) != 1:
         raise RuntimeError("Worker output allocation count changed between invocations")
@@ -462,12 +526,48 @@ def _benchmark_diagnostics(
         "input_shared_preparation_ms": summarize(input_copy),
         "first_use_fd_transfer_mmap_ms": summarize(first_mapping),
         "cached_ensure_mapped_ms": summarize(cached_mapping),
-        "shared_memory_allocation_ms": summarize(allocation_samples),
+        "shared_memory_allocation_ms": summarize(cold_allocation_samples),
+        "pooled_shared_memory_allocation_ms": summarize(pooled_allocation_samples),
+        "buffer_reclamation_ms": summarize(reclamation),
         "output_allocator_service_ms": summarize(output_service),
         "output_shared_allocation_ms": summarize(output_allocation),
         "output_ensure_mapped_ms": summarize(output_mapping),
         "output_allocations_per_invocation": output_counts[0],
     }
+
+
+def _benchmark_arena_first_mapping(
+    manifest: Any,
+    operation: str,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    config: BenchmarkConfig,
+) -> list[int]:
+    samples = []
+    for _ in range(config.diagnostic_iterations):
+        buffers = BufferManager(mode="arena", arena_bytes=config.arena_bytes)
+        session = None
+        try:
+            session = WorkerSession(manifest, buffers)
+            managed_args = tuple(
+                buffers.from_tensor(item).tensor
+                if isinstance(item, torch.Tensor)
+                else item
+                for item in args
+            )
+            result, metrics = session.invoke_profiled(
+                operation, *managed_args, **kwargs
+            )
+            samples.append(sum(item.mapping_ns for item in metrics.inputs))
+            del result
+            buffers.collect()
+        finally:
+            try:
+                if session is not None:
+                    session.close()
+            finally:
+                buffers.close()
+    return samples
 
 
 def _make_arguments(
@@ -629,6 +729,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--dtype", choices=tuple(_DTYPES), default="float32")
     parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument("--memory-mode", choices=("pooled", "arena"), default="pooled")
+    parser.add_argument("--arena-bytes", type=int)
     parser.add_argument("--format", choices=("table", "json"), default="table")
     parser.add_argument("--output", type=Path)
     return parser
@@ -653,6 +755,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         threads=arguments.threads,
         dtype=_DTYPES[arguments.dtype],
         seed=arguments.seed,
+        memory_mode=arguments.memory_mode,
+        arena_bytes=arguments.arena_bytes,
     )
     report = run_benchmarks(config)
     rendered = (

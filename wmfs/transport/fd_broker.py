@@ -3,11 +3,20 @@ import os
 import secrets
 import socket
 import threading
+from dataclasses import dataclass
 from types import ModuleType
 
 from wmfs.memory.buffers import SharedBuffer
 
 _MAX_CONTROL_MESSAGE_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class _RemoteMapping:
+    buffer: SharedBuffer
+    writable: bool
+    arena: bool
+    invocation_id: int | None
 
 
 class FdSender:
@@ -16,10 +25,13 @@ class FdSender:
     ) -> None:
         self._socket = transfer_socket
         self._schema = tensor_schema
-        self._mapped_buffers: dict[tuple[int, int], bool] = {}
+        self._mapped_buffers: dict[tuple[int, int], _RemoteMapping] = {}
         self._lock = threading.Lock()
         self._socket.settimeout(5.0)
+        self._closed = False
+        self._worker_exited = False
         self.transfer_count = 0
+        self.retirement_count = 0
 
     def ensure_mapped(
         self,
@@ -29,64 +41,120 @@ class FdSender:
         writable: bool = False,
     ) -> bool:
         with self._lock:
-            return self._ensure_mapped(
-                buffer, invocation_id=invocation_id, writable=writable
+            key = (buffer.id, buffer.generation)
+            actual_writable = writable or buffer.arena
+            existing = self._mapped_buffers.get(key)
+            if existing is not None:
+                if existing.writable or not actual_writable:
+                    return False
+                raise RuntimeError(
+                    "Cannot upgrade an existing read-only worker mapping"
+                )
+
+            message = self._schema.BufferTransfer.new_message(
+                transferId=secrets.randbits(64),
+                invocationId=invocation_id,
+                bufferId=buffer.id,
+                generation=buffer.generation,
+                allocationId=buffer.allocation_id,
+                byteLength=buffer.mapping_byte_length,
+                writable=actual_writable,
+                arena=buffer.arena,
             )
+            message.map = None
+            transferred_fd = buffer.duplicate_fd(writable=actual_writable)
+            self._mapped_buffers[key] = _RemoteMapping(
+                buffer=buffer,
+                writable=actual_writable,
+                arena=buffer.arena,
+                invocation_id=(
+                    None if buffer.arena or not actual_writable else invocation_id
+                ),
+            )
+            if not buffer.arena:
+                buffer.register_recipient(self)
+            self._send(message, transferred_fd)
+            self.transfer_count += 1
+            return True
 
-    def _ensure_mapped(
-        self,
-        buffer: SharedBuffer,
-        *,
-        invocation_id: int,
-        writable: bool,
-    ) -> bool:
+    def finish_invocation(self, invocation_id: int) -> None:
+        with self._lock:
+            expired = [
+                mapping.buffer
+                for mapping in self._mapped_buffers.values()
+                if mapping.invocation_id == invocation_id and not mapping.arena
+            ]
+            for buffer in expired:
+                self._retire_buffer_locked(buffer)
+
+    def retire_buffer(self, buffer: SharedBuffer) -> None:
+        with self._lock:
+            self._retire_buffer_locked(buffer)
+
+    def worker_exited(self) -> None:
+        with self._lock:
+            self._worker_exited = True
+            self._mapped_buffers.clear()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self._socket.close()
+
+    def _retire_buffer_locked(self, buffer: SharedBuffer) -> None:
         key = (buffer.id, buffer.generation)
-        mapped_writable = self._mapped_buffers.get(key)
-        if mapped_writable is not None and (mapped_writable or not writable):
-            return False
-        if mapped_writable is not None:
-            raise RuntimeError("Cannot upgrade an existing read-only worker mapping")
-
-        transfer_id = secrets.randbits(64)
+        if key not in self._mapped_buffers:
+            return
+        if self._worker_exited:
+            self._mapped_buffers.pop(key, None)
+            return
+        if self._closed:
+            raise RuntimeError("Cannot retire a buffer from a closing worker")
         message = self._schema.BufferTransfer.new_message(
-            transferId=transfer_id,
-            invocationId=invocation_id,
+            transferId=secrets.randbits(64),
+            invocationId=0,
             bufferId=buffer.id,
             generation=buffer.generation,
-            byteLength=buffer.byte_length,
-            writable=writable,
+            allocationId=buffer.allocation_id,
+            byteLength=buffer.mapping_byte_length,
+            writable=False,
+            arena=False,
         )
-        transferred_fd = buffer.duplicate_fd(writable=writable)
+        message.retire = None
+        self._send(message, None)
+        self._mapped_buffers.pop(key, None)
+        self.retirement_count += 1
+
+    def _send(self, message: object, transferred_fd: int | None) -> None:
         payload = message.to_bytes()
         try:
-            descriptors = array.array("i", [transferred_fd])
-            sent = self._socket.sendmsg(
-                [payload],
-                [(socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)],
-            )
+            if transferred_fd is None:
+                sent = self._socket.send(payload)
+            else:
+                descriptors = array.array("i", [transferred_fd])
+                sent = self._socket.sendmsg(
+                    [payload],
+                    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)],
+                )
             if sent != len(payload):
-                raise RuntimeError("FD transfer message was not sent atomically")
+                raise RuntimeError("Buffer control message was not sent atomically")
         finally:
-            os.close(transferred_fd)
+            if transferred_fd is not None:
+                os.close(transferred_fd)
 
         response = self._socket.recv(_MAX_CONTROL_MESSAGE_BYTES)
         if not response:
             raise RuntimeError("FD transfer socket closed before acknowledgement")
         with self._schema.BufferTransferAck.from_bytes(response) as acknowledgement:
-            if acknowledgement.transferId != transfer_id:
-                raise RuntimeError("Worker acknowledged an unexpected FD transfer")
+            if acknowledgement.transferId != message.transferId:
+                raise RuntimeError("Worker acknowledged an unexpected buffer request")
             if acknowledgement.which() == "error":
                 raise RuntimeError(
-                    f"Worker rejected FD transfer: {acknowledgement.error}"
+                    f"Worker rejected buffer request: {acknowledgement.error}"
                 )
-
-        self._mapped_buffers[key] = writable
-        self.transfer_count += 1
-        return True
-
-    def close(self) -> None:
-        try:
-            self._socket.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        self._socket.close()

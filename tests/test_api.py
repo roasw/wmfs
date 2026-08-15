@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from wmfs import add_scalar, matmul, runtime, svd
+from wmfs.runtime import Runtime
 
 
 def test_matmul_matches_torch() -> None:
@@ -45,3 +46,12 @@ def test_runtime_uses_local_backend_by_default() -> None:
 def test_runtime_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unknown backend 'isolated'"):
         runtime.use_backend("isolated")
+
+
+def test_runtime_configures_memory_mode_before_discovery() -> None:
+    candidate = Runtime()
+
+    candidate.configure_memory("arena", arena_bytes=1024 * 1024)
+
+    with pytest.raises(ValueError, match="Memory mode"):
+        candidate.configure_memory("unknown")

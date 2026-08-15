@@ -21,8 +21,11 @@ _DTYPES: dict[str, torch.dtype] = {
 @dataclass
 class MappedBuffer:
     generation: int
+    allocation_id: int
     byte_length: int
     writable: bool
+    arena: bool
+    invocation_id: int
     fd: int
     mapping: mmap.mmap
 
@@ -41,8 +44,11 @@ class MappedBufferCache:
         *,
         buffer_id: int,
         generation: int,
+        allocation_id: int,
         byte_length: int,
         writable: bool,
+        arena: bool,
+        invocation_id: int,
         fd: int,
     ) -> None:
         try:
@@ -53,24 +59,64 @@ class MappedBufferCache:
         except Exception:
             os.close(fd)
             raise
-        candidate = MappedBuffer(generation, byte_length, writable, fd, mapping)
+        candidate = MappedBuffer(
+            generation,
+            allocation_id,
+            byte_length,
+            writable,
+            arena,
+            invocation_id,
+            fd,
+            mapping,
+        )
         with self._lock:
             existing = self._buffers.get(buffer_id)
-            if existing is not None and existing.generation >= generation:
+            if existing is not None:
                 candidate.close()
-                if existing.generation == generation:
-                    if writable and not existing.writable:
-                        raise ValueError(
-                            "Cannot upgrade an existing read-only buffer mapping"
-                        )
+                if (
+                    existing.generation == generation
+                    and (existing.writable or not writable)
+                    and existing.arena == arena
+                    and (arena or existing.allocation_id == allocation_id)
+                ):
                     return
-                raise ValueError("Transferred buffer generation is stale")
+                raise ValueError("Existing buffer mapping must be retired before remap")
             self._buffers[buffer_id] = candidate
-        if existing is not None:
-            existing.close()
+
+    def retire(self, *, buffer_id: int, generation: int, allocation_id: int) -> None:
+        with self._lock:
+            existing = self._buffers.get(buffer_id)
+            if existing is None:
+                return
+            if (
+                existing.generation != generation
+                or existing.allocation_id != allocation_id
+            ):
+                raise ValueError("Cannot retire a stale buffer generation")
+            if existing.arena:
+                raise ValueError("Cannot retire the shared arena mapping")
+            self._buffers.pop(buffer_id)
+        existing.close()
+
+    def finish_invocation(self, invocation_id: int) -> None:
+        with self._lock:
+            expired = [
+                buffer_id
+                for buffer_id, buffer in self._buffers.items()
+                if buffer.writable
+                and not buffer.arena
+                and buffer.invocation_id == invocation_id
+            ]
+            buffers = [self._buffers.pop(buffer_id) for buffer_id in expired]
+        for buffer in buffers:
+            buffer.close()
 
     def tensor(
-        self, descriptor: object, *, require_writable: bool = False
+        self,
+        descriptor: object,
+        *,
+        invocation_id: int,
+        require_writable: bool = False,
     ) -> torch.Tensor:
         with self._lock:
             buffer = self._buffers.get(int(descriptor.bufferId))
@@ -78,8 +124,16 @@ class MappedBufferCache:
             raise ValueError("Tensor references an unmapped buffer")
         if buffer.generation != int(descriptor.generation):
             raise ValueError("Tensor references a stale buffer generation")
+        if not buffer.arena and buffer.allocation_id != int(descriptor.allocationId):
+            raise ValueError("Tensor references a stale logical allocation")
         if require_writable and not buffer.writable:
             raise ValueError("Tensor output is not mapped writable")
+        if (
+            require_writable
+            and not buffer.arena
+            and buffer.invocation_id != invocation_id
+        ):
+            raise ValueError("Tensor output is outside this invocation")
 
         dtype_name = str(descriptor.dtype)
         try:
@@ -165,17 +219,31 @@ class FdReceiver:
             try:
                 if flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC):
                     raise ValueError("FD transfer message was truncated")
-                if len(received_fds) != 1:
-                    raise ValueError("FD transfer must contain exactly one descriptor")
                 with self._schema.BufferTransfer.from_bytes(message) as transfer:
                     transfer_id = int(transfer.transferId)
-                    self._cache.add(
-                        buffer_id=int(transfer.bufferId),
-                        generation=int(transfer.generation),
-                        byte_length=int(transfer.byteLength),
-                        writable=bool(transfer.writable),
-                        fd=received_fds.pop(),
-                    )
+                    if transfer.which() == "map":
+                        if len(received_fds) != 1:
+                            raise ValueError(
+                                "Buffer map must contain exactly one descriptor"
+                            )
+                        self._cache.add(
+                            buffer_id=int(transfer.bufferId),
+                            generation=int(transfer.generation),
+                            allocation_id=int(transfer.allocationId),
+                            byte_length=int(transfer.byteLength),
+                            writable=bool(transfer.writable),
+                            arena=bool(transfer.arena),
+                            invocation_id=int(transfer.invocationId),
+                            fd=received_fds.pop(),
+                        )
+                    else:
+                        if received_fds:
+                            raise ValueError("Buffer retirement must not contain an FD")
+                        self._cache.retire(
+                            buffer_id=int(transfer.bufferId),
+                            generation=int(transfer.generation),
+                            allocation_id=int(transfer.allocationId),
+                        )
                 acknowledgement = self._schema.BufferTransferAck.new_message(
                     transferId=transfer_id
                 )

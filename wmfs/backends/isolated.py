@@ -11,9 +11,12 @@ class IsolatedBackend:
         self,
         manifests: tuple[PluginManifest, ...],
         registry: OperationRegistry,
+        *,
+        memory_mode: str = "pooled",
+        arena_bytes: int | None = None,
     ) -> None:
         self._registry = registry
-        self._buffers = BufferManager()
+        self._buffers = BufferManager(mode=memory_mode, arena_bytes=arena_bytes)
         self._manifests = {manifest.name: manifest for manifest in manifests}
         self._sessions: dict[str, WorkerSession] = {}
 

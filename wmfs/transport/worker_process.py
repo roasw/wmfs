@@ -129,25 +129,29 @@ class _OutputAllocator:
 
         self.server = Server()
         self._buffers = buffers
-        self.allocations: dict[int, ManagedTensor] = {}
+        self.allocations: dict[TensorDescriptor, ManagedTensor] = {}
 
     def _allocate(self, shape: tuple[int, ...], dtype: str) -> ManagedTensor:
         if len(self.allocations) >= 8:
             raise ValueError("Operation output allocation limit exceeded")
         managed = self._buffers.empty_named(shape, dtype)
-        self.allocations[managed.buffer.id] = managed
+        self.allocations[managed.descriptor] = managed
         return managed
 
     def resolve(self, descriptor: object) -> ManagedTensor:
         parsed = TensorDescriptor.from_capnp(descriptor)
-        managed = self.allocations.get(parsed.buffer_id)
-        if managed is None or managed.descriptor != parsed:
+        managed = self.allocations.get(parsed)
+        if managed is None:
             raise ValueError("Worker returned an output it did not allocate")
         return managed
 
     def rollback(self) -> None:
-        for managed in self.allocations.values():
+        allocations = tuple(self.allocations.values())
+        self.allocations.clear()
+        for managed in allocations:
             self._buffers.release(managed)
+
+    def commit(self) -> None:
         self.allocations.clear()
 
 
@@ -260,10 +264,14 @@ class WorkerSession:
                 output_metrics,
             )
             try:
-                response = await self._call_operation(
-                    operation, inputs, args, kwargs, allocator
-                )
+                try:
+                    response = await self._call_operation(
+                        operation, inputs, args, kwargs, allocator, invocation_id
+                    )
+                finally:
+                    self._fd_sender.finish_invocation(invocation_id)
                 result = self._resolve_outputs(operation, response, allocator)
+                allocator.commit()
                 return result, InvocationMetrics(
                     inputs=tuple(input_metrics or ()),
                     outputs=tuple(output_metrics or ()),
@@ -337,14 +345,19 @@ class WorkerSession:
         args: tuple[object, ...],
         kwargs: dict[str, object],
         allocator: _OutputAllocator,
+        invocation_id: int,
     ) -> object:
         descriptors = [item.descriptor.as_capnp() for item in inputs]
         if operation == "matmul":
             return await self._plugin.matmul(
-                a=descriptors[0], b=descriptors[1], allocator=allocator.server
+                invocationId=invocation_id,
+                a=descriptors[0],
+                b=descriptors[1],
+                allocator=allocator.server,
             )
         if operation == "svd":
             return await self._plugin.svd(
+                invocationId=invocation_id,
                 a=descriptors[0],
                 fullMatrices=bool(kwargs.get("full_matrices", True)),
                 allocator=allocator.server,
@@ -352,7 +365,10 @@ class WorkerSession:
         if operation == "add_scalar":
             value = next(item for item in args if not isinstance(item, torch.Tensor))
             return await self._plugin.addScalar(
-                a=descriptors[0], value=float(value), allocator=allocator.server
+                invocationId=invocation_id,
+                a=descriptors[0],
+                value=float(value),
+                allocator=allocator.server,
             )
         raise ValueError(f"Unknown isolated operation {operation!r}")
 
@@ -405,6 +421,19 @@ async def _inspect_worker_environment(
 
 async def _validate_worker(plugin: object) -> PluginMetadata:
     runtime_schema = _load_runtime_schema()
+    try:
+        protocol = await asyncio.wait_for(
+            plugin.getProtocolVersion(), _RPC_TIMEOUT_SECONDS
+        )
+    except Exception as error:
+        raise RuntimeError(
+            "Worker does not implement the required protocol handshake"
+        ) from error
+    if protocol.version != runtime_schema.protocolVersion:
+        raise RuntimeError(
+            f"Worker uses protocol {protocol.version}, but runtime uses "
+            f"{runtime_schema.protocolVersion}"
+        )
     nonce = secrets.randbits(64)
     ping = await asyncio.wait_for(plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS)
     if ping.nonce != nonce:
@@ -426,7 +455,9 @@ async def _probe_shared_tensor(
         fd_sender.ensure_mapped(managed_tensor.buffer, invocation_id=1, writable=False)
         fd_sender.ensure_mapped(managed_tensor.buffer, invocation_id=1, writable=False)
         response = await asyncio.wait_for(
-            plugin.tensorChecksum(tensor=managed_tensor.descriptor.as_capnp()),
+            plugin.tensorChecksum(
+                invocationId=1, tensor=managed_tensor.descriptor.as_capnp()
+            ),
             _RPC_TIMEOUT_SECONDS,
         )
         return TensorProbe(
@@ -473,6 +504,8 @@ async def _worker_connection(
         else:
             fd_parent.close()
         await _wait_for_worker(process)
+        if fd_sender is not None:
+            fd_sender.worker_exited()
 
 
 def _start_worker(

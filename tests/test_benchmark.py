@@ -45,6 +45,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert svd_case["local_kernel_ms"]["count"] == 1
     assert svd_case["isolated_end_to_end_ms"]["count"] == 1
     assert set(svd_case["diagnostics"]) == {
+        "buffer_reclamation_ms",
         "cached_ensure_mapped_ms",
         "first_use_fd_transfer_mmap_ms",
         "input_shared_preparation_ms",
@@ -53,10 +54,13 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "output_allocator_service_ms",
         "output_ensure_mapped_ms",
         "output_shared_allocation_ms",
+        "pooled_shared_memory_allocation_ms",
         "shared_memory_allocation_ms",
     }
     assert svd_case["diagnostics"]["output_allocations_per_invocation"] == 3
     assert add_scalar_case["diagnostics"]["output_allocations_per_invocation"] == 1
+    assert svd_case["memory_pool"]["mode"] == "pooled"
+    assert svd_case["memory_pool"]["pool_hits"] > 0
     assert torch.get_num_threads() == previous_threads
     assert os.environ.get("OMP_NUM_THREADS") == previous_omp_threads
     assert "Primary comparison" in render_table(report)

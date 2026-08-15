@@ -15,6 +15,7 @@ struct TensorDescriptor {
   dtype @4 :DType;
   shape @5 :List(UInt64);
   strides @6 :List(Int64);
+  allocationId @7 :UInt64;
 }
 
 struct BufferTransfer {
@@ -24,6 +25,12 @@ struct BufferTransfer {
   generation @3 :UInt32;
   byteLength @4 :UInt64;
   writable @5 :Bool = false;
+  union {
+    map @6 :Void;
+    retire @7 :Void;
+  }
+  arena @8 :Bool = false;
+  allocationId @9 :UInt64;
 }
 
 struct BufferTransferAck {
