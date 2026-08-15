@@ -67,6 +67,15 @@ class OutputAllocationMetrics:
 class InvocationMetrics:
     inputs: tuple[InputPreparationMetrics, ...]
     outputs: tuple[OutputAllocationMetrics, ...]
+    scalar_binding_ns: int = 0
+    output_plan_ns: int = 0
+    native_call_ns: int = 0
+    native_queue_wait_ns: int = 0
+    native_rpc_ns: int = 0
+    worker_input_views_ns: int = 0
+    worker_output_views_ns: int = 0
+    worker_dispatch_ns: int = 0
+    worker_kernel_ns: int = 0
 
 
 def _schema_root() -> Path:

@@ -13,6 +13,7 @@
 
 namespace nb = nanobind;
 using namespace nb::literals;
+using wmfs::native::InvocationProfile;
 using wmfs::native::Mapping;
 using wmfs::native::ScalarArgument;
 using wmfs::native::ScalarKind;
@@ -25,16 +26,16 @@ std::uint64_t integer(nb::handle value) {
     return nb::cast<std::uint64_t>(value);
 }
 
-TensorDescriptor descriptor_from_dict(const nb::dict &value) {
+TensorDescriptor descriptor_from_object(nb::handle value) {
     return TensorDescriptor{
-        .buffer_id = integer(value["bufferId"]),
-        .generation = nb::cast<std::uint32_t>(value["generation"]),
-        .allocation_id = integer(value["allocationId"]),
-        .offset = integer(value["offset"]),
-        .byte_length = integer(value["byteLength"]),
-        .dtype = nb::cast<std::string>(value["dtype"]),
-        .shape = nb::cast<std::vector<std::uint64_t>>(value["shape"]),
-        .strides = nb::cast<std::vector<std::int64_t>>(value["strides"]),
+        .buffer_id = integer(value.attr("buffer_id")),
+        .generation = nb::cast<std::uint32_t>(value.attr("generation")),
+        .allocation_id = integer(value.attr("allocation_id")),
+        .offset = integer(value.attr("offset")),
+        .byte_length = integer(value.attr("byte_length")),
+        .dtype = nb::cast<std::string>(value.attr("dtype")),
+        .shape = nb::cast<std::vector<std::uint64_t>>(value.attr("shape")),
+        .strides = nb::cast<std::vector<std::int64_t>>(value.attr("strides")),
     };
 }
 
@@ -42,7 +43,7 @@ std::vector<TensorDescriptor> descriptors_from_list(const nb::list &values) {
     std::vector<TensorDescriptor> result;
     result.reserve(values.size());
     for (nb::handle value : values) {
-        result.push_back(descriptor_from_dict(nb::cast<nb::dict>(value)));
+        result.push_back(descriptor_from_object(value));
     }
     return result;
 }
@@ -110,15 +111,29 @@ void retire_buffer(Session &session, nb::object buffer) {
     session.retire_buffer(mapping);
 }
 
-void invoke(Session &session, std::uint64_t invocation_id,
-            std::uint32_t operation_id, const nb::list &inputs,
-            const nb::list &outputs, const nb::list &scalars) {
+nb::object invoke(Session &session, std::uint64_t invocation_id,
+                  std::uint32_t operation_id, const nb::list &inputs,
+                  const nb::list &outputs, const nb::list &scalars,
+                  bool profiled) {
     auto native_inputs = descriptors_from_list(inputs);
     auto native_outputs = descriptors_from_list(outputs);
     auto native_scalars = scalars_from_list(scalars);
-    nb::gil_scoped_release release;
-    session.invoke(invocation_id, operation_id, native_inputs, native_outputs,
-                   native_scalars);
+    InvocationProfile profile;
+    {
+        nb::gil_scoped_release release;
+        profile = session.invoke(invocation_id, operation_id, native_inputs,
+                                 native_outputs, native_scalars, profiled);
+    }
+    if (!profiled)
+        return nb::none();
+    nb::dict result;
+    result["queue_wait_ns"] = profile.queue_wait_ns;
+    result["rpc_ns"] = profile.rpc_ns;
+    result["worker_input_views_ns"] = profile.worker_input_views_ns;
+    result["worker_output_views_ns"] = profile.worker_output_views_ns;
+    result["worker_dispatch_ns"] = profile.worker_dispatch_ns;
+    result["worker_kernel_ns"] = profile.worker_kernel_ns;
+    return result;
 }
 
 } // namespace
@@ -131,7 +146,7 @@ NB_MODULE(_native, module) {
              "writable"_a = false)
         .def("retire_buffer", &retire_buffer, "buffer"_a)
         .def("invoke", &invoke, "invocation_id"_a, "operation_id"_a, "inputs"_a,
-             "outputs"_a, "scalars"_a)
+             "outputs"_a, "scalars"_a, "profiled"_a = false)
         .def(
             "ping",
             [](Session &session, std::uint64_t nonce) {

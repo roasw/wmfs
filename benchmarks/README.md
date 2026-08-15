@@ -21,32 +21,41 @@ standard deviation, allocation statistics, and transport diagnostics.
 
 | Mode   | Operation  | Size             | Local (ms) | Isolated (ms) | Overhead (ms) | Overhead |
 | ------ | ---------- | ---------------- | ---------: | ------------: | ------------: | -------: |
-| pooled | matmul     | 64 x 64          |      0.020 |         0.670 |         0.650 |  3255.3% |
-| arena  | matmul     | 64 x 64          |      0.019 |         0.454 |         0.435 |  2268.3% |
-| pooled | matmul     | 256 x 256        |      0.255 |         1.119 |         0.864 |   339.4% |
-| arena  | matmul     | 256 x 256        |      0.255 |         0.692 |         0.437 |   171.7% |
-| pooled | matmul     | 2048 x 2048      |    130.738 |       137.808 |         7.070 |     5.4% |
-| arena  | matmul     | 2048 x 2048      |    121.160 |       121.562 |         0.402 |     0.3% |
-| pooled | SVD        | 32 x 32          |      0.118 |         1.041 |         0.923 |   781.9% |
-| arena  | SVD        | 32 x 32          |      0.118 |         0.655 |         0.537 |   457.1% |
-| pooled | SVD        | 128 x 128        |      0.985 |         2.258 |         1.273 |   129.1% |
-| arena  | SVD        | 128 x 128        |      0.979 |         1.571 |         0.591 |    60.4% |
-| pooled | SVD        | 768 x 768        |     68.557 |        76.460 |         7.903 |    11.5% |
-| arena  | SVD        | 768 x 768        |     66.664 |        71.723 |         5.059 |     7.6% |
-| pooled | add_scalar | 4096 elements    |      0.025 |         0.674 |         0.649 |  2598.9% |
-| arena  | add_scalar | 4096 elements    |      0.021 |         0.474 |         0.453 |  2170.3% |
-| pooled | add_scalar | 1048576 elements |      0.179 |         2.167 |         1.988 |  1112.7% |
-| arena  | add_scalar | 1048576 elements |      0.157 |         0.596 |         0.439 |   279.4% |
+| pooled | matmul     | 64 x 64          |      0.021 |         0.611 |         0.591 |  2865.8% |
+| arena  | matmul     | 64 x 64          |      0.018 |         0.315 |         0.297 |  1651.2% |
+| pooled | matmul     | 256 x 256        |      0.232 |         1.117 |         0.885 |   381.9% |
+| arena  | matmul     | 256 x 256        |      0.257 |         0.696 |         0.438 |   170.5% |
+| pooled | matmul     | 2048 x 2048      |    122.500 |       129.135 |         6.635 |     5.4% |
+| arena  | matmul     | 2048 x 2048      |    122.771 |       121.358 |        -1.412 |    -1.2% |
+| pooled | SVD        | 32 x 32          |      0.117 |         1.039 |         0.922 |   788.6% |
+| arena  | SVD        | 32 x 32          |      0.112 |         0.576 |         0.464 |   414.9% |
+| pooled | SVD        | 128 x 128        |      1.002 |         2.212 |         1.209 |   120.6% |
+| arena  | SVD        | 128 x 128        |      1.046 |         1.661 |         0.615 |    58.8% |
+| pooled | SVD        | 768 x 768        |     67.513 |        74.341 |         6.828 |    10.1% |
+| arena  | SVD        | 768 x 768        |     67.344 |        73.624 |         6.280 |     9.3% |
+| pooled | add_scalar | 4096 elements    |      0.023 |         0.644 |         0.621 |  2693.6% |
+| arena  | add_scalar | 4096 elements    |      0.021 |         0.431 |         0.409 |  1915.0% |
+| pooled | add_scalar | 1048576 elements |      0.171 |         1.912 |         1.742 |  1020.6% |
+| arena  | add_scalar | 1048576 elements |      0.163 |         0.593 |         0.430 |   263.5% |
 
 Safe pooling reached 91.2% hit rates and bounded each case to three or five
 memfds. It preserves one-FD-per-buffer capabilities, so each reused generation
 still incurs acknowledged worker retirement and a new FD mapping. The arena
 reached 97.1% suballocation hit rates with one memfd.
 
-RPC-only median latency was about 0.126 ms in both modes. The 1,000-call
-high-frequency `add_scalar` run measured 0.575 ms median and 1,525 calls/s
-pooled, versus 0.360 ms and 2,391 calls/s in the arena. These are sequential
-synchronous calls, not batched operations.
+RPC-only median latency was 0.154 ms pooled and 0.132 ms in the arena. The
+1,000-call high-frequency `add_scalar` run measured 0.559 ms median and 1,604
+calls/s pooled, versus 0.342 ms and 2,473 calls/s in the arena. These are
+sequential synchronous calls, not batched operations.
+The negative large-matmul overhead is measurement noise.
+
+The profile identified repeated worker tensor-view construction as the largest
+avoidable cheap-operation cost. Caching validated views per worker mapping
+reduced combined input/output view construction from about 0.070 ms to about
+0.020 ms for small arena `add_scalar`. Detailed JSON diagnostics now separate
+output-plan evaluation, native queue wait, RPC, worker views, dispatch, and
+kernel execution. Profiling is opt-in on each invocation, so ordinary calls do
+not execute the timing code.
 
 These values characterize one WSL2 host and are not performance thresholds.
 Regenerate both reports on the target system when evaluating the security and

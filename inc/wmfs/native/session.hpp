@@ -39,6 +39,15 @@ struct ScalarArgument {
     std::string text_value;
 };
 
+struct InvocationProfile {
+    std::uint64_t queue_wait_ns{};
+    std::uint64_t rpc_ns{};
+    std::uint64_t worker_input_views_ns{};
+    std::uint64_t worker_output_views_ns{};
+    std::uint64_t worker_dispatch_ns{};
+    std::uint64_t worker_kernel_ns{};
+};
+
 class Session {
   public:
     Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint);
@@ -50,10 +59,12 @@ class Session {
     bool mapping_required(const Mapping &mapping) const;
     void map_buffer(const Mapping &mapping, int fd);
     void retire_buffer(const Mapping &mapping);
-    void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
-                const std::vector<TensorDescriptor> &inputs,
-                const std::vector<TensorDescriptor> &outputs,
-                const std::vector<ScalarArgument> &scalars);
+    InvocationProfile invoke(std::uint64_t invocation_id,
+                             std::uint32_t operation_id,
+                             const std::vector<TensorDescriptor> &inputs,
+                             const std::vector<TensorDescriptor> &outputs,
+                             const std::vector<ScalarArgument> &scalars,
+                             bool profiled);
     void ping(std::uint64_t nonce);
     void close();
 

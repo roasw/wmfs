@@ -4,6 +4,7 @@ import ctypes
 import socket
 import sys
 from pathlib import Path
+from time import perf_counter_ns
 from types import ModuleType
 
 import capnp
@@ -12,7 +13,7 @@ import torch
 from wmfs_reference import kernels
 from wmfs_reference.fd_transport import FdReceiver, MappedBufferCache
 
-_PROTOCOL_VERSION = 5
+_PROTOCOL_VERSION = 6
 
 
 def _load_schema(path: Path, import_paths: list[Path]) -> ModuleType:
@@ -71,13 +72,22 @@ def _make_server(
             invocation: object,
             _context: object,
             **_kwargs: object,
-        ) -> None:
+        ) -> tuple[dict[str, int]]:
             invocation_id = int(invocation.invocationId)
+            profiled = bool(invocation.profiled)
+            started = perf_counter_ns() if profiled else 0
+            input_views_ns = 0
+            output_views_ns = 0
+            kernel_ns = 0
             try:
+                view_start = perf_counter_ns() if profiled else 0
                 inputs = [
                     mapped_buffers.tensor(item, invocation_id=invocation_id)
                     for item in invocation.inputs
                 ]
+                if profiled:
+                    input_views_ns = perf_counter_ns() - view_start
+                    view_start = perf_counter_ns()
                 outputs = [
                     mapped_buffers.tensor(
                         item,
@@ -86,11 +96,27 @@ def _make_server(
                     )
                     for item in invocation.outputs
                 ]
+                if profiled:
+                    output_views_ns = perf_counter_ns() - view_start
                 operation_id = int(invocation.operationId)
                 scalars = _decode_scalars(invocation.scalars, operation_id)
-                _execute_known(operation_id, inputs, outputs, scalars)
+                kernel_ns = _execute_known(
+                    operation_id, inputs, outputs, scalars, profiled=profiled
+                )
             finally:
                 mapped_buffers.finish_invocation(invocation_id)
+            elapsed_ns = perf_counter_ns() - started if profiled else 0
+            return (
+                {
+                    "inputViewsNs": input_views_ns,
+                    "outputViewsNs": output_views_ns,
+                    "dispatchNs": max(
+                        0,
+                        elapsed_ns - input_views_ns - output_views_ns - kernel_ns,
+                    ),
+                    "kernelNs": kernel_ns,
+                },
+            )
 
         async def matmul(
             self,
@@ -224,7 +250,9 @@ def _execute_known(
     inputs: list[torch.Tensor],
     outputs: list[torch.Tensor],
     scalars: dict[int, object],
-) -> None:
+    *,
+    profiled: bool,
+) -> int:
     if operation_id == 1:
         if len(inputs) != 2 or len(outputs) != 1 or scalars:
             raise ValueError("Invalid matmul invocation")
@@ -233,8 +261,9 @@ def _execute_known(
             raise ValueError("matmul input dimensions are incompatible")
         result = outputs[0]
         _validate_output(result, (a.shape[0], b.shape[1]), a.dtype)
+        started = perf_counter_ns() if profiled else 0
         kernels.matmul(a, b, out=result)
-        return
+        return perf_counter_ns() - started if profiled else 0
     if operation_id == 2:
         if len(inputs) != 1 or len(outputs) != 3 or set(scalars) != {0}:
             raise ValueError("Invalid svd invocation")
@@ -251,8 +280,9 @@ def _execute_known(
         )
         for output, shape in zip(outputs, expected_shapes, strict=True):
             _validate_output(output, shape, a.dtype)
+        started = perf_counter_ns() if profiled else 0
         kernels.svd(a, full_matrices=full_matrices, out=tuple(outputs))
-        return
+        return perf_counter_ns() - started if profiled else 0
     if operation_id == 3:
         if len(inputs) != 1 or len(outputs) != 1 or set(scalars) != {0}:
             raise ValueError("Invalid add_scalar invocation")
@@ -262,8 +292,9 @@ def _execute_known(
             raise TypeError("add_scalar requires a numeric scalar")
         expected_dtype = torch.result_type(a, value)
         _validate_output(outputs[0], tuple(a.shape), expected_dtype)
+        started = perf_counter_ns() if profiled else 0
         kernels.add_scalar(a, value, out=outputs[0])
-        return
+        return perf_counter_ns() - started if profiled else 0
     raise ValueError(f"Unknown operation ID {operation_id}")
 
 

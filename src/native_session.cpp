@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -188,14 +189,17 @@ struct Session::Impl {
             send_control(message, transfer_id, -1);
         }
 
-        void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
-                    const std::vector<TensorDescriptor> &inputs,
-                    const std::vector<TensorDescriptor> &outputs,
-                    const std::vector<ScalarArgument> &scalars) {
+        InvocationProfile invoke(std::uint64_t invocation_id,
+                                 std::uint32_t operation_id,
+                                 const std::vector<TensorDescriptor> &inputs,
+                                 const std::vector<TensorDescriptor> &outputs,
+                                 const std::vector<ScalarArgument> &scalars,
+                                 bool profiled) {
             auto request = plugin.invokeKnownRequest();
             auto invocation = request.initInvocation();
             invocation.setInvocationId(invocation_id);
             invocation.setOperationId(operation_id);
+            invocation.setProfiled(profiled);
             auto input_builders = invocation.initInputs(inputs.size());
             for (std::size_t index = 0; index < inputs.size(); ++index) {
                 write_descriptor(input_builders[index], inputs[index]);
@@ -224,9 +228,25 @@ struct Session::Impl {
                     break;
                 }
             }
-            io.provider->getTimer()
-                .timeoutAfter(30 * kj::SECONDS, request.send())
-                .wait(io.waitScope);
+            const auto rpc_started =
+                profiled ? std::chrono::steady_clock::now()
+                         : std::chrono::steady_clock::time_point{};
+            auto response = io.provider->getTimer()
+                                .timeoutAfter(30 * kj::SECONDS, request.send())
+                                .wait(io.waitScope);
+            const auto rpc_ns =
+                profiled ? std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - rpc_started)
+                               .count()
+                         : 0;
+            const auto worker = response.getMetrics();
+            return InvocationProfile{
+                .rpc_ns = static_cast<std::uint64_t>(rpc_ns),
+                .worker_input_views_ns = worker.getInputViewsNs(),
+                .worker_output_views_ns = worker.getOutputViewsNs(),
+                .worker_dispatch_ns = worker.getDispatchNs(),
+                .worker_kernel_ns = worker.getKernelNs(),
+            };
         }
 
         void send_control(capnp::MessageBuilder &message,
@@ -460,14 +480,33 @@ void Session::retire_buffer(const Mapping &mapping) {
     ++impl_->retirements;
 }
 
-void Session::invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
-                     const std::vector<TensorDescriptor> &inputs,
-                     const std::vector<TensorDescriptor> &outputs,
-                     const std::vector<ScalarArgument> &scalars) {
+InvocationProfile Session::invoke(std::uint64_t invocation_id,
+                                  std::uint32_t operation_id,
+                                  const std::vector<TensorDescriptor> &inputs,
+                                  const std::vector<TensorDescriptor> &outputs,
+                                  const std::vector<ScalarArgument> &scalars,
+                                  bool profiled) {
+    InvocationProfile profile;
+    const auto submitted = profiled ? std::chrono::steady_clock::now()
+                                    : std::chrono::steady_clock::time_point{};
     try {
-        impl_->submit([=](Impl::Worker &worker) {
-            worker.invoke(invocation_id, operation_id, inputs, outputs,
-                          scalars);
+        impl_->submit([&](Impl::Worker &worker) {
+            if (profiled) {
+                profile.queue_wait_ns = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - submitted)
+                        .count());
+            }
+            const auto worker_profile =
+                worker.invoke(invocation_id, operation_id, inputs, outputs,
+                              scalars, profiled);
+            profile.rpc_ns = worker_profile.rpc_ns;
+            profile.worker_input_views_ns =
+                worker_profile.worker_input_views_ns;
+            profile.worker_output_views_ns =
+                worker_profile.worker_output_views_ns;
+            profile.worker_dispatch_ns = worker_profile.worker_dispatch_ns;
+            profile.worker_kernel_ns = worker_profile.worker_kernel_ns;
         });
     } catch (...) {
         std::lock_guard lock(impl_->mapping_mutex);
@@ -482,6 +521,7 @@ void Session::invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
         return !item.second.arena && item.second.writable &&
                item.second.invocation_id == invocation_id;
     });
+    return profile;
 }
 
 void Session::ping(std::uint64_t nonce) {

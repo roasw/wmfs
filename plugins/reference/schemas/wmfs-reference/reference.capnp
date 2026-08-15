@@ -6,8 +6,8 @@ using Tensor = import "/wmfs/tensor.capnp";
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
-  protocolVersion = 5,
-  fingerprint = 0x8a3d1e7bc554209f,
+  protocolVersion = 6,
+  fingerprint = 0xc2e9486f613a75b4,
   operations = [
     (
       name = "matmul",

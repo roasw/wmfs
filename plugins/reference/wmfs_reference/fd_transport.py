@@ -4,7 +4,8 @@ import os
 import socket
 import threading
 import warnings
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from types import ModuleType
 
 import torch
@@ -16,6 +17,8 @@ _DTYPES: dict[str, torch.dtype] = {
     "int64": torch.int64,
     "uint8": torch.uint8,
 }
+_ITEM_SIZES = {"float32": 4, "float64": 8, "int64": 8, "uint8": 1}
+_MAX_CACHED_VIEWS = 64
 
 
 @dataclass
@@ -28,8 +31,14 @@ class MappedBuffer:
     invocation_id: int
     fd: int
     mapping: mmap.mmap
+    base_tensors: dict[str, torch.Tensor] = field(default_factory=dict)
+    views: OrderedDict[tuple[object, ...], torch.Tensor] = field(
+        default_factory=OrderedDict
+    )
 
     def close(self) -> None:
+        self.views.clear()
+        self.base_tensors.clear()
         self.mapping.close()
         os.close(self.fd)
 
@@ -140,11 +149,17 @@ class MappedBufferCache:
             dtype = _DTYPES[dtype_name]
         except KeyError:
             raise TypeError(f"Unsupported tensor dtype: {dtype_name}") from None
-        item_size = torch.empty((), dtype=dtype).element_size()
         offset = int(descriptor.offset)
         byte_length = int(descriptor.byteLength)
         shape = tuple(int(item) for item in descriptor.shape)
         byte_strides = tuple(int(item) for item in descriptor.strides)
+        view_key = (offset, byte_length, dtype_name, shape, byte_strides)
+        cached = buffer.views.get(view_key)
+        if cached is not None:
+            buffer.views.move_to_end(view_key)
+            return cached
+
+        item_size = _ITEM_SIZES[dtype_name]
         _validate_view(
             buffer.byte_length,
             offset,
@@ -154,19 +169,26 @@ class MappedBufferCache:
             byte_strides,
         )
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="The given buffer is not writable",
-                category=UserWarning,
-            )
-            storage = torch.frombuffer(buffer.mapping, dtype=dtype)
-        return torch.as_strided(
+        storage = buffer.base_tensors.get(dtype_name)
+        if storage is None:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="The given buffer is not writable",
+                    category=UserWarning,
+                )
+                storage = torch.frombuffer(buffer.mapping, dtype=dtype)
+            buffer.base_tensors[dtype_name] = storage
+        view = torch.as_strided(
             storage,
             shape,
             tuple(stride // item_size for stride in byte_strides),
             storage_offset=offset // item_size,
         )
+        buffer.views[view_key] = view
+        if len(buffer.views) > _MAX_CACHED_VIEWS:
+            buffer.views.popitem(last=False)
+        return view
 
     def close(self) -> None:
         with self._lock:

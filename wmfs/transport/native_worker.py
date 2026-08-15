@@ -123,17 +123,24 @@ class NativeWorkerSession:
                 tensor_args, operation.tensor_inputs, strict=True
             )
         ]
+        scalar_start = perf_counter_ns() if collect_metrics else 0
         scalars = _bind_scalars(operation, args, kwargs)
+        scalar_binding_ns = perf_counter_ns() - scalar_start if collect_metrics else 0
         outputs: list[ManagedTensor] = []
         try:
-            for shape, dtype in evaluate_outputs(operation, inputs, scalars):
-                service_start = perf_counter_ns()
-                allocation_start = perf_counter_ns()
+            plan_start = perf_counter_ns() if collect_metrics else 0
+            output_specs = evaluate_outputs(operation, inputs, scalars)
+            output_plan_ns = perf_counter_ns() - plan_start if collect_metrics else 0
+            for shape, dtype in output_specs:
+                service_start = perf_counter_ns() if collect_metrics else 0
+                allocation_start = perf_counter_ns() if collect_metrics else 0
                 output = self._buffers.empty_named(shape, dtype)
-                allocation_ns = perf_counter_ns() - allocation_start
-                mapping_start = perf_counter_ns()
+                allocation_ns = (
+                    perf_counter_ns() - allocation_start if collect_metrics else 0
+                )
+                mapping_start = perf_counter_ns() if collect_metrics else 0
                 transferred = self._ensure_mapped(output, invocation_id, writable=True)
-                mapping_ns = perf_counter_ns() - mapping_start
+                mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
                 outputs.append(output)
                 if collect_metrics:
                     output_metrics.append(
@@ -146,17 +153,22 @@ class NativeWorkerSession:
                         )
                     )
             try:
-                self._ensure_open().invoke(
+                native_start = perf_counter_ns() if collect_metrics else 0
+                native_profile = self._ensure_open().invoke(
                     invocation_id,
                     operation.operation_id,
-                    [item.descriptor.as_capnp() for item in inputs],
-                    [item.descriptor.as_capnp() for item in outputs],
+                    [item.descriptor for item in inputs],
+                    [item.descriptor for item in outputs],
                     [
                         (index, item["kind"], item["value"])
                         for index, item in enumerate(
                             _native_scalars(operation, scalars)
                         )
                     ],
+                    collect_metrics,
+                )
+                native_call_ns = (
+                    perf_counter_ns() - native_start if collect_metrics else 0
                 )
             except Exception:
                 self.close()
@@ -164,8 +176,23 @@ class NativeWorkerSession:
             tensors = tuple(item.tensor for item in outputs)
             result: object = tensors[0] if len(tensors) == 1 else tensors
             outputs.clear()
+            native_profile = native_profile or {}
             return result, InvocationMetrics(
-                inputs=tuple(input_metrics), outputs=tuple(output_metrics)
+                inputs=tuple(input_metrics),
+                outputs=tuple(output_metrics),
+                scalar_binding_ns=scalar_binding_ns,
+                output_plan_ns=output_plan_ns,
+                native_call_ns=native_call_ns,
+                native_queue_wait_ns=int(native_profile.get("queue_wait_ns", 0)),
+                native_rpc_ns=int(native_profile.get("rpc_ns", 0)),
+                worker_input_views_ns=int(
+                    native_profile.get("worker_input_views_ns", 0)
+                ),
+                worker_output_views_ns=int(
+                    native_profile.get("worker_output_views_ns", 0)
+                ),
+                worker_dispatch_ns=int(native_profile.get("worker_dispatch_ns", 0)),
+                worker_kernel_ns=int(native_profile.get("worker_kernel_ns", 0)),
             )
         finally:
             for output in outputs:
@@ -183,12 +210,13 @@ class NativeWorkerSession:
         managed = self._buffers.managed(tensor)
         shared_copy_ns = 0
         if managed is None:
-            copy_start = perf_counter_ns()
+            copy_start = perf_counter_ns() if collect_metrics else 0
             managed = self._buffers.from_tensor(tensor.contiguous())
-            shared_copy_ns = perf_counter_ns() - copy_start
-        mapping_start = perf_counter_ns()
+            if collect_metrics:
+                shared_copy_ns = perf_counter_ns() - copy_start
+        mapping_start = perf_counter_ns() if collect_metrics else 0
         transferred = self._ensure_mapped(managed, invocation_id, writable=writable)
-        mapping_ns = perf_counter_ns() - mapping_start
+        mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
         if collect_metrics:
             metrics.append(
                 InputPreparationMetrics(

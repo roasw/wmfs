@@ -172,6 +172,12 @@ copy. Ensure-mapped timings include native dispatch, FD transfer, worker
 mapping, and acknowledgement. Numerical-library warmup and worker startup are
 excluded from steady-state operation timings.
 
+Profiled invocations additionally separate output-plan evaluation, C++ queue
+wait, RPC, worker input/output view construction, worker dispatch, and kernel
+execution. Profiling showed repeated worker view construction was the largest
+avoidable cheap-operation cost, so each worker mapping now keeps a bounded cache
+of validated Torch views. Ordinary calls leave profiling disabled.
+
 Write a machine-readable report with:
 
 ```console

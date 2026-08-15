@@ -16,6 +16,12 @@ _DTYPE_NAMES: dict[torch.dtype, str] = {
     torch.uint8: "uint8",
 }
 _DTYPES = {name: dtype for dtype, name in _DTYPE_NAMES.items()}
+_ITEM_SIZES = {
+    torch.float32: 4,
+    torch.float64: 8,
+    torch.int64: 8,
+    torch.uint8: 1,
+}
 _DEFAULT_MAX_CACHED_BUFFERS = 64
 _DEFAULT_MAX_CACHED_BYTES = 256 * 1024 * 1024
 _DEFAULT_ARENA_BYTES = 2 * 1024 * 1024 * 1024
@@ -231,8 +237,12 @@ class BufferManager:
         if not shape or any(dimension <= 0 for dimension in shape):
             raise ValueError("Shared tensors must have a non-empty, positive shape")
 
-        item_size = torch.empty((), dtype=dtype).element_size()
-        byte_length = _element_count(shape) * item_size
+        item_size = _ITEM_SIZES[dtype]
+        element_count = _element_count(shape)
+        byte_length = element_count * item_size
+        byte_strides = tuple(
+            stride * item_size for stride in _contiguous_strides(shape)
+        )
         with self._lock:
             self._ensure_open()
             self.collect()
@@ -249,7 +259,7 @@ class BufferManager:
             tensor = torch.frombuffer(
                 buffer.mapping,
                 dtype=dtype,
-                count=_element_count(shape),
+                count=element_count,
                 offset=buffer.offset,
             ).reshape(shape)
             descriptor = TensorDescriptor(
@@ -260,9 +270,7 @@ class BufferManager:
                 byte_length=byte_length,
                 dtype=_DTYPE_NAMES[dtype],
                 shape=shape,
-                strides=tuple(
-                    stride * item_size for stride in _contiguous_strides(shape)
-                ),
+                strides=byte_strides,
             )
             lease = AllocationLease(self, allocation_id)
             storage = tensor.untyped_storage()

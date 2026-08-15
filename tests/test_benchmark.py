@@ -40,6 +40,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
+    assert report["schema_version"] == 4
     assert report["configuration"]["plugin_directory"] == "plugins"
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
@@ -54,12 +55,21 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "first_use_fd_transfer_mmap_ms",
         "input_shared_preparation_ms",
         "isolated_uncached_end_to_end_ms",
+        "native_call_ms",
+        "native_queue_wait_ms",
+        "native_rpc_ms",
         "output_allocations_per_invocation",
         "output_ensure_mapped_ms",
+        "output_plan_evaluation_ms",
         "output_preallocation_service_ms",
         "output_shared_allocation_ms",
         "pooled_shared_memory_allocation_ms",
+        "scalar_binding_ms",
         "shared_memory_allocation_ms",
+        "worker_dispatch_ms",
+        "worker_input_views_ms",
+        "worker_kernel_ms",
+        "worker_output_views_ms",
     }
     assert svd_case["diagnostics"]["output_allocations_per_invocation"] == 3
     assert add_scalar_case["diagnostics"]["output_allocations_per_invocation"] == 1

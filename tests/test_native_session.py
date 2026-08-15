@@ -24,11 +24,18 @@ def test_native_session_runs_known_outputs_with_one_arena_mapping() -> None:
             u, singular_values, vh = session.invoke(
                 "svd", a.tensor, full_matrices=False
             )
-            result = session.invoke("add_scalar", a.tensor, 1.5)
+            result, profile = session.invoke_profiled("add_scalar", a.tensor, 1.5)
 
             torch.testing.assert_close(product, a.tensor @ b.tensor)
             torch.testing.assert_close(u @ torch.diag(singular_values) @ vh, a.tensor)
             torch.testing.assert_close(result, a.tensor + 1.5)
+            assert profile.native_rpc_ns > profile.worker_kernel_ns > 0
+            assert profile.worker_input_views_ns > 0
+            assert profile.worker_output_views_ns > 0
+            del result
+            buffers.collect()
+            repeated = session.invoke("add_scalar", a.tensor, 2.5)
+            torch.testing.assert_close(repeated, a.tensor + 2.5)
             assert session._session.transfer_count == 1
         finally:
             session.close()

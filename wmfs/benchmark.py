@@ -145,7 +145,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -329,6 +329,42 @@ def render_table(report: dict[str, Any]) -> str:
             diagnostic_rows,
         )
     )
+    profile_rows = []
+    for case in report["operations"]:
+        diagnostics = case["diagnostics"]
+        profile_rows.append(
+            (
+                case["operation"],
+                case["tier"],
+                _median(diagnostics, "output_plan_evaluation_ms"),
+                _median(diagnostics, "native_queue_wait_ms"),
+                _median(diagnostics, "native_rpc_ms"),
+                _median(diagnostics, "worker_input_views_ms"),
+                _median(diagnostics, "worker_output_views_ms"),
+                _median(diagnostics, "worker_dispatch_ms"),
+                _median(diagnostics, "worker_kernel_ms"),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "Native invocation profile (median milliseconds)",
+            *_table(
+                (
+                    "operation",
+                    "tier",
+                    "shape plan",
+                    "queue",
+                    "RPC",
+                    "input views",
+                    "output views",
+                    "dispatch",
+                    "kernel",
+                ),
+                profile_rows,
+            ),
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -492,6 +528,15 @@ def _benchmark_diagnostics(
     output_mapping = []
     output_counts = []
     reclamation = []
+    scalar_binding = []
+    output_plan = []
+    native_call = []
+    native_queue_wait = []
+    native_rpc = []
+    worker_input_views = []
+    worker_output_views = []
+    worker_dispatch = []
+    worker_kernel = []
     if config.memory_mode == "arena":
         first_mapping.extend(
             _benchmark_arena_first_mapping(
@@ -528,6 +573,15 @@ def _benchmark_diagnostics(
         )
         output_mapping.append(sum(item.mapping_ns for item in metrics.outputs))
         output_counts.append(len(metrics.outputs))
+        scalar_binding.append(metrics.scalar_binding_ns)
+        output_plan.append(metrics.output_plan_ns)
+        native_call.append(metrics.native_call_ns)
+        native_queue_wait.append(metrics.native_queue_wait_ns)
+        native_rpc.append(metrics.native_rpc_ns)
+        worker_input_views.append(metrics.worker_input_views_ns)
+        worker_output_views.append(metrics.worker_output_views_ns)
+        worker_dispatch.append(metrics.worker_dispatch_ns)
+        worker_kernel.append(metrics.worker_kernel_ns)
         del _result
         start = perf_counter_ns()
         buffers.collect()
@@ -574,6 +628,15 @@ def _benchmark_diagnostics(
         "output_shared_allocation_ms": summarize(output_allocation),
         "output_ensure_mapped_ms": summarize(output_mapping),
         "output_allocations_per_invocation": output_counts[0],
+        "scalar_binding_ms": summarize(scalar_binding),
+        "output_plan_evaluation_ms": summarize(output_plan),
+        "native_call_ms": summarize(native_call),
+        "native_queue_wait_ms": summarize(native_queue_wait),
+        "native_rpc_ms": summarize(native_rpc),
+        "worker_input_views_ms": summarize(worker_input_views),
+        "worker_output_views_ms": summarize(worker_output_views),
+        "worker_dispatch_ms": summarize(worker_dispatch),
+        "worker_kernel_ms": summarize(worker_kernel),
     }
 
 
