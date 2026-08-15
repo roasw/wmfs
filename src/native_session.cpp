@@ -161,7 +161,6 @@ struct Session::Impl {
 
         void map_buffer(const Mapping &mapping, int fd,
                         std::uint64_t transfer_id) {
-            OwnedFd owned_fd(fd);
             capnp::MallocMessageBuilder message;
             auto transfer = message.initRoot<::BufferTransfer>();
             transfer.setTransferId(transfer_id);
@@ -173,7 +172,7 @@ struct Session::Impl {
             transfer.setWritable(mapping.writable);
             transfer.setArena(mapping.arena);
             transfer.setMap();
-            send_control(message, transfer_id, owned_fd.get());
+            send_control(message, transfer_id, fd);
         }
 
         void retire_buffer(const Mapping &mapping, std::uint64_t transfer_id) {
@@ -408,9 +407,8 @@ struct Session::Impl {
 
     void close() {
         std::lock_guard closing(close_mutex);
-        if (closed)
+        if (stopping.exchange(true, std::memory_order_acq_rel))
             return;
-        stopping.store(true, std::memory_order_release);
         ::shutdown(interrupt_rpc_fd.get(), SHUT_RDWR);
         ::shutdown(interrupt_control_fd.get(), SHUT_RDWR);
         {
@@ -423,7 +421,6 @@ struct Session::Impl {
             std::lock_guard lock(mapping_mutex);
             mappings.clear();
         }
-        closed = true;
     }
 
     void finish_invocation(std::uint64_t invocation_id) {
@@ -463,7 +460,6 @@ struct Session::Impl {
     std::mutex close_mutex;
     std::atomic<bool> stopping{false};
     Command *command = nullptr;
-    bool closed = false;
     std::exception_ptr startup_error;
     mutable std::mutex mapping_mutex;
     std::unordered_map<MappingKey, Mapping, MappingKeyHash> mappings;
@@ -508,7 +504,7 @@ void Session::map_buffer(const Mapping &mapping, int fd) {
     const auto transfer_id = impl_->next_transfer_id++;
     const auto raw_fd = owned_fd.get();
     impl_->submit([mapping, raw_fd, transfer_id](Impl::Worker &worker) {
-        worker.map_buffer(mapping, duplicate_fd(raw_fd), transfer_id);
+        worker.map_buffer(mapping, raw_fd, transfer_id);
     });
     impl_->mappings.emplace(key, mapping);
     ++impl_->transfers;

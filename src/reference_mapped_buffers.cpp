@@ -76,9 +76,7 @@ struct Mapping {
 
     ~Mapping() {
         views.clear();
-        if (address != MAP_FAILED) {
-            ::munmap(address, static_cast<std::size_t>(spec.byte_length));
-        }
+        ::munmap(address, static_cast<std::size_t>(spec.byte_length));
     }
 
     MappingSpec spec;
@@ -160,7 +158,7 @@ struct MappedBufferCache::Impl {
 };
 
 TensorLease::TensorLease(at::Tensor tensor, std::shared_ptr<void> mapping)
-    : tensor_(std::move(tensor)), mapping_(std::move(mapping)) {}
+    : mapping_(std::move(mapping)), tensor_(std::move(tensor)) {}
 
 const at::Tensor &TensorLease::tensor() const noexcept { return tensor_; }
 
@@ -352,9 +350,6 @@ void MappedBufferCache::finish_invocation(std::uint64_t invocation_id) {
 }
 
 void MappedBufferCache::close() {
-    if (!impl_) {
-        return;
-    }
     std::unordered_map<std::uint64_t, std::shared_ptr<Mapping>> buffers;
     {
         std::lock_guard lock(impl_->mutex);

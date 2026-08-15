@@ -27,8 +27,8 @@ class TensorLease {
     [[nodiscard]] at::Tensor &tensor() noexcept;
 
   private:
-    at::Tensor tensor_;
     std::shared_ptr<void> mapping_;
+    at::Tensor tensor_;
 };
 
 class MappedBufferCache {

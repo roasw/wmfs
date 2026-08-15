@@ -11,14 +11,13 @@ import torch
 
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
 from wmfs.output_metadata import bind_reusable_outputs, evaluate_outputs
-from wmfs.registry import OperationMetadata, PluginMetadata
+from wmfs.registry import PluginMetadata
 from wmfs.transport.worker_process import (
     InputPreparationMetrics,
     InvocationMetrics,
     OutputAllocationMetrics,
     _bind_scalars,
     _reserve_invocation_access,
-    _scalar_arguments,
     _start_worker,
 )
 
@@ -209,9 +208,9 @@ class NativeWorkerSession:
                     [self._native_descriptor(item) for item in inputs],
                     [self._native_descriptor(item) for item in outputs],
                     [
-                        (index, item["kind"], item["value"])
-                        for index, item in enumerate(
-                            _native_scalars(operation, scalars)
+                        (index, parameter.kind, value)
+                        for index, (parameter, value) in enumerate(
+                            zip(operation.scalar_parameters, scalars, strict=True)
                         )
                     ],
                 )
@@ -254,8 +253,6 @@ class NativeWorkerSession:
         finally:
             if not dispatched and self._session is not None:
                 self._session.abort_invocation(invocation_id)
-            for output in outputs:
-                self._buffers.release(output)
 
     def _prepare_input(
         self,
@@ -337,18 +334,3 @@ class NativeWorkerSession:
             raise RuntimeError("Worker did not stop after native RPC closed")
         if process.returncode != 0:
             raise RuntimeError(f"Worker failed with exit status {process.returncode}")
-
-
-def _native_scalars(
-    operation: OperationMetadata, scalars: tuple[object, ...]
-) -> list[dict[str, object]]:
-    capnp_arguments = _scalar_arguments(operation, scalars)
-    return [
-        {
-            "kind": parameter.kind,
-            "value": argument[parameter.kind],
-        }
-        for parameter, argument in zip(
-            operation.scalar_parameters, capnp_arguments, strict=True
-        )
-    ]

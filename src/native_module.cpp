@@ -4,8 +4,6 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
-#include <unistd.h>
-
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -185,18 +183,9 @@ NB_MODULE(_native, module) {
              "outputs"_a, "scalars"_a)
         .def("invoke_profiled", &invoke_profiled, "invocation_id"_a,
              "operation_id"_a, "inputs"_a, "outputs"_a, "scalars"_a)
-        .def(
-            "ping",
-            [](Session &session, std::uint64_t nonce) {
-                nb::gil_scoped_release release;
-                session.ping(nonce);
-            },
-            "nonce"_a)
-        .def("close",
-             [](Session &session) {
-                 nb::gil_scoped_release release;
-                 session.close();
-             })
+        .def("ping", &Session::ping, "nonce"_a,
+             nb::call_guard<nb::gil_scoped_release>())
+        .def("close", &Session::close, nb::call_guard<nb::gil_scoped_release>())
         .def_prop_ro("transfer_count", &Session::transfer_count)
         .def_prop_ro("retirement_count", &Session::retirement_count);
 }

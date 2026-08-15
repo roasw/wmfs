@@ -5,7 +5,6 @@
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/result_type.h>
 #include <c10/core/InferenceMode.h>
-#include <capnp/ez-rpc.h>
 #include <capnp/rpc-twoparty.h>
 #include <gnu/libc-version.h>
 #include <kj/async-io.h>
@@ -15,11 +14,11 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <atomic>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
+#include <exception>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -33,8 +32,6 @@
 
 namespace wmfs::reference {
 namespace {
-
-constexpr std::uint16_t PROTOCOL_VERSION = 7;
 
 #define WMFS_STRINGIFY_INNER(value) #value
 #define WMFS_STRINGIFY(value) WMFS_STRINGIFY_INNER(value)
@@ -107,11 +104,11 @@ void validate_socket(int fd, int expected_type = 0) {
 }
 
 std::string executable_path() {
-    std::vector<char> buffer(4096);
+    std::array<char, 4096> buffer{};
     auto length =
         ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
     if (length < 0) {
-        return std::filesystem::absolute("/proc/self/exe").string();
+        return "/proc/self/exe";
     }
     return std::string(buffer.data(), static_cast<std::size_t>(length));
 }
@@ -128,39 +125,12 @@ void validate_output(const at::Tensor &output, at::IntArrayRef shape,
             "Preallocated output has an invalid shape or dtype");
 }
 
-struct Scalars {
-    std::optional<bool> boolean;
-    std::optional<double> floating;
-};
-
-Scalars decode_scalars(std::uint32_t operation_id,
-                       capnp::List<ScalarArgument>::Reader arguments) {
-    Scalars values;
-    if (operation_id == 1) {
-        require(arguments.size() == 0, "Invalid matmul invocation");
-        return values;
-    }
-    require(arguments.size() == 1 && arguments[0].getParameter() == 0,
-            "Invocation is missing a scalar argument");
-    if (operation_id == 2) {
-        require(arguments[0].which() == ScalarArgument::BOOLEAN,
-                "Scalar argument does not match operation metadata");
-        values.boolean = arguments[0].getBoolean();
-    } else if (operation_id == 3) {
-        require(arguments[0].which() == ScalarArgument::FLOAT64,
-                "Scalar argument does not match operation metadata");
-        values.floating = arguments[0].getFloat64();
-    } else {
-        throw std::invalid_argument("Unknown operation ID " +
-                                    std::to_string(operation_id));
-    }
-    return values;
-}
-
 void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
-                   std::vector<TensorLease> &outputs, const Scalars &scalars) {
+                   std::vector<TensorLease> &outputs,
+                   capnp::List<ScalarArgument>::Reader scalars) {
     if (operation_id == 1) {
-        require(inputs.size() == 2 && outputs.size() == 1,
+        require(inputs.size() == 2 && outputs.size() == 1 &&
+                    scalars.size() == 0,
                 "Invalid matmul invocation");
         auto &a = inputs[0].tensor();
         auto &b = inputs[1].tensor();
@@ -173,11 +143,13 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
     }
     if (operation_id == 2) {
         require(inputs.size() == 1 && outputs.size() == 3 &&
-                    scalars.boolean.has_value(),
+                    scalars.size() == 1 && scalars[0].getParameter() == 0,
                 "Invalid svd invocation");
+        require(scalars[0].which() == ScalarArgument::BOOLEAN,
+                "Scalar argument does not match operation metadata");
         auto &a = inputs[0].tensor();
         require(a.dim() == 2, "svd initially supports two-dimensional tensors");
-        auto full_matrices = *scalars.boolean;
+        auto full_matrices = scalars[0].getBoolean();
         auto rows = a.size(0);
         auto columns = a.size(1);
         auto rank = std::min(rows, columns);
@@ -196,10 +168,12 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
     }
     if (operation_id == 3) {
         require(inputs.size() == 1 && outputs.size() == 1 &&
-                    scalars.floating.has_value(),
+                    scalars.size() == 1 && scalars[0].getParameter() == 0,
                 "Invalid add_scalar invocation");
+        require(scalars[0].which() == ScalarArgument::FLOAT64,
+                "Scalar argument does not match operation metadata");
         auto &input = inputs[0].tensor();
-        auto scalar = at::Scalar(*scalars.floating);
+        auto scalar = at::Scalar(scalars[0].getFloat64());
         validate_output(outputs[0].tensor(), input.sizes(),
                         at::result_type(input, scalar));
         at::add_out(outputs[0].tensor(), input, scalar, at::Scalar(1));
@@ -308,12 +282,11 @@ class ReferenceServer final : public ReferencePlugin::Server {
         }
         auto output_views_ns = profiled ? nanoseconds_since(view_started) : 0;
 
-        auto scalars = decode_scalars(invocation.getOperationId(),
-                                      invocation.getScalars());
         auto kernel_started = profiled
                                   ? std::chrono::steady_clock::now()
                                   : std::chrono::steady_clock::time_point{};
-        execute_known(invocation.getOperationId(), inputs, outputs, scalars);
+        execute_known(invocation.getOperationId(), inputs, outputs,
+                      invocation.getScalars());
         auto kernel_ns = profiled ? nanoseconds_since(kernel_started) : 0;
         auto elapsed_ns = profiled ? nanoseconds_since(started) : 0;
         auto measured_ns = input_views_ns + output_views_ns + kernel_ns;
@@ -377,7 +350,6 @@ int run_worker(int argc, char **argv) {
     if (receiver_error) {
         std::rethrow_exception(receiver_error);
     }
-    buffers.close();
     return 0;
 }
 

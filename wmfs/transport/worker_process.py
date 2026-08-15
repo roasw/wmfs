@@ -196,13 +196,7 @@ class _OutputAllocator:
             raise ValueError("Worker returned an output it did not allocate")
         return managed
 
-    def rollback(self) -> None:
-        allocations = tuple(self.allocations.values())
-        self.allocations.clear()
-        for managed in allocations:
-            self._buffers.release(managed)
-
-    def commit(self) -> None:
+    def clear(self) -> None:
         self.allocations.clear()
 
 
@@ -367,29 +361,29 @@ class WorkerSession:
                 output_metrics,
             )
             dispatched = False
+            completed = False
             try:
-                try:
-                    dispatched = True
-                    response = await asyncio.wait_for(
-                        self._call_operation(
-                            operation, inputs, args, kwargs, allocator, invocation_id
-                        ),
-                        _RPC_TIMEOUT_SECONDS,
-                    )
-                finally:
-                    self._fd_sender.finish_invocation(invocation_id)
+                dispatched = True
+                response = await asyncio.wait_for(
+                    self._call_operation(
+                        operation, inputs, args, kwargs, allocator, invocation_id
+                    ),
+                    _RPC_TIMEOUT_SECONDS,
+                )
+                self._fd_sender.finish_invocation(invocation_id)
+                completed = True
                 result = self._resolve_outputs(operation, response, allocator)
-                allocator.commit()
+                allocator.clear()
                 return result, InvocationMetrics(
                     inputs=tuple(input_metrics or ()),
                     outputs=tuple(output_metrics or ()),
                 )
             except Exception:
-                if dispatched:
+                if dispatched and not completed:
                     self._invalidated = True
                     if self._shutdown is not None:
                         self._shutdown.set()
-                allocator.rollback()
+                allocator.clear()
                 raise
 
     async def _invoke_known(
@@ -500,8 +494,6 @@ class WorkerSession:
                 self._invalidated = True
                 if self._shutdown is not None:
                     self._shutdown.set()
-            for output in outputs:
-                self._buffers.release(output)
 
     async def _prepare_input(
         self,

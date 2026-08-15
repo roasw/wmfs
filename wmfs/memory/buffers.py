@@ -217,7 +217,6 @@ class BufferAccessLease:
 
 @dataclass
 class _Allocation:
-    allocation_id: int
     buffer: SharedBuffer
     descriptor: TensorDescriptor
     tensor: weakref.ReferenceType[torch.Tensor]
@@ -263,7 +262,6 @@ class BufferManager:
         self._max_cached_buffers = max_cached_buffers
         self._max_cached_bytes = max_cached_bytes
         self._active: dict[int, _Allocation] = {}
-        self._descriptors: dict[TensorDescriptor, int] = {}
         self._free: dict[int, list[_MemoryRegion]] = {}
         self._cached_bytes = 0
         self._arena_region: _MemoryRegion | None = None
@@ -326,9 +324,8 @@ class BufferManager:
             tensor._wmfs_allocation = lease
             weakref.finalize(storage, self._storage_released, allocation_id)
             self._active[allocation_id] = _Allocation(
-                allocation_id, buffer, descriptor, weakref.ref(tensor)
+                buffer, descriptor, weakref.ref(tensor)
             )
-            self._descriptors[descriptor] = allocation_id
             return ManagedTensor(tensor=tensor, descriptor=descriptor, buffer=buffer)
 
     def empty_named(self, shape: tuple[int, ...], dtype: str) -> ManagedTensor:
@@ -361,7 +358,7 @@ class BufferManager:
             descriptor = TensorDescriptor(
                 buffer_id=allocation.buffer.id,
                 generation=allocation.buffer.generation,
-                allocation_id=allocation.allocation_id,
+                allocation_id=allocation.descriptor.allocation_id,
                 offset=allocation.buffer.offset + tensor.storage_offset() * item_size,
                 byte_length=tensor.numel() * item_size,
                 dtype=_DTYPE_NAMES[tensor.dtype],
@@ -372,18 +369,15 @@ class BufferManager:
 
     def resolve(self, descriptor: TensorDescriptor) -> ManagedTensor:
         with self._lock:
-            allocation_id = self._descriptors.get(descriptor)
-            allocation = self._active.get(allocation_id) if allocation_id else None
+            allocation = self._active.get(descriptor.allocation_id)
             tensor = allocation.tensor() if allocation is not None else None
-            if allocation is None or tensor is None:
+            if (
+                allocation is None
+                or allocation.descriptor != descriptor
+                or tensor is None
+            ):
                 raise ValueError("Tensor descriptor does not identify a live tensor")
             return ManagedTensor(tensor, descriptor, allocation.buffer)
-
-    def release(self, managed: ManagedTensor) -> None:
-        # Reclamation follows the underlying Torch storage lifetime. Dropping the
-        # caller's final reference queues the allocation for collection.
-        if self.managed(managed.tensor) is None:
-            return
 
     def reserve_access(
         self,
@@ -391,17 +385,15 @@ class BufferManager:
         reads: Iterable[ManagedTensor] = (),
         writes: Iterable[ManagedTensor] = (),
     ) -> BufferAccessLease:
-        read_tensors = tuple(reads)
-        write_tensors = tuple(writes)
         accesses: dict[_AccessKey, bool] = {}
         held_tensors: dict[int, torch.Tensor] = {}
         with self._access_changed:
             self._ensure_open()
-            for managed in read_tensors:
+            for managed in reads:
                 key = self._access_key(managed)
                 accesses.setdefault(key, False)
                 held_tensors.setdefault(key[2], managed.tensor)
-            for managed in write_tensors:
+            for managed in writes:
                 key = self._access_key(managed)
                 accesses[key] = True
                 held_tensors.setdefault(key[2], managed.tensor)
@@ -438,7 +430,6 @@ class BufferManager:
                 allocation = self._active.pop(allocation_id, None)
                 if allocation is None:
                     continue
-                self._descriptors.pop(allocation.descriptor, None)
                 if allocation.buffer.arena:
                     self._release_arena(allocation.buffer)
                 else:

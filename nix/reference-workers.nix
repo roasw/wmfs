@@ -22,16 +22,10 @@ in
     pythonImportsCheck = [ "wmfs_reference" ];
 
     postInstall = ''
-      install -Dm444 \
-        ${pluginSrc}/plugin.toml \
-        "$out/share/wmfs/plugins/reference/plugin.toml"
       substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \
         --replace-fail \
         'worker = "wmfs-reference-worker"' \
         'worker = "'"$out"'/bin/wmfs-reference-worker"'
-      install -Dm444 \
-        ${pluginSrc}/schemas/wmfs-reference/reference.capnp \
-        "$out/share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp"
     '';
   };
 

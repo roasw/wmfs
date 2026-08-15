@@ -6,7 +6,8 @@ import os
 import platform
 import statistics
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -388,37 +389,25 @@ def _benchmark_startup(
 ) -> list[int]:
     samples = []
     for _ in range(config.startup_iterations):
-        buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
-        session = None
-        try:
+        with BufferManager(
+            mode=config.memory_mode, arena_bytes=config.arena_bytes
+        ) as buffers:
             start = perf_counter_ns()
             session = _new_session(manifest, buffers, metadata, config)
-            samples.append(perf_counter_ns() - start)
-        finally:
             try:
-                if session is not None:
-                    session.close()
+                samples.append(perf_counter_ns() - start)
             finally:
-                buffers.close()
+                session.close()
     return samples
 
 
 def _benchmark_rpc(
     manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
 ) -> list[int]:
-    buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
-    session = None
-    try:
-        session = _new_session(manifest, buffers, metadata, config)
+    with _benchmark_session(manifest, metadata, config) as (_buffers, session):
         for _ in range(config.warmups):
             session.ping()
         return [_time_call(session.ping)[0] for _ in range(config.rpc_iterations)]
-    finally:
-        try:
-            if session is not None:
-                session.close()
-        finally:
-            buffers.close()
 
 
 def _benchmark_case(
@@ -435,14 +424,8 @@ def _benchmark_case(
         tuple(item.shape) for item in args if isinstance(item, torch.Tensor)
     ]
     local = LocalBackend()
-    buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
-    session = None
-    try:
-        session = _new_session(manifest, buffers, metadata, config)
-        managed_args = tuple(
-            buffers.from_tensor(item).tensor if isinstance(item, torch.Tensor) else item
-            for item in args
-        )
+    with _benchmark_session(manifest, metadata, config) as (buffers, session):
+        managed_args = _manage_arguments(buffers, args)
         local_result = local.invoke(operation, *managed_args, **kwargs)
         isolated_result, _initial_metrics = session.invoke_profiled(
             operation, *managed_args, **kwargs
@@ -495,12 +478,6 @@ def _benchmark_case(
         )
         buffers.collect()
         pool_stats = buffers.stats()
-    finally:
-        try:
-            if session is not None:
-                session.close()
-        finally:
-            buffers.close()
 
     local_summary = summarize(local_samples)
     isolated_summary = summarize(isolated_samples)
@@ -614,20 +591,19 @@ def _benchmark_diagnostics(
 
     cold_allocation_samples = []
     for _ in range(config.diagnostic_iterations):
-        cold_buffers = BufferManager(
+        with BufferManager(
             mode=config.memory_mode,
             arena_bytes=config.arena_bytes,
             max_cached_buffers=0,
             max_cached_bytes=0,
-        )
-        start = perf_counter_ns()
-        allocations = [
-            cold_buffers.empty(shape, dtype=config.dtype) for shape in tensor_shapes
-        ]
-        cold_allocation_samples.append(perf_counter_ns() - start)
-        del allocations
-        cold_buffers.collect()
-        cold_buffers.close()
+        ) as cold_buffers:
+            start = perf_counter_ns()
+            allocations = [
+                cold_buffers.empty(shape, dtype=config.dtype) for shape in tensor_shapes
+            ]
+            cold_allocation_samples.append(perf_counter_ns() - start)
+            del allocations
+            cold_buffers.collect()
 
     if len(set(output_counts)) != 1:
         raise RuntimeError("Worker output allocation count changed between invocations")
@@ -665,28 +641,17 @@ def _benchmark_arena_first_mapping(
 ) -> list[int]:
     samples = []
     for _ in range(config.diagnostic_iterations):
-        buffers = BufferManager(mode="arena", arena_bytes=config.arena_bytes)
-        session = None
-        try:
-            session = _new_session(manifest, buffers, metadata, config)
-            managed_args = tuple(
-                buffers.from_tensor(item).tensor
-                if isinstance(item, torch.Tensor)
-                else item
-                for item in args
-            )
+        with _benchmark_session(manifest, metadata, config, memory_mode="arena") as (
+            buffers,
+            session,
+        ):
+            managed_args = _manage_arguments(buffers, args)
             result, metrics = session.invoke_profiled(
                 operation, *managed_args, **kwargs
             )
             samples.append(sum(item.mapping_ns for item in metrics.inputs))
             del result
             buffers.collect()
-        finally:
-            try:
-                if session is not None:
-                    session.close()
-            finally:
-                buffers.close()
     return samples
 
 
@@ -700,14 +665,8 @@ def _benchmark_high_frequency(
 ) -> dict[str, Any]:
     size = config.sizes["add_scalar"]["small"]
     args, kwargs = _make_arguments("add_scalar", size, config.dtype, generator)
-    buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
-    session = None
-    try:
-        session = _new_session(manifest, buffers, metadata, config)
-        managed_args = tuple(
-            buffers.from_tensor(item).tensor if isinstance(item, torch.Tensor) else item
-            for item in args
-        )
+    with _benchmark_session(manifest, metadata, config) as (buffers, session):
+        managed_args = _manage_arguments(buffers, args)
         reusable = (
             session.invoke("add_scalar", *managed_args, **kwargs)
             if reuse_output
@@ -734,12 +693,6 @@ def _benchmark_high_frequency(
         if reuse_output:
             del result, reusable
             buffers.collect()
-    finally:
-        try:
-            if session is not None:
-                session.close()
-        finally:
-            buffers.close()
     latency = summarize(samples)
     return {
         "iterations": config.high_frequency_iterations,
@@ -759,6 +712,34 @@ def _new_session(
     if config.control_mode == "native":
         return NativeWorkerSession(manifest, buffers, metadata)
     return WorkerSession(manifest, buffers)
+
+
+@contextmanager
+def _benchmark_session(
+    manifest: Any,
+    metadata: PluginMetadata,
+    config: BenchmarkConfig,
+    *,
+    memory_mode: str | None = None,
+) -> Iterator[tuple[BufferManager, WorkerSession | NativeWorkerSession]]:
+    with BufferManager(
+        mode=memory_mode or config.memory_mode,
+        arena_bytes=config.arena_bytes,
+    ) as buffers:
+        session = _new_session(manifest, buffers, metadata, config)
+        try:
+            yield buffers, session
+        finally:
+            session.close()
+
+
+def _manage_arguments(
+    buffers: BufferManager, args: tuple[object, ...]
+) -> tuple[object, ...]:
+    return tuple(
+        buffers.from_tensor(item).tensor if isinstance(item, torch.Tensor) else item
+        for item in args
+    )
 
 
 def _make_arguments(
