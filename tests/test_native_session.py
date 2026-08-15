@@ -1,4 +1,5 @@
 import gc
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -96,6 +97,41 @@ def test_native_session_reuses_output_and_native_descriptor() -> None:
             session.close()
 
 
+def test_native_session_reserves_reusable_output_for_exclusive_write() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    metadata = inspect_plugin(manifest)
+    with BufferManager() as buffers:
+        session = NativeWorkerSession(manifest, buffers, metadata)
+        try:
+            source = buffers.from_tensor(torch.arange(4, dtype=torch.float32))
+            output = session.invoke("add_scalar", source.tensor, 0.0)
+            managed_output = buffers.managed(output)
+            assert managed_output is not None
+
+            with buffers.reserve_access(reads=(source,)):
+                shared_read = session.invoke("add_scalar", source.tensor, 1.0)
+            torch.testing.assert_close(shared_read, source.tensor + 1.0)
+
+            output_reader = buffers.reserve_access(reads=(managed_output,))
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                invocation = executor.submit(
+                    session.invoke,
+                    "add_scalar",
+                    source.tensor,
+                    2.0,
+                    out=output,
+                )
+                try:
+                    _wait_for_access_waiter(buffers)
+                    assert not invocation.done()
+                finally:
+                    output_reader.release()
+                assert invocation.result(timeout=2) is output
+            torch.testing.assert_close(output, source.tensor + 2.0)
+        finally:
+            session.close()
+
+
 def test_native_session_serializes_concurrent_callers() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     metadata = inspect_plugin(manifest)
@@ -110,3 +146,13 @@ def test_native_session_serializes_concurrent_callers() -> None:
                     future.result()
         finally:
             session.close()
+
+
+def _wait_for_access_waiter(buffers: BufferManager) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        with buffers._lock:
+            if buffers._access_waiters:
+                return
+        time.sleep(0.001)
+    raise AssertionError("Expected a pending access reservation")

@@ -17,6 +17,7 @@ from wmfs.transport.worker_process import (
     InvocationMetrics,
     OutputAllocationMetrics,
     _bind_scalars,
+    _reserve_invocation_access,
     _scalar_arguments,
     _start_worker,
 )
@@ -77,7 +78,9 @@ class NativeWorkerSession:
         **kwargs: object,
     ) -> object:
         with self._lifecycle_lock:
-            result, _metrics = self._invoke(operation, args, kwargs, out, False)
+            metadata = self._operations[operation]
+            with _reserve_invocation_access(self._buffers, metadata, args, out):
+                result, _metrics = self._invoke(operation, args, kwargs, out, False)
         return result
 
     def invoke_profiled(
@@ -89,7 +92,9 @@ class NativeWorkerSession:
         **kwargs: object,
     ) -> tuple[object, InvocationMetrics]:
         with self._lifecycle_lock:
-            return self._invoke(operation, args, kwargs, out, True)
+            metadata = self._operations[operation]
+            with _reserve_invocation_access(self._buffers, metadata, args, out):
+                return self._invoke(operation, args, kwargs, out, True)
 
     def ping(self) -> None:
         with self._lifecycle_lock:

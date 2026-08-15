@@ -1,4 +1,6 @@
 import gc
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import torch
@@ -74,3 +76,47 @@ def test_trusted_arena_maps_once_for_inputs_and_outputs() -> None:
             assert manager.stats()["memfds_created"] == 1
         finally:
             session.close()
+
+
+def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    with BufferManager() as manager:
+        source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
+        session = WorkerSession(manifest, manager)
+        try:
+            output = session.invoke("add_scalar", source.tensor, 0.0)
+            managed_output = manager.managed(output)
+            assert managed_output is not None
+
+            with manager.reserve_access(reads=(source,)):
+                shared_read = session.invoke("add_scalar", source.tensor, 1.0)
+            torch.testing.assert_close(shared_read, source.tensor + 1.0)
+
+            output_reader = manager.reserve_access(reads=(managed_output,))
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                invocation = executor.submit(
+                    session.invoke,
+                    "add_scalar",
+                    source.tensor,
+                    2.0,
+                    out=output,
+                )
+                try:
+                    _wait_for_access_waiter(manager)
+                    assert not invocation.done()
+                finally:
+                    output_reader.release()
+                assert invocation.result(timeout=2) is output
+            torch.testing.assert_close(output, source.tensor + 2.0)
+        finally:
+            session.close()
+
+
+def _wait_for_access_waiter(manager: BufferManager) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        with manager._lock:
+            if manager._access_waiters:
+                return
+        time.sleep(0.001)
+    raise AssertionError("Expected a pending access reservation")

@@ -4,6 +4,8 @@ import queue
 import secrets
 import threading
 import weakref
+from collections import deque
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
@@ -170,6 +172,49 @@ class AllocationLease:
     allocation_id: int
 
 
+_AccessKey = tuple[int, int, int]
+
+
+@dataclass
+class _AccessState:
+    readers: int = 0
+    writer: bool = False
+
+
+@dataclass
+class _AccessWaiter:
+    accesses: dict[_AccessKey, bool]
+    granted: bool = False
+
+
+class BufferAccessLease:
+    def __init__(
+        self,
+        manager: "BufferManager",
+        accesses: dict[_AccessKey, bool],
+        tensors: tuple[torch.Tensor, ...],
+    ) -> None:
+        self._manager: BufferManager | None = manager
+        self._accesses = accesses
+        self._tensors = tensors
+        self._lock = threading.Lock()
+
+    def release(self) -> None:
+        with self._lock:
+            manager = self._manager
+            if manager is None:
+                return
+            self._manager = None
+        manager._release_access(self._accesses)
+        self._tensors = ()
+
+    def __enter__(self) -> "BufferAccessLease":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
+
 @dataclass
 class _Allocation:
     allocation_id: int
@@ -226,6 +271,9 @@ class BufferManager:
         self._region_ids: set[int] = set()
         self._released: queue.SimpleQueue[int] = queue.SimpleQueue()
         self._lock = threading.RLock()
+        self._access_changed = threading.Condition(self._lock)
+        self._access_states: dict[_AccessKey, _AccessState] = {}
+        self._access_waiters: deque[_AccessWaiter] = deque()
         self._closed = False
         self._stats = PoolStats()
 
@@ -337,6 +385,49 @@ class BufferManager:
         if self.managed(managed.tensor) is None:
             return
 
+    def reserve_access(
+        self,
+        *,
+        reads: Iterable[ManagedTensor] = (),
+        writes: Iterable[ManagedTensor] = (),
+    ) -> BufferAccessLease:
+        read_tensors = tuple(reads)
+        write_tensors = tuple(writes)
+        accesses: dict[_AccessKey, bool] = {}
+        held_tensors: dict[int, torch.Tensor] = {}
+        with self._access_changed:
+            self._ensure_open()
+            for managed in read_tensors:
+                key = self._access_key(managed)
+                accesses.setdefault(key, False)
+                held_tensors.setdefault(key[2], managed.tensor)
+            for managed in write_tensors:
+                key = self._access_key(managed)
+                accesses[key] = True
+                held_tensors.setdefault(key[2], managed.tensor)
+            if not accesses:
+                return BufferAccessLease(self, {}, ())
+
+            waiter = _AccessWaiter(accesses)
+            self._access_waiters.append(waiter)
+            try:
+                while not waiter.granted:
+                    if self._closed:
+                        raise RuntimeError("Buffer manager is closed")
+                    self._grant_access_waiters()
+                    if waiter.granted:
+                        break
+                    self._access_changed.wait()
+            except BaseException:
+                if waiter.granted:
+                    self._release_access_locked(accesses)
+                else:
+                    self._access_waiters.remove(waiter)
+                self._grant_access_waiters()
+                self._access_changed.notify_all()
+                raise
+        return BufferAccessLease(self, accesses, tuple(held_tensors.values()))
+
     def collect(self) -> None:
         with self._lock:
             while True:
@@ -374,8 +465,9 @@ class BufferManager:
             return result
 
     def close(self) -> None:
-        with self._lock:
+        with self._access_changed:
             self._closed = True
+            self._access_changed.notify_all()
             self.collect()
             for regions in self._free.values():
                 for region in regions:
@@ -497,6 +589,65 @@ class BufferManager:
 
     def _storage_released(self, allocation_id: int) -> None:
         self._released.put(allocation_id)
+
+    def _access_key(self, managed: ManagedTensor) -> _AccessKey:
+        current = self.managed(managed.tensor)
+        descriptor = managed.descriptor
+        if (
+            current is None
+            or current.descriptor.buffer_id != descriptor.buffer_id
+            or current.descriptor.generation != descriptor.generation
+            or current.descriptor.allocation_id != descriptor.allocation_id
+        ):
+            raise RuntimeError("Tensor access refers to a stale managed allocation")
+        return (
+            descriptor.buffer_id,
+            descriptor.generation,
+            descriptor.allocation_id,
+        )
+
+    def _grant_access_waiters(self) -> None:
+        if self._closed:
+            return
+        blocked: set[_AccessKey] = set()
+        for waiter in tuple(self._access_waiters):
+            keys = waiter.accesses.keys()
+            if blocked.isdisjoint(keys) and self._can_grant_access(waiter.accesses):
+                for key, writable in waiter.accesses.items():
+                    state = self._access_states.setdefault(key, _AccessState())
+                    if writable:
+                        state.writer = True
+                    else:
+                        state.readers += 1
+                waiter.granted = True
+                self._access_waiters.remove(waiter)
+                continue
+            blocked.update(keys)
+
+    def _can_grant_access(self, accesses: dict[_AccessKey, bool]) -> bool:
+        for key, writable in accesses.items():
+            state = self._access_states.get(key)
+            if state is None:
+                continue
+            if state.writer or (writable and state.readers):
+                return False
+        return True
+
+    def _release_access(self, accesses: dict[_AccessKey, bool]) -> None:
+        with self._access_changed:
+            self._release_access_locked(accesses)
+            self._grant_access_waiters()
+            self._access_changed.notify_all()
+
+    def _release_access_locked(self, accesses: dict[_AccessKey, bool]) -> None:
+        for key, writable in accesses.items():
+            state = self._access_states[key]
+            if writable:
+                state.writer = False
+            else:
+                state.readers -= 1
+            if not state.writer and state.readers == 0:
+                del self._access_states[key]
 
     def _ensure_open(self) -> None:
         if self._closed:

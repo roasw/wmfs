@@ -86,6 +86,14 @@ have acknowledged retirement, and its generation has advanced. Read-only input
 mappings may remain cached while the allocation is live; writable output
 mappings are scoped to one invocation. Pool limits bound idle FDs and bytes.
 
+Runtime-mediated access is reserved atomically for each operation. Read-only
+inputs may be used by multiple workers concurrently. Explicitly mutable inputs
+and reusable outputs receive an exclusive write lease until the operation has
+completed, or until a failed worker has been stopped. Aliases share one lease,
+and an operation acquires its complete access set at once, so it never holds one
+buffer while waiting for another. Queued writers are not bypassed by later
+readers of the same allocation.
+
 For trusted plugins, an optional arena mode suballocates one writable memfd and
 maps it once per worker:
 

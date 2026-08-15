@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING
 import capnp
 import torch
 
-from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
+from wmfs.memory.buffers import (
+    BufferAccessLease,
+    BufferManager,
+    ManagedTensor,
+    TensorDescriptor,
+)
 from wmfs.output_metadata import (
     bind_reusable_outputs,
     evaluate_outputs,
@@ -80,6 +85,31 @@ class InvocationMetrics:
     worker_output_views_ns: int = 0
     worker_dispatch_ns: int = 0
     worker_kernel_ns: int = 0
+
+
+def _reserve_invocation_access(
+    buffers: BufferManager,
+    operation: OperationMetadata,
+    args: tuple[object, ...],
+    out: object | None,
+) -> BufferAccessLease:
+    reads: list[ManagedTensor] = []
+    writes: list[ManagedTensor] = []
+    tensor_args = [item for item in args if isinstance(item, torch.Tensor)]
+    if len(tensor_args) == len(operation.tensor_inputs):
+        for tensor, parameter in zip(tensor_args, operation.tensor_inputs, strict=True):
+            managed = buffers.managed(tensor)
+            if managed is None:
+                continue
+            (writes if parameter.access == "readWrite" else reads).append(managed)
+
+    output_values = out if isinstance(out, tuple) else (out,)
+    for value in output_values:
+        if isinstance(value, torch.Tensor):
+            managed = buffers.managed(value)
+            if managed is not None:
+                writes.append(managed)
+    return buffers.reserve_access(reads=reads, writes=writes)
 
 
 def _schema_root() -> Path:
@@ -182,6 +212,7 @@ class WorkerSession:
         self._buffers = buffers
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
+        self._submit_lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._plugin: object | None = None
         self._operations: dict[str, OperationMetadata] = {}
@@ -335,10 +366,15 @@ class WorkerSession:
                 invocation_id,
                 output_metrics,
             )
+            dispatched = False
             try:
                 try:
-                    response = await self._call_operation(
-                        operation, inputs, args, kwargs, allocator, invocation_id
+                    dispatched = True
+                    response = await asyncio.wait_for(
+                        self._call_operation(
+                            operation, inputs, args, kwargs, allocator, invocation_id
+                        ),
+                        _RPC_TIMEOUT_SECONDS,
                     )
                 finally:
                     self._fd_sender.finish_invocation(invocation_id)
@@ -349,6 +385,10 @@ class WorkerSession:
                     outputs=tuple(output_metrics or ()),
                 )
             except Exception:
+                if dispatched:
+                    self._invalidated = True
+                    if self._shutdown is not None:
+                        self._shutdown.set()
                 allocator.rollback()
                 raise
 
@@ -515,19 +555,23 @@ class WorkerSession:
         out: object | None,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
-        if self._closed or self._loop is None:
-            raise RuntimeError("Worker session is closed")
         if threading.current_thread() is self._thread:
             raise RuntimeError("Worker session cannot synchronously invoke itself")
-        future = asyncio.run_coroutine_threadsafe(
-            self._invoke(operation, args, kwargs, out, collect_metrics), self._loop
-        )
-        try:
-            return future.result()
-        except Exception:
-            if self._invalidated:
-                self.close()
-            raise
+        with self._submit_lock:
+            if self._closed or self._loop is None:
+                raise RuntimeError("Worker session is closed")
+            metadata = self._operations[operation]
+            with _reserve_invocation_access(self._buffers, metadata, args, out):
+                future = asyncio.run_coroutine_threadsafe(
+                    self._invoke(operation, args, kwargs, out, collect_metrics),
+                    self._loop,
+                )
+                try:
+                    return future.result()
+                except Exception:
+                    if self._invalidated:
+                        self.close()
+                    raise
 
     async def _call_operation(
         self,
