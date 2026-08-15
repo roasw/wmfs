@@ -87,6 +87,10 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       ${TORCH_LIBRARIES}
   )
   target_compile_options(wmfs-reference-worker PRIVATE ${TORCH_CXX_FLAGS})
+  set_target_properties(
+    wmfs-reference-worker
+    PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE
+  )
 
   install(TARGETS wmfs-reference-worker RUNTIME DESTINATION bin)
   install(

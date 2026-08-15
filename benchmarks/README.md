@@ -3,16 +3,20 @@
 The reports were generated on 2026-08-15 with:
 
 ```console
-wmfs-benchmark --plugin-directory plugins --memory-mode pooled \
+nix shell .#default .#reference-worker -c wmfs-benchmark \
+  --plugin-directory plugins --memory-mode pooled \
   --control-mode native --high-frequency-iterations 1000 \
   --format json --output benchmarks/baseline.json
-wmfs-benchmark --plugin-directory plugins --memory-mode arena \
+nix shell .#default .#reference-worker -c wmfs-benchmark \
+  --plugin-directory plugins --memory-mode arena \
   --arena-bytes 268435456 --control-mode native \
   --high-frequency-iterations 1000 --format json --output benchmarks/arena.json
 ```
 
-The runtime used Python 3.14.6 and Torch 2.12.0. The C++ worker contained no
-Python runtime and linked directly to LibTorch 2.12.0. Both used glibc 2.42.
+The runtime used Python 3.14.6 and Torch 2.12.0. The native runtime extension
+and C++ worker were built in Release mode by their Nix packages. The worker
+contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
+glibc 2.42.
 Torch was limited to one CPU thread. Each operation was warmed up twice, then
 measured ten times. Result destruction and safe-pool retirement/reset are
 included in isolated end-to-end samples. Known outputs are preallocated from
@@ -22,33 +26,33 @@ p95, standard deviation, allocation statistics, and transport diagnostics.
 
 | Mode   | Operation  | Size             | Local (ms) | Isolated (ms) | Overhead (ms) | Overhead |
 | ------ | ---------- | ---------------- | ---------: | ------------: | ------------: | -------: |
-| pooled | matmul     | 64 x 64          |      0.018 |         0.349 |         0.331 |  1848.3% |
-| arena  | matmul     | 64 x 64          |      0.021 |         0.339 |         0.318 |  1506.0% |
-| pooled | matmul     | 256 x 256        |      0.238 |         0.689 |         0.451 |   189.0% |
-| arena  | matmul     | 256 x 256        |      0.232 |         0.523 |         0.290 |   125.0% |
-| pooled | matmul     | 2048 x 2048      |    125.291 |       131.127 |         5.837 |     4.7% |
-| arena  | matmul     | 2048 x 2048      |    123.238 |       125.040 |         1.802 |     1.5% |
-| pooled | SVD        | 32 x 32          |      0.115 |         0.628 |         0.512 |   444.8% |
-| arena  | SVD        | 32 x 32          |      0.109 |         0.476 |         0.367 |   335.5% |
-| pooled | SVD        | 128 x 128        |      1.028 |         1.822 |         0.793 |    77.1% |
-| arena  | SVD        | 128 x 128        |      1.006 |         1.423 |         0.417 |    41.5% |
-| pooled | SVD        | 768 x 768        |     70.120 |        75.199 |         5.079 |     7.2% |
-| arena  | SVD        | 768 x 768        |     66.162 |        71.376 |         5.214 |     7.9% |
-| pooled | add_scalar | 4096 elements    |      0.020 |         0.398 |         0.377 |  1864.9% |
-| arena  | add_scalar | 4096 elements    |      0.017 |         0.200 |         0.183 |  1083.5% |
-| pooled | add_scalar | 1048576 elements |      0.178 |         2.002 |         1.824 |  1025.4% |
-| arena  | add_scalar | 1048576 elements |      0.170 |         0.622 |         0.452 |   265.7% |
+| pooled | matmul     | 64 x 64          |      0.018 |         0.349 |         0.331 |  1793.1% |
+| arena  | matmul     | 64 x 64          |      0.015 |         0.279 |         0.264 |  1722.0% |
+| pooled | matmul     | 256 x 256        |      0.237 |         0.893 |         0.655 |   275.9% |
+| arena  | matmul     | 256 x 256        |      0.230 |         0.521 |         0.291 |   126.7% |
+| pooled | matmul     | 2048 x 2048      |    122.849 |       130.373 |         7.524 |     6.1% |
+| arena  | matmul     | 2048 x 2048      |    121.406 |       123.634 |         2.228 |     1.8% |
+| pooled | SVD        | 32 x 32          |      0.114 |         0.776 |         0.662 |   578.3% |
+| arena  | SVD        | 32 x 32          |      0.111 |         0.445 |         0.334 |   300.2% |
+| pooled | SVD        | 128 x 128        |      0.993 |         1.743 |         0.750 |    75.5% |
+| arena  | SVD        | 128 x 128        |      0.995 |         1.453 |         0.458 |    46.0% |
+| pooled | SVD        | 768 x 768        |     66.120 |        73.866 |         7.746 |    11.7% |
+| arena  | SVD        | 768 x 768        |     63.988 |        70.318 |         6.330 |     9.9% |
+| pooled | add_scalar | 4096 elements    |      0.019 |         0.412 |         0.392 |  2033.1% |
+| arena  | add_scalar | 4096 elements    |      0.018 |         0.266 |         0.248 |  1386.7% |
+| pooled | add_scalar | 1048576 elements |      0.177 |         2.001 |         1.824 |  1030.4% |
+| arena  | add_scalar | 1048576 elements |      0.187 |         0.645 |         0.459 |   245.7% |
 
 Safe pooling reached 91.2% hit rates and bounded each case to three or five
 memfds. It preserves one-FD-per-buffer capabilities, so each reused generation
 still incurs acknowledged worker retirement and a new FD mapping. The arena
 reached 97.1% suballocation hit rates with one memfd.
 
-RPC-only median latency was 0.087 ms pooled and 0.090 ms in the arena. The
-1,000-call high-frequency `add_scalar` run measured 0.324 ms median and 2,545
-calls/s pooled, versus 0.202 ms and 4,440 calls/s in the arena. Reusing a managed
-`out=` tensor reduced these to 0.246 ms and 3,294 calls/s pooled, and 0.158 ms
-and 5,608 calls/s in the arena. These are sequential synchronous calls, not
+RPC-only median latency was 0.082 ms pooled and 0.081 ms in the arena. The
+1,000-call high-frequency `add_scalar` run measured 0.337 ms median and 2,502
+calls/s pooled, versus 0.226 ms and 4,107 calls/s in the arena. Reusing a managed
+`out=` tensor reduced these to 0.262 ms and 3,186 calls/s pooled, and 0.183 ms
+and 4,675 calls/s in the arena. These are sequential synchronous calls, not
 batched operations.
 
 The profile identified repeated worker tensor-view construction as the largest
@@ -69,7 +73,7 @@ promise/function queue with a synchronous semaphore handoff. These changes
 reduce allocation pressure but did not move ordinary end-to-end latency beyond
 run-to-run noise: the mandatory RPC and thread wakeup now dominate. Reusable
 outputs are the measurable remaining eager-path optimization, improving the
-high-frequency cheap-operation median by roughly 22-24% in this report.
+high-frequency cheap-operation median by roughly 19-22% in this report.
 
 These values characterize one WSL2 host and are not performance thresholds.
 Regenerate both reports on the target system when evaluating the security and

@@ -35,19 +35,6 @@
         }
       );
 
-      apps = forSystems (system: {
-        reference-worker = {
-          type = "app";
-          program = "${self.packages.${system}.reference-worker}/bin/wmfs-reference-worker";
-          meta.description = "Run the wmfs reference plugin worker";
-        };
-        reference-python-worker = {
-          type = "app";
-          program = "${self.packages.${system}.reference-python-worker}/bin/wmfs-reference-worker";
-          meta.description = "Run the Python reference plugin worker";
-        };
-      });
-
       checks = forSystems (
         system:
         let
@@ -104,41 +91,23 @@
         let
           pkgs = pkgsFactory system nixpkgs;
           pre-commit-check = self.checks.${system}.pre-commit-check;
-          python = pkgs.python3.withPackages (
-            ps: with ps; [
-              matplotlib
-              nanobind
-              numpy
-              pycapnp
-              scikit-build-core
-              pytest
-              torch
-            ]
-          );
         in
         {
           default = pkgs.mkShell {
             name = "wmfs-dev";
 
-            nativeBuildInputs =
-              pre-commit-check.enabledPackages
-              ++ (with pkgs; [
-                capnproto
-                cmake
-                ninja
-                doxygen
-                graphviz
-              ]);
-
-            buildInputs = [
-              python
+            inputsFrom = [
+              self.packages.${system}.default
               self.packages.${system}.reference-worker
             ];
+            packages = pre-commit-check.enabledPackages ++ [ pkgs.python3Packages.pytest ];
 
             shellHook = pre-commit-check.shellHook + ''
               repo_root="$(git rev-parse --show-toplevel)"
-              export PATH="$repo_root/tools:$repo_root/build/Debug:$PATH"
-              export PYTHONPATH="$repo_root''${PYTHONPATH:+:$PYTHONPATH}"
+              export WMFS_BUILD_TYPE="''${WMFS_BUILD_TYPE:-Debug}"
+              development_output="$repo_root/output/$WMFS_BUILD_TYPE"
+              export PATH="$development_output/bin:$PATH"
+              export PYTHONPATH="$development_output:$repo_root''${PYTHONPATH:+:$PYTHONPATH}"
             '';
           };
         }

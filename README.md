@@ -6,23 +6,71 @@ path uses a C++20 runtime bound with nanobind, Cap'n Proto C++ RPC, shared CPU
 tensors, and an independently deployed C++ worker linked to its own LibTorch
 environment.
 
-## Development
+## Development Build
 
-Enter the Nix development shell and run the tests:
+The development shell inherits build inputs from the runtime and worker package
+derivations with `inputsFrom`. This keeps the CMake and package builds on the
+same Python, Cap'n Proto, nanobind, Torch, compiler, and linker dependencies.
+
+The shell defaults `WMFS_BUILD_TYPE` to `Debug`. Configure one CMake tree for
+both the native runtime extension and C++ reference worker, then install the
+runnable artifacts into the matching ignored output directory:
 
 ```console
 nix develop
-cmake -S . -B build/Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/Debug
-cmake -S . -B build/reference -G Ninja \
-  -DWMFS_BUILD_PYTHON_RUNTIME=OFF \
+cmake -S . -B "build/$WMFS_BUILD_TYPE" -G Ninja \
+  -DCMAKE_BUILD_TYPE="$WMFS_BUILD_TYPE" \
+  -DWMFS_BUILD_PYTHON_RUNTIME=ON \
   -DWMFS_BUILD_REFERENCE_WORKER=ON
-cmake --build build/reference
-nix build
+cmake --build "build/$WMFS_BUILD_TYPE"
+cmake --install "build/$WMFS_BUILD_TYPE" \
+  --prefix "$PWD/output/$WMFS_BUILD_TYPE"
+```
+
+This keeps generated CMake state under `build/Debug`, `build/Release`, and so
+on, while installed artifacts live under the corresponding `output/Debug` or
+`output/Release` prefix. Select another configuration when entering the shell:
+
+```console
+WMFS_BUILD_TYPE=Release nix develop
+```
+
+The shell adds the selected output prefix to `PYTHONPATH` and `PATH`. Re-run the
+build and install commands after source changes. Verify that the development
+artifacts are selected, then run the tests or benchmark directly from the
+source tree:
+
+```console
+python -c 'import wmfs._native; print(wmfs._native.__file__)'
+command -v wmfs-reference-worker
+wmfs-reference-worker --help
+pytest
+python -m wmfs.benchmark --plugin-directory plugins --control-mode native
+```
+
+The worker is normally launched by the runtime with private RPC and FD-passing
+descriptors; `--help` only verifies the executable outside an invocation.
+
+## Release Build
+
+Release artifacts are produced by the Nix packages. They configure CMake in
+Release mode and package the runtime and workers independently:
+
+```console
+nix build .#default .#reference-worker .#reference-python-worker
+nix flake check -L
+```
+
+Use `nix shell`, rather than a development build, when measuring packaged
+Release performance:
+
+```console
+nix shell .#default .#reference-worker -c wmfs-benchmark \
+  --plugin-directory plugins --control-mode native
 ```
 
 Reusable package derivations live under `nix/`; the root `flake.nix` only wires
-packages, checks, applications, and development shells together.
+packages, checks, and development shells together.
 
 ## Usage
 
@@ -188,10 +236,12 @@ nix develop ./environments/nixos-25.05
 
 ## Benchmarking
 
-Run the local-versus-isolated benchmark from the development shell:
+Run the local-versus-isolated benchmark with the packaged Release runtime and
+worker:
 
 ```console
-wmfs-benchmark --plugin-directory plugins --control-mode native
+nix shell .#default .#reference-worker -c wmfs-benchmark \
+  --plugin-directory plugins --control-mode native
 ```
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
@@ -226,13 +276,15 @@ eager execution model.
 Write a machine-readable report with:
 
 ```console
-wmfs-benchmark --plugin-directory plugins --format json --output benchmark.json
+nix shell .#default .#reference-worker -c wmfs-benchmark \
+  --plugin-directory plugins --format json --output benchmark.json
 ```
 
 Compare the trusted single-FD arena with:
 
 ```console
-wmfs-benchmark --plugin-directory plugins --memory-mode arena \
+nix shell .#default .#reference-worker -c wmfs-benchmark \
+  --plugin-directory plugins --memory-mode arena \
   --arena-bytes 268435456 --format json --output arena.json
 ```
 

@@ -105,37 +105,19 @@
         inherit reference-python-worker reference-worker;
       };
 
-      apps.${system} = {
-        default = self.apps.${system}.reference-worker;
-        reference-worker = {
-          type = "app";
-          program = "${reference-worker}/bin/wmfs-reference-worker";
-          meta.description = "Run the glibc 2.40 reference worker";
-        };
-        reference-python-worker = {
-          type = "app";
-          program = "${reference-python-worker}/bin/wmfs-reference-worker";
-          meta.description = "Run the glibc 2.40 Python reference worker";
-        };
-      };
-
       checks.${system} = {
         default = isolation-check;
         package = reference-worker;
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = [
-          pkgs.capnproto
+        inputsFrom = [
+          reference-python-worker
           reference-worker
-          (pkgs.python3.withPackages (
-            ps: with ps; [
-              numpy
-              pycapnp
-              pytest
-              torch
-            ]
-          ))
+        ];
+        packages = [
+          pkgs.python3Packages.pytest
+          reference-worker
         ];
       };
     };
