@@ -137,7 +137,7 @@ class SharedBuffer:
     def mapping_byte_length(self) -> int:
         return self._region.byte_length
 
-    def duplicate_fd(self, *, writable: bool = False) -> int:
+    def duplicate_fd(self, writable: bool = False) -> int:
         self._ensure_current()
         return self._region.duplicate_fd(writable=writable or self.arena)
 

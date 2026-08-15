@@ -20,6 +20,7 @@ def test_discovers_operations_over_rpc() -> None:
 
     assert registry.plugin_names == ("reference",)
     assert registry.operation_names == ("add_scalar", "matmul", "svd")
+    assert registry.plugin("reference").fingerprint != 0
 
     svd_metadata = registry.operation("svd")
     assert [item.name for item in svd_metadata.tensor_inputs] == ["a"]
@@ -28,6 +29,9 @@ def test_discovers_operations_over_rpc() -> None:
     assert svd_metadata.scalar_parameters[0].name == "fullMatrices"
     assert svd_metadata.scalar_parameters[0].kind == "boolean"
     assert not svd_metadata.scalar_parameters[0].required
+    assert svd_metadata.scalar_parameters[0].default is True
+    assert svd_metadata.operation_id == 2
+    assert [item.name for item in svd_metadata.output_plans] == ["u", "s", "vh"]
 
 
 def test_runtime_registers_discovered_operations() -> None:

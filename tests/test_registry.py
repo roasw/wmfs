@@ -14,8 +14,11 @@ def _plugin(name: str, operation_name: str) -> PluginMetadata:
                 tensor_inputs=(),
                 tensor_outputs=(),
                 scalar_parameters=(),
+                operation_id=1,
+                output_plans=(),
             ),
         ),
+        fingerprint=1,
     )
 
 

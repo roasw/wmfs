@@ -12,7 +12,7 @@ import torch
 from wmfs_reference import kernels
 from wmfs_reference.fd_transport import FdReceiver, MappedBufferCache
 
-_PROTOCOL_VERSION = 4
+_PROTOCOL_VERSION = 5
 
 
 def _load_schema(path: Path, import_paths: list[Path]) -> ModuleType:
@@ -65,6 +65,32 @@ def _make_server(
                 mapped_buffers.tensor(tensor, invocation_id=invocationId).sum().item()
             )
             return (float(checksum),)
+
+        async def invokeKnown(
+            self,
+            invocation: object,
+            _context: object,
+            **_kwargs: object,
+        ) -> None:
+            invocation_id = int(invocation.invocationId)
+            try:
+                inputs = [
+                    mapped_buffers.tensor(item, invocation_id=invocation_id)
+                    for item in invocation.inputs
+                ]
+                outputs = [
+                    mapped_buffers.tensor(
+                        item,
+                        invocation_id=invocation_id,
+                        require_writable=True,
+                    )
+                    for item in invocation.outputs
+                ]
+                operation_id = int(invocation.operationId)
+                scalars = _decode_scalars(invocation.scalars, operation_id)
+                _execute_known(operation_id, inputs, outputs, scalars)
+            finally:
+                mapped_buffers.finish_invocation(invocation_id)
 
         async def matmul(
             self,
@@ -173,6 +199,79 @@ def _make_server(
             return (allocated.tensor,)
 
     return ReferencePlugin()
+
+
+def _decode_scalars(arguments: object, operation_id: int) -> dict[int, object]:
+    expected = {1: {}, 2: {0: "boolean"}, 3: {0: "float64"}}.get(operation_id)
+    if expected is None:
+        raise ValueError(f"Unknown operation ID {operation_id}")
+    values: dict[int, object] = {}
+    for argument in arguments:
+        parameter = int(argument.parameter)
+        if parameter in values:
+            raise ValueError("Scalar parameter was supplied more than once")
+        kind = argument.which()
+        if expected.get(parameter) != kind:
+            raise TypeError("Scalar argument does not match operation metadata")
+        values[parameter] = getattr(argument, kind)
+    if set(values) != set(expected):
+        raise ValueError("Invocation is missing a scalar argument")
+    return values
+
+
+def _execute_known(
+    operation_id: int,
+    inputs: list[torch.Tensor],
+    outputs: list[torch.Tensor],
+    scalars: dict[int, object],
+) -> None:
+    if operation_id == 1:
+        if len(inputs) != 2 or len(outputs) != 1 or scalars:
+            raise ValueError("Invalid matmul invocation")
+        a, b = inputs
+        if a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[0]:
+            raise ValueError("matmul input dimensions are incompatible")
+        result = outputs[0]
+        _validate_output(result, (a.shape[0], b.shape[1]), a.dtype)
+        kernels.matmul(a, b, out=result)
+        return
+    if operation_id == 2:
+        if len(inputs) != 1 or len(outputs) != 3 or set(scalars) != {0}:
+            raise ValueError("Invalid svd invocation")
+        a = inputs[0]
+        if a.ndim != 2:
+            raise ValueError("svd initially supports two-dimensional tensors")
+        full_matrices = bool(scalars[0])
+        rows, columns = a.shape
+        rank = min(rows, columns)
+        expected_shapes = (
+            (rows, rows if full_matrices else rank),
+            (rank,),
+            (columns if full_matrices else rank, columns),
+        )
+        for output, shape in zip(outputs, expected_shapes, strict=True):
+            _validate_output(output, shape, a.dtype)
+        kernels.svd(a, full_matrices=full_matrices, out=tuple(outputs))
+        return
+    if operation_id == 3:
+        if len(inputs) != 1 or len(outputs) != 1 or set(scalars) != {0}:
+            raise ValueError("Invalid add_scalar invocation")
+        a = inputs[0]
+        value = scalars[0]
+        if not isinstance(value, float):
+            raise TypeError("add_scalar requires a numeric scalar")
+        expected_dtype = torch.result_type(a, value)
+        _validate_output(outputs[0], tuple(a.shape), expected_dtype)
+        kernels.add_scalar(a, value, out=outputs[0])
+        return
+    raise ValueError(f"Unknown operation ID {operation_id}")
+
+
+def _validate_output(
+    output: torch.Tensor, shape: tuple[int, ...], dtype: torch.dtype
+) -> None:
+    if tuple(output.shape) != shape or output.dtype != dtype:
+        raise ValueError("Preallocated output has an invalid shape or dtype")
 
 
 def _glibc_version() -> str:

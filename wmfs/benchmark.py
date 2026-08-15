@@ -18,8 +18,11 @@ import torch
 from wmfs.backends.local import LocalBackend
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
+from wmfs.registry import PluginMetadata
+from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import (
     WorkerSession,
+    inspect_plugin,
     inspect_worker_environment,
 )
 
@@ -52,6 +55,8 @@ class BenchmarkConfig:
     seed: int = 1234
     memory_mode: str = "pooled"
     arena_bytes: int | None = None
+    control_mode: str = "native"
+    high_frequency_iterations: int = 1000
 
     def validate(self) -> None:
         counts = (
@@ -60,6 +65,7 @@ class BenchmarkConfig:
             self.rpc_iterations,
             self.diagnostic_iterations,
             self.threads,
+            self.high_frequency_iterations,
         )
         if any(value <= 0 for value in counts) or self.warmups < 0:
             raise ValueError("Benchmark iteration counts and threads must be positive")
@@ -69,6 +75,8 @@ class BenchmarkConfig:
             raise ValueError("Unknown benchmark size tier")
         if self.memory_mode not in {"pooled", "arena"}:
             raise ValueError("Unknown benchmark memory mode")
+        if self.control_mode not in {"native", "python"}:
+            raise ValueError("Unknown benchmark control mode")
         if any(
             self.sizes[operation][tier] <= 0
             for operation in self.operations
@@ -107,10 +115,11 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             f"found {len(manifests)}"
         )
     manifest = manifests[0]
+    metadata = inspect_plugin(manifest)
 
-    startup = _benchmark_startup(manifest, config)
+    startup = _benchmark_startup(manifest, metadata, config)
     worker = inspect_worker_environment(manifest)
-    rpc = _benchmark_rpc(manifest, config)
+    rpc = _benchmark_rpc(manifest, metadata, config)
 
     generator = torch.Generator().manual_seed(config.seed)
     cases = []
@@ -120,6 +129,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                 cases.append(
                     _benchmark_case(
                         manifest,
+                        metadata,
                         operation,
                         tier,
                         config.sizes[operation][tier],
@@ -128,8 +138,14 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                     )
                 )
 
+    high_frequency = (
+        _benchmark_high_frequency(manifest, metadata, config, generator)
+        if "add_scalar" in config.operations
+        else None
+    )
+
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -165,11 +181,14 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "dtype": str(config.dtype).removeprefix("torch."),
             "seed": config.seed,
             "memory_mode": config.memory_mode,
+            "control_mode": config.control_mode,
+            "high_frequency_iterations": config.high_frequency_iterations,
             "arena_bytes": config.arena_bytes,
             "sizes": config.sizes,
         },
         "worker_startup_ms": summarize(startup),
         "rpc_round_trip_ms": summarize(rpc),
+        "high_frequency_add_scalar": high_frequency,
         "operations": cases,
     }
 
@@ -189,7 +208,8 @@ def render_table(report: dict[str, Any]) -> str:
         ),
         (
             f"dtype: {environment['dtype']}; threads: {environment['threads']}; "
-            f"memory: {report['configuration']['memory_mode']}"
+            f"memory: {report['configuration']['memory_mode']}; "
+            f"control: {report['configuration']['control_mode']}"
         ),
         "",
         "Primary comparison (milliseconds; isolated inputs are already mapped)",
@@ -230,6 +250,7 @@ def render_table(report: dict[str, Any]) -> str:
 
     startup = report["worker_startup_ms"]
     rpc = report["rpc_round_trip_ms"]
+    high_frequency = report["high_frequency_add_scalar"]
     lines.extend(
         [
             "",
@@ -255,6 +276,17 @@ def render_table(report: dict[str, Any]) -> str:
             "Transport diagnostics (median milliseconds per invocation)",
         ]
     )
+    if high_frequency is not None:
+        lines.extend(
+            [
+                "",
+                (
+                    "High-frequency add_scalar: "
+                    f"{_number(high_frequency['latency_ms']['median_ms'])} ms median; "
+                    f"{high_frequency['calls_per_second']:.0f} calls/s"
+                ),
+            ]
+        )
     diagnostic_rows = []
     for case in report["operations"]:
         diagnostics = case["diagnostics"]
@@ -269,7 +301,7 @@ def render_table(report: dict[str, Any]) -> str:
                 _median(diagnostics, "shared_memory_allocation_ms"),
                 _median(diagnostics, "pooled_shared_memory_allocation_ms"),
                 _median(diagnostics, "buffer_reclamation_ms"),
-                _median(diagnostics, "output_allocator_service_ms"),
+                _median(diagnostics, "output_preallocation_service_ms"),
                 _median(diagnostics, "output_shared_allocation_ms"),
                 _median(diagnostics, "output_ensure_mapped_ms"),
                 f"{case['memory_pool']['pool_hit_rate'] * 100:.1f}%",
@@ -288,7 +320,7 @@ def render_table(report: dict[str, Any]) -> str:
                 "cold alloc",
                 "pool alloc",
                 "reclaim",
-                "output service",
+                "output prealloc",
                 "output alloc",
                 "output ensure",
                 "pool hits",
@@ -300,14 +332,16 @@ def render_table(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _benchmark_startup(manifest: Any, config: BenchmarkConfig) -> list[int]:
+def _benchmark_startup(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> list[int]:
     samples = []
     for _ in range(config.startup_iterations):
         buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
         session = None
         try:
             start = perf_counter_ns()
-            session = WorkerSession(manifest, buffers)
+            session = _new_session(manifest, buffers, metadata, config)
             samples.append(perf_counter_ns() - start)
         finally:
             try:
@@ -318,11 +352,13 @@ def _benchmark_startup(manifest: Any, config: BenchmarkConfig) -> list[int]:
     return samples
 
 
-def _benchmark_rpc(manifest: Any, config: BenchmarkConfig) -> list[int]:
+def _benchmark_rpc(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> list[int]:
     buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
     session = None
     try:
-        session = WorkerSession(manifest, buffers)
+        session = _new_session(manifest, buffers, metadata, config)
         for _ in range(config.warmups):
             session.ping()
         return [_time_call(session.ping)[0] for _ in range(config.rpc_iterations)]
@@ -336,6 +372,7 @@ def _benchmark_rpc(manifest: Any, config: BenchmarkConfig) -> list[int]:
 
 def _benchmark_case(
     manifest: Any,
+    metadata: PluginMetadata,
     operation: str,
     tier: str,
     size: int,
@@ -350,7 +387,7 @@ def _benchmark_case(
     buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
     session = None
     try:
-        session = WorkerSession(manifest, buffers)
+        session = _new_session(manifest, buffers, metadata, config)
         managed_args = tuple(
             buffers.from_tensor(item).tensor if isinstance(item, torch.Tensor) else item
             for item in args
@@ -395,6 +432,7 @@ def _benchmark_case(
 
         diagnostics = _benchmark_diagnostics(
             manifest,
+            metadata,
             session,
             buffers,
             operation,
@@ -435,7 +473,8 @@ def _benchmark_case(
 
 def _benchmark_diagnostics(
     manifest: Any,
-    session: WorkerSession,
+    metadata: PluginMetadata,
+    session: WorkerSession | NativeWorkerSession,
     buffers: BufferManager,
     operation: str,
     args: tuple[object, ...],
@@ -455,7 +494,9 @@ def _benchmark_diagnostics(
     reclamation = []
     if config.memory_mode == "arena":
         first_mapping.extend(
-            _benchmark_arena_first_mapping(manifest, operation, args, kwargs, config)
+            _benchmark_arena_first_mapping(
+                manifest, metadata, operation, args, kwargs, config
+            )
         )
 
     for _ in range(config.diagnostic_iterations):
@@ -529,7 +570,7 @@ def _benchmark_diagnostics(
         "shared_memory_allocation_ms": summarize(cold_allocation_samples),
         "pooled_shared_memory_allocation_ms": summarize(pooled_allocation_samples),
         "buffer_reclamation_ms": summarize(reclamation),
-        "output_allocator_service_ms": summarize(output_service),
+        "output_preallocation_service_ms": summarize(output_service),
         "output_shared_allocation_ms": summarize(output_allocation),
         "output_ensure_mapped_ms": summarize(output_mapping),
         "output_allocations_per_invocation": output_counts[0],
@@ -538,6 +579,7 @@ def _benchmark_diagnostics(
 
 def _benchmark_arena_first_mapping(
     manifest: Any,
+    metadata: PluginMetadata,
     operation: str,
     args: tuple[object, ...],
     kwargs: dict[str, object],
@@ -548,7 +590,7 @@ def _benchmark_arena_first_mapping(
         buffers = BufferManager(mode="arena", arena_bytes=config.arena_bytes)
         session = None
         try:
-            session = WorkerSession(manifest, buffers)
+            session = _new_session(manifest, buffers, metadata, config)
             managed_args = tuple(
                 buffers.from_tensor(item).tensor
                 if isinstance(item, torch.Tensor)
@@ -568,6 +610,62 @@ def _benchmark_arena_first_mapping(
             finally:
                 buffers.close()
     return samples
+
+
+def _benchmark_high_frequency(
+    manifest: Any,
+    metadata: PluginMetadata,
+    config: BenchmarkConfig,
+    generator: torch.Generator,
+) -> dict[str, Any]:
+    size = config.sizes["add_scalar"]["small"]
+    args, kwargs = _make_arguments("add_scalar", size, config.dtype, generator)
+    buffers = BufferManager(mode=config.memory_mode, arena_bytes=config.arena_bytes)
+    session = None
+    try:
+        session = _new_session(manifest, buffers, metadata, config)
+        managed_args = tuple(
+            buffers.from_tensor(item).tensor if isinstance(item, torch.Tensor) else item
+            for item in args
+        )
+        for _ in range(config.warmups):
+            result = session.invoke("add_scalar", *managed_args, **kwargs)
+            del result
+            buffers.collect()
+        samples = []
+        batch_start = perf_counter_ns()
+        for _ in range(config.high_frequency_iterations):
+            start = perf_counter_ns()
+            result = session.invoke("add_scalar", *managed_args, **kwargs)
+            del result
+            buffers.collect()
+            samples.append(perf_counter_ns() - start)
+        batch_elapsed = perf_counter_ns() - batch_start
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        finally:
+            buffers.close()
+    latency = summarize(samples)
+    return {
+        "iterations": config.high_frequency_iterations,
+        "latency_ms": latency,
+        "calls_per_second": (
+            config.high_frequency_iterations * 1_000_000_000 / batch_elapsed
+        ),
+    }
+
+
+def _new_session(
+    manifest: Any,
+    buffers: BufferManager,
+    metadata: PluginMetadata,
+    config: BenchmarkConfig,
+) -> WorkerSession | NativeWorkerSession:
+    if config.control_mode == "native":
+        return NativeWorkerSession(manifest, buffers, metadata)
+    return WorkerSession(manifest, buffers)
 
 
 def _make_arguments(
@@ -731,6 +829,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--memory-mode", choices=("pooled", "arena"), default="pooled")
     parser.add_argument("--arena-bytes", type=int)
+    parser.add_argument(
+        "--control-mode", choices=("native", "python"), default="native"
+    )
+    parser.add_argument("--high-frequency-iterations", type=int, default=1000)
     parser.add_argument("--format", choices=("table", "json"), default="table")
     parser.add_argument("--output", type=Path)
     return parser
@@ -757,6 +859,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=arguments.seed,
         memory_mode=arguments.memory_mode,
         arena_bytes=arguments.arena_bytes,
+        control_mode=arguments.control_mode,
+        high_frequency_iterations=arguments.high_frequency_iterations,
     )
     report = run_benchmarks(config)
     rendered = (

@@ -67,7 +67,17 @@
             pyproject = true;
             src = ./.;
 
-            build-system = [ pkgs.python3Packages.setuptools ];
+            build-system = [
+              pkgs.python3Packages.nanobind
+              pkgs.python3Packages.scikit-build-core
+            ];
+            nativeBuildInputs = [
+              pkgs.capnproto
+              pkgs.cmake
+              pkgs.ninja
+            ];
+            buildInputs = [ pkgs.capnproto ];
+            dontUseCmakeConfigure = true;
             dependencies = with pkgs.python3Packages; [
               numpy
               pycapnp
@@ -155,6 +165,7 @@
               nanobind
               numpy
               pycapnp
+              scikit-build-core
               pytest
               torch
             ]

@@ -6,7 +6,8 @@ using Tensor = import "/wmfs/tensor.capnp";
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
-  protocolVersion = 4,
+  protocolVersion = 5,
+  fingerprint = 0x8a3d1e7bc554209f,
   operations = [
     (
       name = "matmul",
@@ -15,6 +16,19 @@ const pluginMetadata :Runtime.PluginMetadata = (
         (name = "b"),
       ],
       tensorOutputs = [(name = "result")],
+      operationId = 1,
+      outputPlans = [
+        (
+          name = "result",
+          known = (
+            dimensions = [
+              (inputAxis = (input = 0, axis = 0)),
+              (inputAxis = (input = 1, axis = 1)),
+            ],
+            dtype = (input = 0),
+          ),
+        ),
+      ],
     ),
     (
       name = "svd",
@@ -25,7 +39,71 @@ const pluginMetadata :Runtime.PluginMetadata = (
         (name = "vh"),
       ],
       scalarParameters = [
-        (name = "fullMatrices", kind = boolean, required = false),
+        (
+          name = "fullMatrices",
+          kind = boolean,
+          required = false,
+          default = (boolean = true),
+        ),
+      ],
+      operationId = 2,
+      outputPlans = [
+        (
+          name = "u",
+          known = (
+            dimensions = [
+              (inputAxis = (input = 0, axis = 0)),
+              (
+                select = (
+                  scalarParameter = 0,
+                  whenTrue = (inputAxis = (input = 0, axis = 0)),
+                  whenFalse = (
+                    minimum = [
+                      (inputAxis = (input = 0, axis = 0)),
+                      (inputAxis = (input = 0, axis = 1)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            dtype = (input = 0),
+          ),
+        ),
+        (
+          name = "s",
+          known = (
+            dimensions = [
+              (
+                minimum = [
+                  (inputAxis = (input = 0, axis = 0)),
+                  (inputAxis = (input = 0, axis = 1)),
+                ],
+              ),
+            ],
+            dtype = (input = 0),
+          ),
+        ),
+        (
+          name = "vh",
+          known = (
+            dimensions = [
+              (
+                select = (
+                  scalarParameter = 0,
+                  whenTrue = (inputAxis = (input = 0, axis = 1)),
+                  whenFalse = (
+                    minimum = [
+                      (inputAxis = (input = 0, axis = 0)),
+                      (inputAxis = (input = 0, axis = 1)),
+                    ],
+                  ),
+                ),
+              ),
+              (inputAxis = (input = 0, axis = 1)),
+            ],
+            dtype = (input = 0),
+          ),
+        ),
       ],
     ),
     (
@@ -33,6 +111,18 @@ const pluginMetadata :Runtime.PluginMetadata = (
       tensorInputs = [(name = "a")],
       tensorOutputs = [(name = "result")],
       scalarParameters = [(name = "value", kind = float64)],
+      operationId = 3,
+      outputPlans = [
+        (
+          name = "result",
+          known = (
+            sameShapeAsInput = 0,
+            dtype = (
+              promoteTensorScalar = (tensorInput = 0, scalarParameter = 0),
+            ),
+          ),
+        ),
+      ],
     ),
   ],
 );

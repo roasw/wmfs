@@ -6,6 +6,8 @@
 - Implement the runtime in Python first.
 - Use nanobind instead of pybind11 for future Python/C++ bindings.
 - Use C++20 or newer for all C++ code.
+- Keep the root `CMakeLists.txt`, C++ sources in `src`, and headers in `inc`.
+- Build C++ out of tree under the ignored `build` directory.
 - Commit messages must follow the rules in `.gitlint`.
 
 ## Goal
@@ -95,10 +97,15 @@ A plugin should explicitly describe:
 - output tensors;
 - scalar parameters;
 - read-only versus mutable inputs where applicable.
+- output shape and dtype expressions when they are known from inputs and scalars.
 
 Read-only must be the default.
 
 Mutation must be explicit.
+
+Known outputs are preallocated by the runtime and passed to the worker in the
+operation request. Use the allocator capability only for genuinely dynamic
+outputs whose shape cannot be declared in metadata.
 
 ## Tensor Transport
 

@@ -17,11 +17,19 @@ import capnp
 import torch
 
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
+from wmfs.output_metadata import evaluate_outputs, validate_operation_metadata
 from wmfs.registry import (
+    DimensionExpression,
+    DTypeExpression,
     EnvironmentMetadata,
+    InputAxis,
+    KnownOutput,
     OperationMetadata,
+    OutputPlan,
     PluginMetadata,
+    PromoteTensorScalar,
     ScalarParameter,
+    SelectDimension,
     TensorParameter,
 )
 from wmfs.transport.fd_broker import FdSender
@@ -163,6 +171,7 @@ class WorkerSession:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._plugin: object | None = None
+        self._operations: dict[str, OperationMetadata] = {}
         self._fd_sender: FdSender | None = None
         self._startup_error: BaseException | None = None
         self._shutdown: asyncio.Event | None = None
@@ -222,8 +231,9 @@ class WorkerSession:
         self._shutdown = asyncio.Event()
         self._invoke_lock = asyncio.Lock()
         async with _worker_connection(self._manifest) as (plugin, fd_sender):
-            await _validate_worker(plugin)
+            metadata = await _validate_worker(plugin)
             self._plugin = plugin
+            self._operations = {item.name: item for item in metadata.operations}
             self._fd_sender = fd_sender
             self._ready.set()
             await self._shutdown.wait()
@@ -251,11 +261,34 @@ class WorkerSession:
             output_metrics: list[OutputAllocationMetrics] | None = (
                 [] if collect_metrics else None
             )
+            metadata = self._operations[operation]
+            tensor_args = [item for item in args if isinstance(item, torch.Tensor)]
+            if len(tensor_args) != len(metadata.tensor_inputs):
+                raise TypeError(
+                    f"Operation {operation!r} expected "
+                    f"{len(metadata.tensor_inputs)} tensor inputs"
+                )
             inputs = [
-                await self._prepare_input(item, invocation_id, input_metrics)
-                for item in args
-                if isinstance(item, torch.Tensor)
+                await self._prepare_input(
+                    item,
+                    invocation_id,
+                    input_metrics,
+                    writable=parameter.access == "readWrite",
+                )
+                for item, parameter in zip(
+                    tensor_args, metadata.tensor_inputs, strict=True
+                )
             ]
+            scalars = _bind_scalars(metadata, args, kwargs)
+            if all(plan.known is not None for plan in metadata.output_plans):
+                return await self._invoke_known(
+                    metadata,
+                    inputs,
+                    scalars,
+                    invocation_id,
+                    input_metrics,
+                    output_metrics,
+                )
             allocator = _OutputAllocator(
                 _load_runtime_schema(),
                 self._buffers,
@@ -280,11 +313,76 @@ class WorkerSession:
                 allocator.rollback()
                 raise
 
+    async def _invoke_known(
+        self,
+        metadata: OperationMetadata,
+        inputs: list[ManagedTensor],
+        scalars: tuple[object, ...],
+        invocation_id: int,
+        input_metrics: list[InputPreparationMetrics] | None,
+        output_metrics: list[OutputAllocationMetrics] | None,
+    ) -> tuple[object, InvocationMetrics]:
+        if self._plugin is None or self._fd_sender is None:
+            raise RuntimeError("Worker session is not ready")
+        outputs: list[ManagedTensor] = []
+        try:
+            for shape, dtype in evaluate_outputs(metadata, inputs, scalars):
+                service_start = perf_counter_ns()
+                allocation_start = perf_counter_ns()
+                managed = self._buffers.empty_named(shape, dtype)
+                allocation_ns = perf_counter_ns() - allocation_start
+                mapping_start = perf_counter_ns()
+                transferred = await asyncio.to_thread(
+                    self._fd_sender.ensure_mapped,
+                    managed.buffer,
+                    invocation_id=invocation_id,
+                    writable=True,
+                )
+                mapping_ns = perf_counter_ns() - mapping_start
+                outputs.append(managed)
+                if output_metrics is not None:
+                    output_metrics.append(
+                        OutputAllocationMetrics(
+                            byte_length=managed.buffer.byte_length,
+                            shared_allocation_ns=allocation_ns,
+                            mapping_ns=mapping_ns,
+                            service_ns=perf_counter_ns() - service_start,
+                            fd_transferred=transferred,
+                        )
+                    )
+
+            invocation = {
+                "invocationId": invocation_id,
+                "operationId": metadata.operation_id,
+                "inputs": [item.descriptor.as_capnp() for item in inputs],
+                "outputs": [item.descriptor.as_capnp() for item in outputs],
+                "scalars": _scalar_arguments(metadata, scalars),
+            }
+            try:
+                await asyncio.wait_for(
+                    self._plugin.invokeKnown(invocation=invocation),
+                    _RPC_TIMEOUT_SECONDS,
+                )
+            finally:
+                self._fd_sender.finish_invocation(invocation_id)
+            tensors = tuple(item.tensor for item in outputs)
+            result: object = tensors[0] if len(tensors) == 1 else tensors
+            outputs.clear()
+            return result, InvocationMetrics(
+                inputs=tuple(input_metrics or ()),
+                outputs=tuple(output_metrics or ()),
+            )
+        finally:
+            for output in outputs:
+                self._buffers.release(output)
+
     async def _prepare_input(
         self,
         tensor: torch.Tensor,
         invocation_id: int,
         metrics: list[InputPreparationMetrics] | None,
+        *,
+        writable: bool = False,
     ) -> ManagedTensor:
         managed = self._buffers.managed(tensor)
         shared_copy_ns = 0
@@ -297,7 +395,7 @@ class WorkerSession:
             self._fd_sender.ensure_mapped,
             managed.buffer,
             invocation_id=invocation_id,
-            writable=False,
+            writable=writable,
         )
         mapping_ns = perf_counter_ns() - mapping_start
         if metrics is not None:
@@ -381,6 +479,82 @@ class WorkerSession:
                 for item in (response.u, response.s, response.vh)
             )
         return allocator.resolve(response.result).tensor
+
+
+def _bind_scalars(
+    metadata: OperationMetadata,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> tuple[object, ...]:
+    positional = [item for item in args if not isinstance(item, torch.Tensor)]
+    if len(positional) > len(metadata.scalar_parameters):
+        raise TypeError(f"Operation {metadata.name!r} received too many arguments")
+    remaining = dict(kwargs)
+    values: list[object] = []
+    for index, parameter in enumerate(metadata.scalar_parameters):
+        python_name = _python_parameter_name(parameter.name)
+        if index < len(positional):
+            if parameter.name in remaining or python_name in remaining:
+                raise TypeError(f"Scalar {python_name!r} was supplied more than once")
+            value = positional[index]
+        elif python_name in remaining:
+            value = remaining.pop(python_name)
+        elif parameter.name in remaining:
+            value = remaining.pop(parameter.name)
+        elif parameter.default is not None:
+            value = parameter.default
+        elif parameter.required:
+            raise TypeError(f"Missing required scalar {python_name!r}")
+        else:
+            raise ValueError(
+                f"Optional scalar {python_name!r} needs a default for preallocation"
+            )
+        values.append(_coerce_scalar(parameter, value))
+    if remaining:
+        unexpected = next(iter(remaining))
+        raise TypeError(f"Unexpected scalar argument {unexpected!r}")
+    return tuple(values)
+
+
+def _coerce_scalar(parameter: ScalarParameter, value: object) -> object:
+    if parameter.kind == "boolean":
+        if not isinstance(value, bool):
+            raise TypeError(f"Scalar {parameter.name!r} must be Boolean")
+        return value
+    if parameter.kind == "float64":
+        if isinstance(value, bool) or not isinstance(value, (float, int)):
+            raise TypeError(f"Scalar {parameter.name!r} must be numeric")
+        return float(value)
+    if parameter.kind == "int64":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"Scalar {parameter.name!r} must be an integer")
+        return value
+    if parameter.kind == "text":
+        if not isinstance(value, str):
+            raise TypeError(f"Scalar {parameter.name!r} must be text")
+        return value
+    raise TypeError(f"Scalar {parameter.name!r} has an unknown kind")
+
+
+def _scalar_arguments(
+    metadata: OperationMetadata, scalars: tuple[object, ...]
+) -> list[dict[str, object]]:
+    return [
+        {"parameter": index, parameter.kind: value}
+        for index, (parameter, value) in enumerate(
+            zip(metadata.scalar_parameters, scalars, strict=True)
+        )
+    ]
+
+
+def _python_parameter_name(name: str) -> str:
+    converted = []
+    for character in name:
+        if character.isupper():
+            converted.extend(("_", character.lower()))
+        else:
+            converted.append(character)
+    return "".join(converted)
 
 
 def inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
@@ -559,30 +733,107 @@ async def _wait_for_worker(process: subprocess.Popen[str]) -> None:
 
 
 def _metadata_from_reader(metadata: object) -> PluginMetadata:
-    return PluginMetadata(
+    plugin = PluginMetadata(
         name=str(metadata.name),
         version=str(metadata.version),
         protocol_version=int(metadata.protocolVersion),
+        fingerprint=int(metadata.fingerprint),
         operations=tuple(
-            OperationMetadata(
-                name=str(operation.name),
-                tensor_inputs=tuple(
-                    TensorParameter(name=str(item.name), access=str(item.access))
-                    for item in operation.tensorInputs
-                ),
-                tensor_outputs=tuple(
-                    TensorParameter(name=str(item.name), access=str(item.access))
-                    for item in operation.tensorOutputs
-                ),
-                scalar_parameters=tuple(
-                    ScalarParameter(
-                        name=str(item.name),
-                        kind=str(item.kind),
-                        required=bool(item.required),
-                    )
-                    for item in operation.scalarParameters
-                ),
-            )
+            _operation_metadata_from_reader(operation)
             for operation in metadata.operations
         ),
     )
+    for operation in plugin.operations:
+        validate_operation_metadata(operation)
+    return plugin
+
+
+def _operation_metadata_from_reader(operation: object) -> OperationMetadata:
+    return OperationMetadata(
+        name=str(operation.name),
+        tensor_inputs=tuple(
+            TensorParameter(name=str(item.name), access=str(item.access))
+            for item in operation.tensorInputs
+        ),
+        tensor_outputs=tuple(
+            TensorParameter(name=str(item.name), access=str(item.access))
+            for item in operation.tensorOutputs
+        ),
+        scalar_parameters=tuple(
+            ScalarParameter(
+                name=str(item.name),
+                kind=str(item.kind),
+                required=bool(item.required),
+                default=_scalar_default_from_reader(item.default),
+            )
+            for item in operation.scalarParameters
+        ),
+        operation_id=int(operation.operationId),
+        output_plans=tuple(
+            _output_plan_from_reader(item) for item in operation.outputPlans
+        ),
+    )
+
+
+def _scalar_default_from_reader(default: object) -> bool | float | int | str | None:
+    kind = default.which()
+    return None if kind == "none" else getattr(default, kind)
+
+
+def _output_plan_from_reader(plan: object) -> OutputPlan:
+    if plan.which() == "dynamic":
+        return OutputPlan(name=str(plan.name), known=None)
+    known = plan.known
+    shape_kind = known.which()
+    shape: int | tuple[DimensionExpression, ...]
+    if shape_kind == "sameShapeAsInput":
+        shape = int(known.sameShapeAsInput)
+    else:
+        shape = tuple(_dimension_from_reader(item) for item in known.dimensions)
+    return OutputPlan(
+        name=str(plan.name),
+        known=KnownOutput(
+            shape_kind=shape_kind,
+            shape=shape,
+            dtype=_dtype_from_reader(known.dtype),
+        ),
+    )
+
+
+def _dimension_from_reader(expression: object, depth: int = 0) -> DimensionExpression:
+    if depth >= 16:
+        raise ValueError("Output dimension expression is too deeply nested")
+    kind = expression.which()
+    if kind == "constant":
+        value: object = int(expression.constant)
+    elif kind == "inputAxis":
+        value = InputAxis(
+            input=int(expression.inputAxis.input), axis=int(expression.inputAxis.axis)
+        )
+    elif kind == "minimum":
+        value = tuple(
+            _dimension_from_reader(item, depth + 1) for item in expression.minimum
+        )
+    else:
+        select = expression.select
+        value = SelectDimension(
+            scalar_parameter=int(select.scalarParameter),
+            when_true=_dimension_from_reader(select.whenTrue, depth + 1),
+            when_false=_dimension_from_reader(select.whenFalse, depth + 1),
+        )
+    return DimensionExpression(kind=kind, value=value)
+
+
+def _dtype_from_reader(expression: object) -> DTypeExpression:
+    kind = expression.which()
+    if kind == "fixed":
+        value: object = str(expression.fixed)
+    elif kind == "input":
+        value = int(expression.input)
+    else:
+        promotion = expression.promoteTensorScalar
+        value = PromoteTensorScalar(
+            tensor_input=int(promotion.tensorInput),
+            scalar_parameter=int(promotion.scalarParameter),
+        )
+    return DTypeExpression(kind=kind, value=value)

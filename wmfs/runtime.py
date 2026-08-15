@@ -22,6 +22,7 @@ class Runtime:
         self._registry = OperationRegistry()
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
+        self._control_mode = "auto"
 
     @property
     def backend_name(self) -> str:
@@ -47,6 +48,7 @@ class Runtime:
             registry,
             memory_mode=self._memory_mode,
             arena_bytes=self._arena_bytes,
+            control_mode=self._control_mode,
         )
 
     def configure_memory(
@@ -59,6 +61,14 @@ class Runtime:
             raise ValueError("Memory mode must be 'pooled' or 'arena'")
         self._memory_mode = mode
         self._arena_bytes = arena_bytes
+
+    def configure_control(self, mode: str = "auto") -> None:
+        """Select the isolated control path before plugin discovery."""
+        if "isolated" in self._backends:
+            raise RuntimeError("Configure control before discovering plugins")
+        if mode not in {"auto", "native", "python"}:
+            raise ValueError("Control mode must be 'auto', 'native', or 'python'")
+        self._control_mode = mode
 
     def use_backend(self, name: str) -> None:
         if name not in self._backends:

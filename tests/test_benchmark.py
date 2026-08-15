@@ -35,6 +35,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
             startup_iterations=1,
             rpc_iterations=1,
             diagnostic_iterations=1,
+            high_frequency_iterations=2,
         )
     )
 
@@ -42,6 +43,9 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert report["configuration"]["plugin_directory"] == "plugins"
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
+    assert report["configuration"]["control_mode"] == "native"
+    assert report["high_frequency_add_scalar"]["iterations"] == 2
+    assert report["high_frequency_add_scalar"]["calls_per_second"] > 0
     assert svd_case["local_kernel_ms"]["count"] == 1
     assert svd_case["isolated_end_to_end_ms"]["count"] == 1
     assert set(svd_case["diagnostics"]) == {
@@ -51,8 +55,8 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "input_shared_preparation_ms",
         "isolated_uncached_end_to_end_ms",
         "output_allocations_per_invocation",
-        "output_allocator_service_ms",
         "output_ensure_mapped_ms",
+        "output_preallocation_service_ms",
         "output_shared_allocation_ms",
         "pooled_shared_memory_allocation_ms",
         "shared_memory_allocation_ms",

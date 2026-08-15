@@ -1,9 +1,10 @@
 # wmfs
 
 `wmfs` is a prototype scientific-computing runtime for transparently running
-selected Python function calls in isolated worker processes. The first
-milestone provides the local PyTorch backend that will serve as the behavioral
-and performance baseline for isolated execution.
+selected Python function calls in isolated worker processes. Its low-latency
+control path uses a C++20 runtime bound with nanobind, Cap'n Proto C++ RPC, and
+shared CPU tensors while workers may use an independently deployed Python and
+Torch environment.
 
 ## Development
 
@@ -11,7 +12,9 @@ Enter the Nix development shell and run the tests:
 
 ```console
 nix develop
-pytest
+cmake -S . -B build/Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/Debug
+nix build
 ```
 
 ## Usage
@@ -35,8 +38,9 @@ The public calls will remain unchanged when the isolated backend is added.
 ## Plugin Discovery
 
 Plugin deployment metadata identifies a worker module and its Cap'n Proto
-schema. Operation signatures are declared once in the schema and discovered
-over RPC when the plugin is registered:
+schema. Operation signatures, numeric IDs, and known output shape/dtype
+expressions are declared once in the schema and discovered over RPC when the
+plugin is registered:
 
 ```python
 from pathlib import Path
@@ -50,6 +54,13 @@ print(runtime.operation_names)
 Discovery exchanges metadata only. Discovered operations continue to execute
 through the explicitly selected backend until isolated operation dispatch is
 enabled.
+
+Known output plans may reference input axes, minimum dimensions, Boolean scalar
+selection, input dtypes, and tensor/scalar dtype promotion. The runtime
+validates these plans during discovery, preallocates every known output, and
+passes its writable descriptor in the operation request. This removes the
+reverse output-allocator RPC from high-frequency calls. Dynamic operations may
+still use the allocator capability.
 
 ## Shared CPU Tensors
 
@@ -98,9 +109,23 @@ result = matmul(a, b)
 runtime.close()
 ```
 
+The default `auto` control mode uses the native extension when it is installed.
+Selection can be made explicit before discovery:
+
+```python
+runtime.configure_control("native")  # or "python"
+runtime.discover_plugins(Path("plugins"))
+```
+
+The native session owns synchronous Cap'n Proto/KJ dispatch and SCM_RIGHTS
+mapping control on a dedicated C++ thread. The Python layer remains the public
+Torch API and evaluates output metadata. Neither the native extension nor the
+main process loads plugin code or links against the worker's Torch runtime.
+
 `matmul`, `svd`, and `add_scalar` expose the same public API in local and
 isolated modes. The current prototype supports contiguous CPU tensors and
-serializes calls within each worker.
+serializes calls within each worker. Repeated calls reuse the persistent RPC
+connection and cached arena or read-only pooled mappings.
 
 ## Incompatible Worker Environment
 
@@ -130,19 +155,20 @@ nix develop ./environments/nixos-25.05
 Run the local-versus-isolated benchmark from the development shell:
 
 ```console
-wmfs-benchmark --plugin-directory plugins
+wmfs-benchmark --plugin-directory plugins --control-mode native
 ```
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
 the deliberately cheap `add_scalar` operation. It reports median and standard
 deviation for local kernel execution and isolated end-to-end execution, plus
-absolute and percentage overhead. JSON output also records nearest-rank p95.
+absolute and percentage overhead. JSON output also records nearest-rank p95 and
+a 1,000-call sequential high-frequency `add_scalar` latency/throughput run.
 
 Separate diagnostics report worker startup, RPC-only round trips, shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
 cached mapping checks, and runtime-owned output allocation. Input preparation
 includes memfd allocation, the runtime mapping and Torch view, and the ingress
-copy. Ensure-mapped timings include the event-loop handoff, FD transfer, worker
+copy. Ensure-mapped timings include native dispatch, FD transfer, worker
 mapping, and acknowledgement. Numerical-library warmup and worker startup are
 excluded from steady-state operation timings.
 
@@ -159,10 +185,11 @@ wmfs-benchmark --plugin-directory plugins --memory-mode arena \
   --arena-bytes 268435456 --format json --output arena.json
 ```
 
-Sizes, iteration counts, dtype, and Torch thread count are configurable; run
-`wmfs-benchmark --help` for all options. The output allocator service metric
-measures runtime allocation and output FD mapping inside the callback handler;
-lazy page faults and callback transit remain part of isolated end-to-end time.
+Sizes, iteration counts, dtype, Torch thread count, control mode, and
+high-frequency iteration count are configurable; run `wmfs-benchmark --help`
+for all options. The output allocation service metric measures metadata-driven
+runtime allocation and output mapping before the single operation RPC. Lazy
+page faults remain part of isolated end-to-end time.
 The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) records a
 complete safe-pool run, [`benchmarks/arena.json`](benchmarks/arena.json) records
 the trusted-arena comparison, and
