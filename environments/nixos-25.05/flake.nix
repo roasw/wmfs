@@ -18,36 +18,11 @@
         inherit system;
         config.allowUnfree = true;
       };
-      pluginSrc = wmfs.outPath + "/plugins/reference";
-
-      reference-worker = pkgs.python3Packages.buildPythonApplication {
-        pname = "wmfs-reference";
-        version = "0.1.0";
-        pyproject = true;
-        src = pluginSrc;
-
-        build-system = [ pkgs.python3Packages.setuptools ];
-        dependencies = with pkgs.python3Packages; [
-          numpy
-          pycapnp
-          torch
-        ];
-
-        pythonImportsCheck = [ "wmfs_reference" ];
-
-        postInstall = ''
-          install -Dm444 \
-            ${pluginSrc}/plugin.toml \
-            "$out/share/wmfs/plugins/reference/plugin.toml"
-          substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \
-            --replace-fail \
-            'worker = "wmfs-reference-worker"' \
-            'worker = "'"$out"'/bin/wmfs-reference-worker"'
-          install -Dm444 \
-            ${pluginSrc}/schemas/wmfs-reference/reference.capnp \
-            "$out/share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp"
-        '';
+      source = wmfs.outPath;
+      workers = import (source + "/nix/reference-workers.nix") {
+        inherit pkgs source;
       };
+      inherit (workers) reference-python-worker reference-worker;
 
       runtime = wmfs.packages.${system}.default;
       runtimePython = runtime.pythonModule.withPackages (_: [ runtime ]);
@@ -67,7 +42,7 @@
 
             import torch
 
-            from wmfs import add_scalar, runtime
+            from wmfs import add_scalar, matmul, runtime, svd
             from wmfs.plugins import find_manifests
             from wmfs.transport.worker_process import inspect_worker_environment
 
@@ -86,9 +61,9 @@
             assert worker.glibc_version == "${pkgs.glibc.version}"
             assert worker.glibc_version == "2.40"
             assert worker.glibc_version != runtime_glibc
-            assert worker.python_version == "${pkgs.python3.version}"
-            assert worker.torch_version.startswith("${pkgs.python3Packages.torch.version}")
-            assert worker.executable.startswith("${pkgs.python3}")
+            assert worker.python_version == "none"
+            assert worker.torch_version == "${pkgs.python3Packages.torch.version}"
+            assert worker.executable == "${reference-worker}/bin/wmfs-reference-worker"
 
             runtime.discover_plugins(plugin_directory)
             runtime.use_backend("isolated")
@@ -96,6 +71,16 @@
                 source = torch.arange(4, dtype=torch.float64)
                 result = add_scalar(source, 1.5)
                 torch.testing.assert_close(result, source + 1.5)
+
+                matrix = torch.arange(12, dtype=torch.float64).reshape(4, 3)
+                product = matmul(matrix, matrix.T)
+                torch.testing.assert_close(product, matrix @ matrix.T)
+
+                u, singular_values, vh = svd(matrix, full_matrices=False)
+                torch.testing.assert_close(
+                    u @ torch.diag(singular_values) @ vh,
+                    matrix,
+                )
             finally:
                 runtime.close()
 
@@ -107,9 +92,7 @@
             worker_closure_paths = (
                 "${reference-worker}",
                 "${pkgs.glibc}",
-                "${pkgs.python3}",
-                "${pkgs.python3Packages.pycapnp}",
-                "${pkgs.python3Packages.torch}",
+                "${pkgs.python3Packages.torch.lib}",
             )
             assert not any(path in process_maps for path in worker_closure_paths)
             PY
@@ -119,7 +102,7 @@
     {
       packages.${system} = {
         default = reference-worker;
-        inherit reference-worker;
+        inherit reference-python-worker reference-worker;
       };
 
       apps.${system} = {
@@ -128,6 +111,11 @@
           type = "app";
           program = "${reference-worker}/bin/wmfs-reference-worker";
           meta.description = "Run the glibc 2.40 reference worker";
+        };
+        reference-python-worker = {
+          type = "app";
+          program = "${reference-python-worker}/bin/wmfs-reference-worker";
+          meta.description = "Run the glibc 2.40 Python reference worker";
         };
       };
 

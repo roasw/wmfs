@@ -2,9 +2,9 @@
 
 `wmfs` is a prototype scientific-computing runtime for transparently running
 selected Python function calls in isolated worker processes. Its low-latency
-control path uses a C++20 runtime bound with nanobind, Cap'n Proto C++ RPC, and
-shared CPU tensors while workers may use an independently deployed Python and
-Torch environment.
+path uses a C++20 runtime bound with nanobind, Cap'n Proto C++ RPC, shared CPU
+tensors, and an independently deployed C++ worker linked to its own LibTorch
+environment.
 
 ## Development
 
@@ -14,8 +14,15 @@ Enter the Nix development shell and run the tests:
 nix develop
 cmake -S . -B build/Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/Debug
+cmake -S . -B build/reference -G Ninja \
+  -DWMFS_BUILD_PYTHON_RUNTIME=OFF \
+  -DWMFS_BUILD_REFERENCE_WORKER=ON
+cmake --build build/reference
 nix build
 ```
+
+Reusable package derivations live under `nix/`; the root `flake.nix` only wires
+packages, checks, applications, and development shells together.
 
 ## Usage
 
@@ -122,6 +129,13 @@ mapping control on a dedicated C++ thread. The Python layer remains the public
 Torch API and evaluates output metadata. Neither the native extension nor the
 main process loads plugin code or links against the worker's Torch runtime.
 
+The packaged reference worker implements the server control plane in C++20 and
+constructs ATen tensor views directly over mapped memfds. It executes the
+reference kernels with LibTorch, removing pycapnp, asyncio, Python descriptor
+conversion, and Python-to-Torch dispatch from the worker hot path. The previous
+Python implementation remains available as the `reference-python-worker` Nix
+package for comparison and fallback testing.
+
 `matmul`, `svd`, and `add_scalar` expose the same public API in local and
 isolated modes. The current prototype supports contiguous CPU tensors and
 serializes calls within each worker. Repeated calls reuse the persistent RPC
@@ -130,9 +144,9 @@ connection and cached arena or read-only pooled mappings.
 ## Incompatible Worker Environment
 
 `environments/nixos-25.05` is an independent nested flake that rebuilds the
-reference worker with NixOS 25.05, glibc 2.40, Python 3.12, and its own Torch
-closure. The root runtime remains built from its separately pinned unstable
-Nixpkgs input.
+reference worker with NixOS 25.05, glibc 2.40, Cap'n Proto 1.1, and LibTorch
+2.7. The worker contains no Python runtime. The root runtime remains built from
+its separately pinned unstable Nixpkgs input.
 
 Run the cross-environment integration check from the repository root:
 
@@ -174,9 +188,11 @@ excluded from steady-state operation timings.
 
 Profiled invocations additionally separate output-plan evaluation, C++ queue
 wait, RPC, worker input/output view construction, worker dispatch, and kernel
-execution. Profiling showed repeated worker view construction was the largest
-avoidable cheap-operation cost, so each worker mapping now keeps a bounded cache
-of validated Torch views. Ordinary calls leave profiling disabled.
+execution. Profiling first showed repeated worker view construction was the
+largest avoidable cheap-operation cost, so each worker mapping keeps a bounded
+cache of validated tensor views. Moving the worker control plane and view
+construction to C++ reduced the remaining Python worker scheduling overhead.
+Ordinary calls leave profiling disabled.
 
 Write a machine-readable report with:
 

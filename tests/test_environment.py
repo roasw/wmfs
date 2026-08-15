@@ -11,7 +11,7 @@ def test_worker_reports_its_runtime_environment() -> None:
 
     environment = inspect_worker_environment(manifest)
 
-    assert environment.python_version
+    assert environment.python_version == "none"
     assert environment.torch_version
     assert environment.glibc_version
     assert Path(environment.executable).is_absolute()

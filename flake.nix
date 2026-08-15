@@ -29,69 +29,9 @@
     {
       packages = forSystems (
         system:
-        let
+        import ./nix/packages.nix {
           pkgs = pkgsFactory system nixpkgs;
-          reference-worker = pkgs.python3Packages.buildPythonApplication {
-            pname = "wmfs-reference";
-            version = "0.1.0";
-            pyproject = true;
-            src = ./plugins/reference;
-
-            build-system = [ pkgs.python3Packages.setuptools ];
-            dependencies = with pkgs.python3Packages; [
-              numpy
-              pycapnp
-              torch
-            ];
-
-            pythonImportsCheck = [ "wmfs_reference" ];
-
-            postInstall = ''
-              install -Dm444 \
-                ${./plugins/reference/plugin.toml} \
-                "$out/share/wmfs/plugins/reference/plugin.toml"
-              substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \
-                --replace-fail \
-                'worker = "wmfs-reference-worker"' \
-                'worker = "'"$out"'/bin/wmfs-reference-worker"'
-              install -Dm444 \
-                ${./plugins/reference/schemas/wmfs-reference/reference.capnp} \
-                "$out/share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp"
-            '';
-          };
-        in
-        {
-          default = pkgs.python3Packages.buildPythonPackage {
-            pname = "wmfs";
-            version = "0.1.0";
-            pyproject = true;
-            src = ./.;
-
-            build-system = [
-              pkgs.python3Packages.nanobind
-              pkgs.python3Packages.scikit-build-core
-            ];
-            nativeBuildInputs = [
-              pkgs.capnproto
-              pkgs.cmake
-              pkgs.ninja
-            ];
-            buildInputs = [ pkgs.capnproto ];
-            dontUseCmakeConfigure = true;
-            dependencies = with pkgs.python3Packages; [
-              numpy
-              pycapnp
-              torch
-            ];
-
-            nativeCheckInputs = [
-              pkgs.python3Packages.pytestCheckHook
-              reference-worker
-            ];
-            pythonImportsCheck = [ "wmfs" ];
-          };
-
-          inherit reference-worker;
+          source = ./.;
         }
       );
 
@@ -100,6 +40,11 @@
           type = "app";
           program = "${self.packages.${system}.reference-worker}/bin/wmfs-reference-worker";
           meta.description = "Run the wmfs reference plugin worker";
+        };
+        reference-python-worker = {
+          type = "app";
+          program = "${self.packages.${system}.reference-python-worker}/bin/wmfs-reference-worker";
+          meta.description = "Run the Python reference plugin worker";
         };
       });
 
