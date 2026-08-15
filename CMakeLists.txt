@@ -45,13 +45,13 @@ if(WMFS_BUILD_REFERENCE_WORKER OR WMFS_BUNDLE_REFERENCE)
   target_compile_options(wmfs-reference-kernels PRIVATE ${TORCH_CXX_FLAGS})
 endif()
 
-set(CAPNPC_SRC_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/wmfs/schemas")
-set(CAPNPC_IMPORT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/wmfs/schemas")
+set(CAPNPC_SRC_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/schemas")
+set(CAPNPC_IMPORT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/schemas")
 capnp_generate_cpp(
   WMFS_CAPNP_SOURCES
   WMFS_CAPNP_HEADERS
-  wmfs/schemas/wmfs/tensor.capnp
-  wmfs/schemas/wmfs/runtime.capnp
+  packages/wmfs/wmfs/schemas/wmfs/tensor.capnp
+  packages/wmfs/wmfs/schemas/wmfs/runtime.capnp
 )
 
 if(WMFS_BUILD_PYTHON_RUNTIME)
@@ -100,7 +100,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
   set(CAPNPC_SRC_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/schemas")
   set(
     CAPNPC_IMPORT_DIRS
-    "${CMAKE_CURRENT_SOURCE_DIR}/wmfs/schemas"
+    "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/schemas"
     "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/schemas"
   )
   capnp_generate_cpp(

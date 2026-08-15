@@ -8,6 +8,10 @@ environment.
 
 ## Development Build
 
+The `wmfs` Python distribution lives under `packages/wmfs`; root-level CMake,
+C++ sources, tests, plugins, Nix definitions, and benchmarks remain shared
+repository infrastructure.
+
 The development shell inherits build inputs from the runtime and worker package
 derivations with `inputsFrom`. This keeps the CMake and package builds on the
 same Python, Cap'n Proto, nanobind, Torch, compiler, and linker dependencies.
@@ -33,10 +37,10 @@ just build RelWithDebInfo
 WMFS_BUILD_TYPE=Release nix develop
 ```
 
-The shell adds the selected output prefix to `PYTHONPATH` and `PATH`. Re-run the
-corresponding `just build` recipe after source changes. Verify that the
-development artifacts are selected, then run tests directly from the source
-tree:
+The shell adds the selected output prefix and `packages/wmfs` source directory
+to `PYTHONPATH`, and adds the output prefix to `PATH`. Re-run the corresponding
+`just build` recipe after source changes. Verify that the development artifacts
+are selected, then run tests directly from the source tree:
 
 ```console
 python -c 'import wmfs._native; print(wmfs._native.__file__)'

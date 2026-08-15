@@ -828,10 +828,22 @@ def _restore_threads(state: tuple[dict[str, str | None], int]) -> None:
 
 def _project_home() -> Path:
     working_directory = Path.cwd().resolve()
+    directories = (working_directory, *working_directory.parents)
+    repository = next(
+        (
+            directory
+            for directory in directories
+            if (directory / "CMakeLists.txt").is_file()
+            and (directory / "packages" / "wmfs" / "pyproject.toml").is_file()
+        ),
+        None,
+    )
+    if repository is not None:
+        return repository
     return next(
         (
             directory
-            for directory in (working_directory, *working_directory.parents)
+            for directory in directories
             if (directory / "pyproject.toml").is_file()
         ),
         working_directory,

@@ -77,16 +77,16 @@
 
           schemas = pkgs.runCommand "wmfs-schema-check" { nativeBuildInputs = [ pkgs.capnproto ]; } ''
             capnp compile -o- \
-              --src-prefix=${./wmfs/schemas} \
-              --import-path=${./wmfs/schemas} \
-              ${./wmfs/schemas/wmfs/runtime.capnp} >/dev/null
+              --src-prefix=${./packages/wmfs/wmfs/schemas} \
+              --import-path=${./packages/wmfs/wmfs/schemas} \
+              ${./packages/wmfs/wmfs/schemas/wmfs/runtime.capnp} >/dev/null
             capnp compile -o- \
-              --src-prefix=${./wmfs/schemas} \
-              --import-path=${./wmfs/schemas} \
-              ${./wmfs/schemas/wmfs/tensor.capnp} >/dev/null
+              --src-prefix=${./packages/wmfs/wmfs/schemas} \
+              --import-path=${./packages/wmfs/wmfs/schemas} \
+              ${./packages/wmfs/wmfs/schemas/wmfs/tensor.capnp} >/dev/null
             capnp compile -o- \
               --src-prefix=${./plugins/reference/schemas} \
-              --import-path=${./wmfs/schemas} \
+              --import-path=${./packages/wmfs/wmfs/schemas} \
               --import-path=${./plugins/reference/schemas} \
               ${./plugins/reference/schemas/wmfs-reference/reference.capnp} >/dev/null
             touch $out
@@ -118,7 +118,7 @@
               export WMFS_BUILD_TYPE="''${WMFS_BUILD_TYPE:-Debug}"
               development_output="$repo_root/output/$WMFS_BUILD_TYPE"
               export PATH="$development_output/bin:$PATH"
-              export PYTHONPATH="$development_output:$repo_root''${PYTHONPATH:+:$PYTHONPATH}"
+              export PYTHONPATH="$development_output:$repo_root/packages/wmfs''${PYTHONPATH:+:$PYTHONPATH}"
             '';
           };
         }

@@ -13,6 +13,9 @@ let
       version = "0.1.0";
       pyproject = true;
       src = source;
+      postUnpack = ''
+        sourceRoot="$sourceRoot/packages/wmfs"
+      '';
 
       build-system = [
         pkgs.python3Packages.nanobind
@@ -43,6 +46,11 @@ let
       nativeCheckInputs = [
         pkgs.python3Packages.pytestCheckHook
         workers.reference-worker
+      ];
+      pytestFlags = [
+        "-c"
+        "../../pytest.ini"
+        "../../tests"
       ];
       pythonImportsCheck = [ "wmfs" ];
     };

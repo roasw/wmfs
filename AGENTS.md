@@ -2,7 +2,8 @@
 
 ## Project Conventions
 
-- The Python package is named `wmfs` and is located in `wmfs` at the project root.
+- The `wmfs` Python distribution is in `packages/wmfs`; its import package is
+  `packages/wmfs/wmfs`.
 - Implement the runtime in Python first.
 - Use nanobind instead of pybind11 for future Python/C++ bindings.
 - Use C++20 or newer for all C++ code.

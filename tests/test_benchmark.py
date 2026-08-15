@@ -4,9 +4,24 @@ from pathlib import Path
 import pytest
 import torch
 
-from wmfs.benchmark import BenchmarkConfig, render_table, run_benchmarks, summarize
+from wmfs.benchmark import (
+    BenchmarkConfig,
+    _project_home,
+    render_table,
+    run_benchmarks,
+    summarize,
+)
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+
+
+def test_project_home_is_stable_inside_runtime_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Path(__file__).parents[1]
+    monkeypatch.chdir(repository / "packages" / "wmfs")
+
+    assert _project_home() == repository
 
 
 def test_summarize_reports_median_and_nearest_rank_p95() -> None:

@@ -31,7 +31,7 @@ test profile=build_type:
     just build "{{ profile }}"
     env \
       PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
-      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}${PYTHONPATH:+:$PYTHONPATH}" \
+      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs${PYTHONPATH:+:$PYTHONPATH}" \
       pytest -q
 
 # Test the local Release development artifacts.
@@ -79,7 +79,7 @@ format:
     -pre-commit run --all-files
     pre-commit run --all-files
 
-# Run root package, schema, formatting, and test checks.
+# Run package, schema, formatting, and test checks.
 check:
     nix flake check -L
 
