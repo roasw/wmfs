@@ -116,6 +116,7 @@
           reference-worker
         ];
         packages = [
+          pkgs.just
           pkgs.python3Packages.pytest
           reference-worker
         ];

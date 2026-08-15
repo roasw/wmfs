@@ -12,40 +12,38 @@ The development shell inherits build inputs from the runtime and worker package
 derivations with `inputsFrom`. This keeps the CMake and package builds on the
 same Python, Cap'n Proto, nanobind, Torch, compiler, and linker dependencies.
 
-The shell defaults `WMFS_BUILD_TYPE` to `Debug`. Configure one CMake tree for
-both the native runtime extension and C++ reference worker, then install the
-runnable artifacts into the matching ignored output directory:
+The shell provides a `justfile` that configures one CMake tree for both the
+native runtime extension and C++ reference worker, then installs the runnable
+artifacts into the matching ignored output directory:
 
 ```console
 nix develop
-cmake -S . -B "build/$WMFS_BUILD_TYPE" -G Ninja \
-  -DCMAKE_BUILD_TYPE="$WMFS_BUILD_TYPE" \
-  -DWMFS_BUILD_PYTHON_RUNTIME=ON \
-  -DWMFS_BUILD_REFERENCE_WORKER=ON
-cmake --build "build/$WMFS_BUILD_TYPE"
-cmake --install "build/$WMFS_BUILD_TYPE" \
-  --prefix "$PWD/output/$WMFS_BUILD_TYPE"
+just --list
+just debug
 ```
 
 This keeps generated CMake state under `build/Debug`, `build/Release`, and so
 on, while installed artifacts live under the corresponding `output/Debug` or
-`output/Release` prefix. Select another configuration when entering the shell:
+`output/Release` prefix. Build another configuration explicitly or select the
+default before entering the shell:
 
 ```console
+just release
+just build RelWithDebInfo
 WMFS_BUILD_TYPE=Release nix develop
 ```
 
 The shell adds the selected output prefix to `PYTHONPATH` and `PATH`. Re-run the
-build and install commands after source changes. Verify that the development
-artifacts are selected, then run the tests or benchmark directly from the
-source tree:
+corresponding `just build` recipe after source changes. Verify that the
+development artifacts are selected, then run tests directly from the source
+tree:
 
 ```console
 python -c 'import wmfs._native; print(wmfs._native.__file__)'
 command -v wmfs-reference-worker
 wmfs-reference-worker --help
-pytest
-python -m wmfs.benchmark --plugin-directory plugins --control-mode native
+just test
+just test-release
 ```
 
 The worker is normally launched by the runtime with private RPC and FD-passing
@@ -57,16 +55,17 @@ Release artifacts are produced by the Nix packages. They configure CMake in
 Release mode and package the runtime and workers independently:
 
 ```console
-nix build .#default .#reference-worker .#reference-python-worker
-nix flake check -L
+just package
+just check
+just check-pinned
 ```
 
 Use `nix shell`, rather than a development build, when measuring packaged
 Release performance:
 
 ```console
-nix shell .#default .#reference-worker -c wmfs-benchmark \
-  --plugin-directory plugins --control-mode native
+just benchmark
+just benchmark arena
 ```
 
 Reusable package derivations live under `nix/`; the root `flake.nix` only wires
@@ -240,8 +239,7 @@ Run the local-versus-isolated benchmark with the packaged Release runtime and
 worker:
 
 ```console
-nix shell .#default .#reference-worker -c wmfs-benchmark \
-  --plugin-directory plugins --control-mode native
+just benchmark
 ```
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
@@ -276,23 +274,20 @@ eager execution model.
 Write a machine-readable report with:
 
 ```console
-nix shell .#default .#reference-worker -c wmfs-benchmark \
-  --plugin-directory plugins --format json --output benchmark.json
+just benchmark-json benchmark.json
 ```
 
 Compare the trusted single-FD arena with:
 
 ```console
-nix shell .#default .#reference-worker -c wmfs-benchmark \
-  --plugin-directory plugins --memory-mode arena \
-  --arena-bytes 268435456 --format json --output arena.json
+just benchmark-json arena.json arena
 ```
 
 Sizes, iteration counts, dtype, Torch thread count, control mode, and
-high-frequency iteration count are configurable; run `wmfs-benchmark --help`
-for all options. The output allocation service metric measures metadata-driven
-runtime allocation and output mapping before the single operation RPC. Lazy
-page faults remain part of isolated end-to-end time.
+high-frequency iteration count are configurable; run `just benchmark-help` for
+all underlying options. The output allocation service metric measures
+metadata-driven runtime allocation and output mapping before the single
+operation RPC. Lazy page faults remain part of isolated end-to-end time.
 The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) records a
 complete safe-pool run, [`benchmarks/arena.json`](benchmarks/arena.json) records
 the trusted-arena comparison, and

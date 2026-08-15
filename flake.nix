@@ -46,6 +46,13 @@
             hooks = {
               nixfmt.enable = true;
 
+              just-fmt = {
+                enable = true;
+                entry = "${pkgs.just}/bin/just --fmt --check";
+                files = "(^|/)justfile$";
+                pass_filenames = false;
+              };
+
               gitlint.enable = true;
 
               mdformat = {
@@ -100,7 +107,10 @@
               self.packages.${system}.default
               self.packages.${system}.reference-worker
             ];
-            packages = pre-commit-check.enabledPackages ++ [ pkgs.python3Packages.pytest ];
+            packages = pre-commit-check.enabledPackages ++ [
+              pkgs.just
+              pkgs.python3Packages.pytest
+            ];
 
             shellHook = pre-commit-check.shellHook + ''
               repo_root="$(git rev-parse --show-toplevel)"

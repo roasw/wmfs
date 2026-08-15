@@ -3,15 +3,12 @@
 The reports were generated on 2026-08-15 with:
 
 ```console
-nix shell .#default .#reference-worker -c wmfs-benchmark \
-  --plugin-directory plugins --memory-mode pooled \
-  --control-mode native --high-frequency-iterations 1000 \
-  --format json --output benchmarks/baseline.json
-nix shell .#default .#reference-worker -c wmfs-benchmark \
-  --plugin-directory plugins --memory-mode arena \
-  --arena-bytes 268435456 --control-mode native \
-  --high-frequency-iterations 1000 --format json --output benchmarks/arena.json
+just benchmark-json benchmarks/baseline.json
+just benchmark-json benchmarks/arena.json arena
 ```
+
+The recipes use the packaged Release runtime and worker. Use `just benchmark`
+or `just benchmark arena` for the same measurements rendered interactively.
 
 The runtime used Python 3.14.6 and Torch 2.12.0. The native runtime extension
 and C++ worker were built in Release mode by their Nix packages. The worker
