@@ -3,6 +3,7 @@
 #include <ATen/ops/add.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/matmul.h>
+#include <ATen/ops/result_type.h>
 #include <c10/core/InferenceMode.h>
 #include <capnp/ez-rpc.h>
 #include <capnp/rpc-twoparty.h>
@@ -33,7 +34,7 @@
 namespace wmfs::reference {
 namespace {
 
-constexpr std::uint16_t PROTOCOL_VERSION = 6;
+constexpr std::uint16_t PROTOCOL_VERSION = 7;
 
 #define WMFS_STRINGIFY_INNER(value) #value
 #define WMFS_STRINGIFY(value) WMFS_STRINGIFY_INNER(value)
@@ -198,10 +199,10 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
                     scalars.floating.has_value(),
                 "Invalid add_scalar invocation");
         auto &input = inputs[0].tensor();
+        auto scalar = at::Scalar(*scalars.floating);
         validate_output(outputs[0].tensor(), input.sizes(),
-                        outputs[0].tensor().scalar_type());
-        at::add_out(outputs[0].tensor(), input, at::Scalar(*scalars.floating),
-                    at::Scalar(1));
+                        at::result_type(input, scalar));
+        at::add_out(outputs[0].tensor(), input, scalar, at::Scalar(1));
         return;
     }
     throw std::invalid_argument("Unknown operation ID " +
@@ -251,66 +252,79 @@ class ReferenceServer final : public ReferencePlugin::Server {
     }
 
     kj::Promise<void> invokeKnown(InvokeKnownContext context) override {
+        return translate_errors(
+            [&] { run_known(context.getParams().getInvocation(), false); });
+    }
+
+    kj::Promise<void>
+    invokeKnownProfiled(InvokeKnownProfiledContext context) override {
         return translate_errors([&] {
-            auto invocation = context.getParams().getInvocation();
-            auto invocation_id = invocation.getInvocationId();
-            struct InvocationCleanup {
-                MappedBufferCache &buffers;
-                std::uint64_t invocation_id;
-                ~InvocationCleanup() {
-                    buffers.finish_invocation(invocation_id);
-                }
-            } cleanup{buffers_, invocation_id};
-
-            c10::InferenceMode inference_mode;
-            auto profiled = invocation.getProfiled();
-            auto started = profiled ? std::chrono::steady_clock::now()
-                                    : std::chrono::steady_clock::time_point{};
-
-            auto view_started = profiled
-                                    ? std::chrono::steady_clock::now()
-                                    : std::chrono::steady_clock::time_point{};
-            std::vector<TensorLease> inputs;
-            inputs.reserve(invocation.getInputs().size());
-            for (auto descriptor : invocation.getInputs()) {
-                inputs.push_back(buffers_.tensor(descriptor, invocation_id));
-            }
-            auto input_views_ns =
-                profiled ? nanoseconds_since(view_started) : 0;
-
-            if (profiled) {
-                view_started = std::chrono::steady_clock::now();
-            }
-            std::vector<TensorLease> outputs;
-            outputs.reserve(invocation.getOutputs().size());
-            for (auto descriptor : invocation.getOutputs()) {
-                outputs.push_back(
-                    buffers_.tensor(descriptor, invocation_id, true));
-            }
-            auto output_views_ns =
-                profiled ? nanoseconds_since(view_started) : 0;
-
-            auto scalars = decode_scalars(invocation.getOperationId(),
-                                          invocation.getScalars());
-            auto kernel_started = profiled
-                                      ? std::chrono::steady_clock::now()
-                                      : std::chrono::steady_clock::time_point{};
-            execute_known(invocation.getOperationId(), inputs, outputs,
-                          scalars);
-            auto kernel_ns = profiled ? nanoseconds_since(kernel_started) : 0;
-            auto elapsed_ns = profiled ? nanoseconds_since(started) : 0;
-            auto measured_ns = input_views_ns + output_views_ns + kernel_ns;
-
+            auto measured =
+                run_known(context.getParams().getInvocation(), true);
             auto metrics = context.getResults().initMetrics();
-            metrics.setInputViewsNs(input_views_ns);
-            metrics.setOutputViewsNs(output_views_ns);
-            metrics.setDispatchNs(
-                elapsed_ns > measured_ns ? elapsed_ns - measured_ns : 0);
-            metrics.setKernelNs(kernel_ns);
+            metrics.setInputViewsNs(measured.input_views_ns);
+            metrics.setOutputViewsNs(measured.output_views_ns);
+            metrics.setDispatchNs(measured.dispatch_ns);
+            metrics.setKernelNs(measured.kernel_ns);
         });
     }
 
   private:
+    struct InvocationMeasurements {
+        std::uint64_t input_views_ns{};
+        std::uint64_t output_views_ns{};
+        std::uint64_t dispatch_ns{};
+        std::uint64_t kernel_ns{};
+    };
+
+    InvocationMeasurements run_known(KnownInvocation::Reader invocation,
+                                     bool profiled) {
+        auto invocation_id = invocation.getInvocationId();
+        struct InvocationCleanup {
+            MappedBufferCache &buffers;
+            std::uint64_t invocation_id;
+            ~InvocationCleanup() { buffers.finish_invocation(invocation_id); }
+        } cleanup{buffers_, invocation_id};
+
+        c10::InferenceMode inference_mode;
+        auto started = profiled ? std::chrono::steady_clock::now()
+                                : std::chrono::steady_clock::time_point{};
+        auto view_started = profiled ? std::chrono::steady_clock::now()
+                                     : std::chrono::steady_clock::time_point{};
+        std::vector<TensorLease> inputs;
+        inputs.reserve(invocation.getInputs().size());
+        for (auto descriptor : invocation.getInputs()) {
+            inputs.push_back(buffers_.tensor(descriptor, invocation_id));
+        }
+        auto input_views_ns = profiled ? nanoseconds_since(view_started) : 0;
+
+        if (profiled) {
+            view_started = std::chrono::steady_clock::now();
+        }
+        std::vector<TensorLease> outputs;
+        outputs.reserve(invocation.getOutputs().size());
+        for (auto descriptor : invocation.getOutputs()) {
+            outputs.push_back(buffers_.tensor(descriptor, invocation_id, true));
+        }
+        auto output_views_ns = profiled ? nanoseconds_since(view_started) : 0;
+
+        auto scalars = decode_scalars(invocation.getOperationId(),
+                                      invocation.getScalars());
+        auto kernel_started = profiled
+                                  ? std::chrono::steady_clock::now()
+                                  : std::chrono::steady_clock::time_point{};
+        execute_known(invocation.getOperationId(), inputs, outputs, scalars);
+        auto kernel_ns = profiled ? nanoseconds_since(kernel_started) : 0;
+        auto elapsed_ns = profiled ? nanoseconds_since(started) : 0;
+        auto measured_ns = input_views_ns + output_views_ns + kernel_ns;
+        return {
+            input_views_ns,
+            output_views_ns,
+            elapsed_ns > measured_ns ? elapsed_ns - measured_ns : 0,
+            kernel_ns,
+        };
+    }
+
     template <typename Function>
     static kj::Promise<void> translate_errors(Function &&function) {
         try {

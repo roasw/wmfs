@@ -47,9 +47,7 @@ class FdSender:
             if existing is not None:
                 if existing.writable or not actual_writable:
                     return False
-                raise RuntimeError(
-                    "Cannot upgrade an existing read-only worker mapping"
-                )
+                self._retire_buffer_locked(existing.buffer)
 
             message = self._schema.BufferTransfer.new_message(
                 transferId=secrets.randbits(64),
@@ -63,7 +61,7 @@ class FdSender:
             )
             message.map = None
             transferred_fd = buffer.duplicate_fd(writable=actual_writable)
-            self._mapped_buffers[key] = _RemoteMapping(
+            mapping = _RemoteMapping(
                 buffer=buffer,
                 writable=actual_writable,
                 arena=buffer.arena,
@@ -71,9 +69,10 @@ class FdSender:
                     None if buffer.arena or not actual_writable else invocation_id
                 ),
             )
+            self._send(message, transferred_fd)
+            self._mapped_buffers[key] = mapping
             if not buffer.arena:
                 buffer.register_recipient(self)
-            self._send(message, transferred_fd)
             self.transfer_count += 1
             return True
 

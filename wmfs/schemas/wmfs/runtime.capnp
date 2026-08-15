@@ -2,7 +2,7 @@
 
 using Tensor = import "/wmfs/tensor.capnp";
 
-const protocolVersion :UInt16 = 6;
+const protocolVersion :UInt16 = 7;
 
 enum TensorAccess {
   readOnly @0;
@@ -132,7 +132,6 @@ struct KnownInvocation {
   inputs @2 :List(Tensor.TensorDescriptor);
   outputs @3 :List(Tensor.TensorDescriptor);
   scalars @4 :List(ScalarArgument);
-  profiled @5 :Bool = false;
 }
 
 struct WorkerInvocationMetrics {
@@ -147,6 +146,7 @@ interface Plugin {
   ping @1 (nonce :UInt64) -> (nonce :UInt64);
   getEnvironment @2 () -> (environment :EnvironmentMetadata);
   getProtocolVersion @3 () -> (version :UInt16);
-  invokeKnown @4 (invocation :KnownInvocation) ->
+  invokeKnown @4 (invocation :KnownInvocation) -> ();
+  invokeKnownProfiled @5 (invocation :KnownInvocation) ->
       (metrics :WorkerInvocationMetrics);
 }

@@ -13,7 +13,7 @@ import torch
 from wmfs_reference import kernels
 from wmfs_reference.fd_transport import FdReceiver, MappedBufferCache
 
-_PROTOCOL_VERSION = 6
+_PROTOCOL_VERSION = 7
 
 
 def _load_schema(path: Path, import_paths: list[Path]) -> ModuleType:
@@ -72,51 +72,18 @@ def _make_server(
             invocation: object,
             _context: object,
             **_kwargs: object,
+        ) -> None:
+            _invoke_known(invocation, mapped_buffers, profiled=False)
+
+        async def invokeKnownProfiled(
+            self,
+            invocation: object,
+            _context: object,
+            **_kwargs: object,
         ) -> tuple[dict[str, int]]:
-            invocation_id = int(invocation.invocationId)
-            profiled = bool(invocation.profiled)
-            started = perf_counter_ns() if profiled else 0
-            input_views_ns = 0
-            output_views_ns = 0
-            kernel_ns = 0
-            try:
-                view_start = perf_counter_ns() if profiled else 0
-                inputs = [
-                    mapped_buffers.tensor(item, invocation_id=invocation_id)
-                    for item in invocation.inputs
-                ]
-                if profiled:
-                    input_views_ns = perf_counter_ns() - view_start
-                    view_start = perf_counter_ns()
-                outputs = [
-                    mapped_buffers.tensor(
-                        item,
-                        invocation_id=invocation_id,
-                        require_writable=True,
-                    )
-                    for item in invocation.outputs
-                ]
-                if profiled:
-                    output_views_ns = perf_counter_ns() - view_start
-                operation_id = int(invocation.operationId)
-                scalars = _decode_scalars(invocation.scalars, operation_id)
-                kernel_ns = _execute_known(
-                    operation_id, inputs, outputs, scalars, profiled=profiled
-                )
-            finally:
-                mapped_buffers.finish_invocation(invocation_id)
-            elapsed_ns = perf_counter_ns() - started if profiled else 0
-            return (
-                {
-                    "inputViewsNs": input_views_ns,
-                    "outputViewsNs": output_views_ns,
-                    "dispatchNs": max(
-                        0,
-                        elapsed_ns - input_views_ns - output_views_ns - kernel_ns,
-                    ),
-                    "kernelNs": kernel_ns,
-                },
-            )
+            metrics = _invoke_known(invocation, mapped_buffers, profiled=True)
+            assert metrics is not None
+            return (metrics,)
 
         async def matmul(
             self,
@@ -225,6 +192,57 @@ def _make_server(
             return (allocated.tensor,)
 
     return ReferencePlugin()
+
+
+def _invoke_known(
+    invocation: object,
+    mapped_buffers: MappedBufferCache,
+    *,
+    profiled: bool,
+) -> dict[str, int] | None:
+    invocation_id = int(invocation.invocationId)
+    started = perf_counter_ns() if profiled else 0
+    input_views_ns = 0
+    output_views_ns = 0
+    kernel_ns = 0
+    try:
+        view_start = perf_counter_ns() if profiled else 0
+        inputs = [
+            mapped_buffers.tensor(item, invocation_id=invocation_id)
+            for item in invocation.inputs
+        ]
+        if profiled:
+            input_views_ns = perf_counter_ns() - view_start
+            view_start = perf_counter_ns()
+        outputs = [
+            mapped_buffers.tensor(
+                item,
+                invocation_id=invocation_id,
+                require_writable=True,
+            )
+            for item in invocation.outputs
+        ]
+        if profiled:
+            output_views_ns = perf_counter_ns() - view_start
+        operation_id = int(invocation.operationId)
+        scalars = _decode_scalars(invocation.scalars, operation_id)
+        kernel_ns = _execute_known(
+            operation_id, inputs, outputs, scalars, profiled=profiled
+        )
+        elapsed_ns = perf_counter_ns() - started if profiled else 0
+    finally:
+        mapped_buffers.finish_invocation(invocation_id)
+    if not profiled:
+        return None
+    return {
+        "inputViewsNs": input_views_ns,
+        "outputViewsNs": output_views_ns,
+        "dispatchNs": max(
+            0,
+            elapsed_ns - input_views_ns - output_views_ns - kernel_ns,
+        ),
+        "kernelNs": kernel_ns,
+    }
 
 
 def _decode_scalars(arguments: object, operation_id: int) -> dict[int, object]:

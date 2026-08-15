@@ -8,18 +8,18 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <condition_variable>
 #include <cstring>
-#include <deque>
 #include <exception>
 #include <functional>
-#include <future>
 #include <mutex>
 #include <optional>
+#include <semaphore>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -79,16 +79,18 @@ void set_socket_timeout(int fd) {
     }
 }
 
-::DType dtype_from_name(const std::string &name) {
-    if (name == "float32")
+::DType dtype_from_native(TensorDType dtype) {
+    switch (dtype) {
+    case TensorDType::float32:
         return ::DType::FLOAT32;
-    if (name == "float64")
+    case TensorDType::float64:
         return ::DType::FLOAT64;
-    if (name == "int64")
+    case TensorDType::int64:
         return ::DType::INT64;
-    if (name == "uint8")
+    case TensorDType::uint8:
         return ::DType::UINT8;
-    throw std::invalid_argument("Unsupported tensor dtype: " + name);
+    }
+    throw std::invalid_argument("Unsupported native tensor dtype");
 }
 
 void write_descriptor(::TensorDescriptor::Builder target,
@@ -98,7 +100,7 @@ void write_descriptor(::TensorDescriptor::Builder target,
     target.setAllocationId(source.allocation_id);
     target.setOffset(source.offset);
     target.setByteLength(source.byte_length);
-    target.setDtype(dtype_from_name(source.dtype));
+    target.setDtype(dtype_from_native(source.dtype));
     auto shape = target.initShape(source.shape.size());
     for (std::size_t index = 0; index < source.shape.size(); ++index) {
         shape.set(index, source.shape[index]);
@@ -117,12 +119,12 @@ std::runtime_error kj_error(const kj::Exception &error) {
 
 struct Session::Impl {
     struct Worker {
-        explicit Worker(int rpc_fd, int control_fd,
+        explicit Worker(OwnedFd rpc_fd, OwnedFd control_fd,
                         std::uint64_t expected_fingerprint)
-            : io(kj::setupAsyncIo()), stream(io.lowLevelProvider->wrapSocketFd(
-                                          kj::AutoCloseFd(rpc_fd))),
-              client(*stream), plugin(client.bootstrap().castAs<::Plugin>()),
-              control_fd(control_fd) {
+            : control_fd(std::move(control_fd)), io(kj::setupAsyncIo()),
+              stream(io.lowLevelProvider->wrapSocketFd(
+                  kj::AutoCloseFd(rpc_fd.release()))),
+              client(*stream), plugin(client.bootstrap().castAs<::Plugin>()) {
             set_socket_timeout(this->control_fd.get());
             auto version =
                 io.provider->getTimer()
@@ -189,24 +191,21 @@ struct Session::Impl {
             send_control(message, transfer_id, -1);
         }
 
-        InvocationProfile invoke(std::uint64_t invocation_id,
-                                 std::uint32_t operation_id,
-                                 const std::vector<TensorDescriptor> &inputs,
-                                 const std::vector<TensorDescriptor> &outputs,
-                                 const std::vector<ScalarArgument> &scalars,
-                                 bool profiled) {
-            auto request = plugin.invokeKnownRequest();
-            auto invocation = request.initInvocation();
+        void write_invocation(::KnownInvocation::Builder invocation,
+                              std::uint64_t invocation_id,
+                              std::uint32_t operation_id,
+                              const TensorDescriptors &inputs,
+                              const TensorDescriptors &outputs,
+                              const std::vector<ScalarArgument> &scalars) {
             invocation.setInvocationId(invocation_id);
             invocation.setOperationId(operation_id);
-            invocation.setProfiled(profiled);
             auto input_builders = invocation.initInputs(inputs.size());
             for (std::size_t index = 0; index < inputs.size(); ++index) {
-                write_descriptor(input_builders[index], inputs[index]);
+                write_descriptor(input_builders[index], *inputs[index]);
             }
             auto output_builders = invocation.initOutputs(outputs.size());
             for (std::size_t index = 0; index < outputs.size(); ++index) {
-                write_descriptor(output_builders[index], outputs[index]);
+                write_descriptor(output_builders[index], *outputs[index]);
             }
             auto scalar_builders = invocation.initScalars(scalars.size());
             for (std::size_t index = 0; index < scalars.size(); ++index) {
@@ -228,17 +227,36 @@ struct Session::Impl {
                     break;
                 }
             }
-            const auto rpc_started =
-                profiled ? std::chrono::steady_clock::now()
-                         : std::chrono::steady_clock::time_point{};
+        }
+
+        void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
+                    const TensorDescriptors &inputs,
+                    const TensorDescriptors &outputs,
+                    const std::vector<ScalarArgument> &scalars) {
+            auto request = plugin.invokeKnownRequest();
+            write_invocation(request.initInvocation(), invocation_id,
+                             operation_id, inputs, outputs, scalars);
+            io.provider->getTimer()
+                .timeoutAfter(30 * kj::SECONDS, request.send())
+                .wait(io.waitScope);
+        }
+
+        InvocationProfile
+        invoke_profiled(std::uint64_t invocation_id, std::uint32_t operation_id,
+                        const TensorDescriptors &inputs,
+                        const TensorDescriptors &outputs,
+                        const std::vector<ScalarArgument> &scalars) {
+            auto request = plugin.invokeKnownProfiledRequest();
+            write_invocation(request.initInvocation(), invocation_id,
+                             operation_id, inputs, outputs, scalars);
+            const auto rpc_started = std::chrono::steady_clock::now();
             auto response = io.provider->getTimer()
                                 .timeoutAfter(30 * kj::SECONDS, request.send())
                                 .wait(io.waitScope);
             const auto rpc_ns =
-                profiled ? std::chrono::duration_cast<std::chrono::nanoseconds>(
-                               std::chrono::steady_clock::now() - rpc_started)
-                               .count()
-                         : 0;
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - rpc_started)
+                    .count();
             const auto worker = response.getMetrics();
             return InvocationProfile{
                 .rpc_ns = static_cast<std::uint64_t>(rpc_ns),
@@ -303,11 +321,21 @@ struct Session::Impl {
             }
         }
 
+        OwnedFd control_fd;
         kj::AsyncIoContext io;
         kj::Own<kj::AsyncIoStream> stream;
         capnp::TwoPartyClient client;
         ::Plugin::Client plugin;
-        OwnedFd control_fd;
+    };
+
+    struct Command {
+        Command(void *callable, void (*execute)(void *, Worker &))
+            : callable(callable), execute(execute) {}
+
+        void *callable;
+        void (*execute)(void *, Worker &);
+        std::exception_ptr error;
+        std::binary_semaphore complete{0};
     };
 
     Impl(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint)
@@ -316,10 +344,8 @@ struct Session::Impl {
           interrupt_control_fd(duplicate_fd(control_fd)),
           expected_fingerprint(expected_fingerprint),
           thread([this] { run(); }) {
-        std::unique_lock lock(queue_mutex);
-        ready_condition.wait(lock, [this] { return ready; });
+        startup_complete.acquire();
         if (startup_error) {
-            lock.unlock();
             thread.join();
             std::rethrow_exception(startup_error);
         }
@@ -328,84 +354,102 @@ struct Session::Impl {
     ~Impl() { close(); }
 
     template <typename Function> void submit(Function &&function) {
-        auto completion = std::make_shared<std::promise<void>>();
-        auto result = completion->get_future();
-        {
-            std::lock_guard lock(queue_mutex);
-            if (stopping) {
-                throw std::runtime_error("Native worker session is closed");
-            }
-            queue.emplace_back([function = std::forward<Function>(function),
-                                completion](Worker &worker) {
-                try {
-                    function(worker);
-                    completion->set_value();
-                } catch (const kj::Exception &error) {
-                    completion->set_exception(
-                        std::make_exception_ptr(kj_error(error)));
-                } catch (...) {
-                    completion->set_exception(std::current_exception());
-                }
-            });
+        std::unique_lock serial(submit_mutex);
+        if (stopping.load(std::memory_order_acquire)) {
+            throw std::runtime_error("Native worker session is closed");
         }
-        queue_condition.notify_one();
-        result.get();
+
+        using Callable = std::decay_t<Function>;
+        Callable callable(std::forward<Function>(function));
+        Command current(&callable, [](void *value, Worker &worker) {
+            (*static_cast<Callable *>(value))(worker);
+        });
+        command = &current;
+        command_ready.release();
+        current.complete.acquire();
+        command = nullptr;
+        if (current.error) {
+            std::rethrow_exception(current.error);
+        }
     }
 
     void run() {
         std::optional<Worker> worker;
         try {
-            worker.emplace(rpc_fd.release(), control_fd.release(),
+            worker.emplace(std::move(rpc_fd), std::move(control_fd),
                            expected_fingerprint);
         } catch (...) {
             startup_error = std::current_exception();
         }
-        {
-            std::lock_guard lock(queue_mutex);
-            ready = true;
-        }
-        ready_condition.notify_one();
+        startup_complete.release();
         if (!worker)
             return;
 
         while (true) {
-            std::function<void(Worker &)> command;
-            {
-                std::unique_lock lock(queue_mutex);
-                queue_condition.wait(
-                    lock, [this] { return stopping || !queue.empty(); });
-                if (stopping && queue.empty())
-                    break;
-                command = std::move(queue.front());
-                queue.pop_front();
+            command_ready.acquire();
+            auto *current = command;
+            if (current == nullptr) {
+                return;
             }
-            command(*worker);
+            try {
+                current->execute(current->callable, *worker);
+            } catch (const kj::Exception &error) {
+                try {
+                    current->error = std::make_exception_ptr(kj_error(error));
+                } catch (...) {
+                    current->error = std::current_exception();
+                }
+            } catch (...) {
+                current->error = std::current_exception();
+            }
+            current->complete.release();
         }
     }
 
     void close() {
-        {
-            std::unique_lock lock(queue_mutex);
-            if (stopping) {
-                closed_condition.wait(lock, [this] { return closed; });
-                return;
-            }
-            stopping = true;
-        }
+        std::lock_guard closing(close_mutex);
+        if (closed)
+            return;
+        stopping.store(true, std::memory_order_release);
         ::shutdown(interrupt_rpc_fd.get(), SHUT_RDWR);
         ::shutdown(interrupt_control_fd.get(), SHUT_RDWR);
-        queue_condition.notify_one();
+        {
+            std::lock_guard serial(submit_mutex);
+            command_ready.release();
+        }
         if (thread.joinable())
             thread.join();
         {
             std::lock_guard lock(mapping_mutex);
             mappings.clear();
         }
-        {
-            std::lock_guard lock(queue_mutex);
-            closed = true;
+        closed = true;
+    }
+
+    void finish_invocation(std::uint64_t invocation_id) {
+        std::lock_guard lock(mapping_mutex);
+        std::erase_if(mappings, [invocation_id](const auto &item) {
+            return !item.second.arena && item.second.writable &&
+                   item.second.invocation_id == invocation_id;
+        });
+    }
+
+    void abort_invocation(std::uint64_t invocation_id) {
+        std::lock_guard lock(mapping_mutex);
+        for (auto item = mappings.begin(); item != mappings.end();) {
+            const auto &mapping = item->second;
+            if (!mapping.arena && mapping.writable &&
+                mapping.invocation_id == invocation_id) {
+                const auto transfer_id = next_transfer_id++;
+                submit([mapping, transfer_id](Worker &worker) {
+                    worker.retire_buffer(mapping, transfer_id);
+                });
+                item = mappings.erase(item);
+                ++retirements;
+            } else {
+                ++item;
+            }
         }
-        closed_condition.notify_all();
     }
 
     OwnedFd rpc_fd;
@@ -413,14 +457,12 @@ struct Session::Impl {
     OwnedFd interrupt_rpc_fd;
     OwnedFd interrupt_control_fd;
     std::uint64_t expected_fingerprint;
-    std::thread thread;
-    std::mutex queue_mutex;
-    std::condition_variable queue_condition;
-    std::condition_variable ready_condition;
-    std::condition_variable closed_condition;
-    std::deque<std::function<void(Worker &)>> queue;
-    bool ready = false;
-    bool stopping = false;
+    std::binary_semaphore startup_complete{0};
+    std::binary_semaphore command_ready{0};
+    std::mutex submit_mutex;
+    std::mutex close_mutex;
+    std::atomic<bool> stopping{false};
+    Command *command = nullptr;
     bool closed = false;
     std::exception_ptr startup_error;
     mutable std::mutex mapping_mutex;
@@ -428,6 +470,7 @@ struct Session::Impl {
     std::uint64_t next_transfer_id = 1;
     std::uint64_t transfers = 0;
     std::uint64_t retirements = 0;
+    std::thread thread;
 };
 
 Session::Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint)
@@ -443,8 +486,7 @@ bool Session::mapping_required(const Mapping &mapping) const {
         return true;
     if (existing->second.writable || !mapping.writable)
         return false;
-    throw std::runtime_error(
-        "Cannot upgrade an existing read-only worker mapping");
+    return true;
 }
 
 void Session::map_buffer(const Mapping &mapping, int fd) {
@@ -455,8 +497,13 @@ void Session::map_buffer(const Mapping &mapping, int fd) {
     if (existing != impl_->mappings.end()) {
         if (existing->second.writable || !mapping.writable)
             return;
-        throw std::runtime_error(
-            "Cannot upgrade an existing read-only worker mapping");
+        const auto transfer_id = impl_->next_transfer_id++;
+        const auto previous = existing->second;
+        impl_->submit([previous, transfer_id](Impl::Worker &worker) {
+            worker.retire_buffer(previous, transfer_id);
+        });
+        impl_->mappings.erase(existing);
+        ++impl_->retirements;
     }
     const auto transfer_id = impl_->next_transfer_id++;
     const auto raw_fd = owned_fd.get();
@@ -480,26 +527,40 @@ void Session::retire_buffer(const Mapping &mapping) {
     ++impl_->retirements;
 }
 
-InvocationProfile Session::invoke(std::uint64_t invocation_id,
-                                  std::uint32_t operation_id,
-                                  const std::vector<TensorDescriptor> &inputs,
-                                  const std::vector<TensorDescriptor> &outputs,
-                                  const std::vector<ScalarArgument> &scalars,
-                                  bool profiled) {
-    InvocationProfile profile;
-    const auto submitted = profiled ? std::chrono::steady_clock::now()
-                                    : std::chrono::steady_clock::time_point{};
+void Session::abort_invocation(std::uint64_t invocation_id) {
+    impl_->abort_invocation(invocation_id);
+}
+
+void Session::invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
+                     const TensorDescriptors &inputs,
+                     const TensorDescriptors &outputs,
+                     const std::vector<ScalarArgument> &scalars) {
     try {
         impl_->submit([&](Impl::Worker &worker) {
-            if (profiled) {
-                profile.queue_wait_ns = static_cast<std::uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - submitted)
-                        .count());
-            }
-            const auto worker_profile =
-                worker.invoke(invocation_id, operation_id, inputs, outputs,
-                              scalars, profiled);
+            worker.invoke(invocation_id, operation_id, inputs, outputs,
+                          scalars);
+        });
+    } catch (...) {
+        impl_->finish_invocation(invocation_id);
+        throw;
+    }
+    impl_->finish_invocation(invocation_id);
+}
+
+InvocationProfile Session::invoke_profiled(
+    std::uint64_t invocation_id, std::uint32_t operation_id,
+    const TensorDescriptors &inputs, const TensorDescriptors &outputs,
+    const std::vector<ScalarArgument> &scalars) {
+    InvocationProfile profile;
+    const auto submitted = std::chrono::steady_clock::now();
+    try {
+        impl_->submit([&](Impl::Worker &worker) {
+            profile.queue_wait_ns = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - submitted)
+                    .count());
+            const auto worker_profile = worker.invoke_profiled(
+                invocation_id, operation_id, inputs, outputs, scalars);
             profile.rpc_ns = worker_profile.rpc_ns;
             profile.worker_input_views_ns =
                 worker_profile.worker_input_views_ns;
@@ -509,18 +570,10 @@ InvocationProfile Session::invoke(std::uint64_t invocation_id,
             profile.worker_kernel_ns = worker_profile.worker_kernel_ns;
         });
     } catch (...) {
-        std::lock_guard lock(impl_->mapping_mutex);
-        std::erase_if(impl_->mappings, [invocation_id](const auto &item) {
-            return !item.second.arena && item.second.writable &&
-                   item.second.invocation_id == invocation_id;
-        });
+        impl_->finish_invocation(invocation_id);
         throw;
     }
-    std::lock_guard lock(impl_->mapping_mutex);
-    std::erase_if(impl_->mappings, [invocation_id](const auto &item) {
-        return !item.second.arena && item.second.writable &&
-               item.second.invocation_id == invocation_id;
-    });
+    impl_->finish_invocation(invocation_id);
     return profile;
 }
 

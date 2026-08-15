@@ -143,9 +143,16 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         if "add_scalar" in config.operations
         else None
     )
+    high_frequency_out = (
+        _benchmark_high_frequency(
+            manifest, metadata, config, generator, reuse_output=True
+        )
+        if "add_scalar" in config.operations
+        else None
+    )
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -189,6 +196,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         "worker_startup_ms": summarize(startup),
         "rpc_round_trip_ms": summarize(rpc),
         "high_frequency_add_scalar": high_frequency,
+        "high_frequency_add_scalar_out": high_frequency_out,
         "operations": cases,
     }
 
@@ -251,6 +259,7 @@ def render_table(report: dict[str, Any]) -> str:
     startup = report["worker_startup_ms"]
     rpc = report["rpc_round_trip_ms"]
     high_frequency = report["high_frequency_add_scalar"]
+    high_frequency_out = report["high_frequency_add_scalar_out"]
     lines.extend(
         [
             "",
@@ -286,6 +295,12 @@ def render_table(report: dict[str, Any]) -> str:
                     f"{high_frequency['calls_per_second']:.0f} calls/s"
                 ),
             ]
+        )
+    if high_frequency_out is not None:
+        lines.append(
+            "High-frequency add_scalar with out: "
+            f"{_number(high_frequency_out['latency_ms']['median_ms'])} ms median; "
+            f"{high_frequency_out['calls_per_second']:.0f} calls/s"
         )
     diagnostic_rows = []
     for case in report["operations"]:
@@ -680,6 +695,8 @@ def _benchmark_high_frequency(
     metadata: PluginMetadata,
     config: BenchmarkConfig,
     generator: torch.Generator,
+    *,
+    reuse_output: bool = False,
 ) -> dict[str, Any]:
     size = config.sizes["add_scalar"]["small"]
     args, kwargs = _make_arguments("add_scalar", size, config.dtype, generator)
@@ -691,19 +708,32 @@ def _benchmark_high_frequency(
             buffers.from_tensor(item).tensor if isinstance(item, torch.Tensor) else item
             for item in args
         )
+        reusable = (
+            session.invoke("add_scalar", *managed_args, **kwargs)
+            if reuse_output
+            else None
+        )
         for _ in range(config.warmups):
-            result = session.invoke("add_scalar", *managed_args, **kwargs)
-            del result
-            buffers.collect()
+            result = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
+            if not reuse_output:
+                del result
+                buffers.collect()
         samples = []
         batch_start = perf_counter_ns()
         for _ in range(config.high_frequency_iterations):
             start = perf_counter_ns()
-            result = session.invoke("add_scalar", *managed_args, **kwargs)
-            del result
-            buffers.collect()
+            result = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
+            if not reuse_output:
+                del result
+                buffers.collect()
             samples.append(perf_counter_ns() - start)
         batch_elapsed = perf_counter_ns() - batch_start
+        validation = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
+        torch.testing.assert_close(validation, managed_args[0] + managed_args[1])
+        del validation
+        if reuse_output:
+            del result, reusable
+            buffers.collect()
     finally:
         try:
             if session is not None:

@@ -17,16 +17,20 @@ struct Mapping {
     std::uint64_t invocation_id;
 };
 
+enum class TensorDType { float32, float64, int64, uint8 };
+
 struct TensorDescriptor {
     std::uint64_t buffer_id;
     std::uint32_t generation;
     std::uint64_t allocation_id;
     std::uint64_t offset;
     std::uint64_t byte_length;
-    std::string dtype;
+    TensorDType dtype;
     std::vector<std::uint64_t> shape;
     std::vector<std::int64_t> strides;
 };
+
+using TensorDescriptors = std::vector<const TensorDescriptor *>;
 
 enum class ScalarKind { boolean, float64, int64, text };
 
@@ -59,12 +63,16 @@ class Session {
     bool mapping_required(const Mapping &mapping) const;
     void map_buffer(const Mapping &mapping, int fd);
     void retire_buffer(const Mapping &mapping);
-    InvocationProfile invoke(std::uint64_t invocation_id,
-                             std::uint32_t operation_id,
-                             const std::vector<TensorDescriptor> &inputs,
-                             const std::vector<TensorDescriptor> &outputs,
-                             const std::vector<ScalarArgument> &scalars,
-                             bool profiled);
+    void abort_invocation(std::uint64_t invocation_id);
+    void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
+                const TensorDescriptors &inputs,
+                const TensorDescriptors &outputs,
+                const std::vector<ScalarArgument> &scalars);
+    InvocationProfile
+    invoke_profiled(std::uint64_t invocation_id, std::uint32_t operation_id,
+                    const TensorDescriptors &inputs,
+                    const TensorDescriptors &outputs,
+                    const std::vector<ScalarArgument> &scalars);
     void ping(std::uint64_t nonce);
     void close();
 

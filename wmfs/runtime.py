@@ -9,7 +9,14 @@ from wmfs.registry import OperationMetadata, OperationRegistry
 
 
 class Backend(Protocol):
-    def invoke(self, operation: str, /, *args: object, **kwargs: object) -> object:
+    def invoke(
+        self,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
         """Invoke a registered operation."""
 
 
@@ -78,8 +85,17 @@ class Runtime:
             )
         self._backend_name = name
 
-    def invoke(self, operation: str, /, *args: object, **kwargs: object) -> object:
-        return self._backends[self._backend_name].invoke(operation, *args, **kwargs)
+    def invoke(
+        self,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
+        return self._backends[self._backend_name].invoke(
+            operation, *args, out=out, **kwargs
+        )
 
     def close(self) -> None:
         for backend in self._backends.values():

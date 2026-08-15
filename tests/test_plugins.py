@@ -20,6 +20,7 @@ def test_discovers_operations_over_rpc() -> None:
 
     assert registry.plugin_names == ("reference",)
     assert registry.operation_names == ("add_scalar", "matmul", "svd")
+    assert registry.plugin("reference").protocol_version == 7
     assert registry.plugin("reference").fingerprint != 0
 
     svd_metadata = registry.operation("svd")

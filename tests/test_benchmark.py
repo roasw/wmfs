@@ -40,13 +40,15 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 4
+    assert report["schema_version"] == 5
     assert report["configuration"]["plugin_directory"] == "plugins"
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
     assert report["configuration"]["control_mode"] == "native"
     assert report["high_frequency_add_scalar"]["iterations"] == 2
     assert report["high_frequency_add_scalar"]["calls_per_second"] > 0
+    assert report["high_frequency_add_scalar_out"]["iterations"] == 2
+    assert report["high_frequency_add_scalar_out"]["calls_per_second"] > 0
     assert svd_case["local_kernel_ms"]["count"] == 1
     assert svd_case["isolated_end_to_end_ms"]["count"] == 1
     assert set(svd_case["diagnostics"]) == {

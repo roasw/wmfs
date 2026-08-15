@@ -2,7 +2,7 @@ from collections.abc import Sequence
 
 import torch
 
-from wmfs.memory.buffers import ManagedTensor
+from wmfs.memory.buffers import BufferManager, ManagedTensor
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -26,6 +26,8 @@ def validate_operation_metadata(operation: OperationMetadata) -> None:
     if len(operation.output_plans) > _MAX_OUTPUTS:
         raise ValueError(f"Operation {operation.name!r} declares too many outputs")
     for scalar in operation.scalar_parameters:
+        if scalar.name == "out":
+            raise ValueError("Scalar parameter name 'out' is reserved")
         if scalar.kind not in {"boolean", "float64", "int64", "text"}:
             raise ValueError(f"Scalar {scalar.name!r} has an invalid kind")
         if scalar.required and scalar.default is not None:
@@ -68,6 +70,51 @@ def evaluate_outputs(
             raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
         results.append((shape, _evaluate_dtype(known.dtype, inputs, scalars)))
     return tuple(results)
+
+
+def bind_reusable_outputs(
+    operation: OperationMetadata,
+    expected: Sequence[tuple[tuple[int, ...], str]],
+    inputs: Sequence[ManagedTensor],
+    out: object,
+    buffers: BufferManager,
+) -> tuple[ManagedTensor, ...]:
+    if len(expected) == 1:
+        tensors = (out,)
+    elif isinstance(out, tuple) and len(out) == len(expected):
+        tensors = out
+    else:
+        raise TypeError(
+            f"Operation {operation.name!r} requires a tuple of "
+            f"{len(expected)} output tensors"
+        )
+
+    outputs: list[ManagedTensor] = []
+    input_allocations = {item.descriptor.allocation_id for item in inputs}
+    output_allocations: set[int] = set()
+    for parameter, value, (shape, dtype) in zip(
+        operation.tensor_outputs, tensors, expected, strict=True
+    ):
+        if not isinstance(value, torch.Tensor):
+            raise TypeError(f"Output {parameter.name!r} must be a tensor")
+        if value.requires_grad:
+            raise ValueError("Isolated out tensors cannot require gradients")
+        if value.is_inference() and not torch.is_inference_mode_enabled():
+            raise ValueError("Inference tensors require inference mode for out")
+        managed = buffers.managed(value)
+        if managed is None:
+            raise ValueError(
+                f"Output {parameter.name!r} must be a live tensor managed "
+                "by this isolated runtime"
+            )
+        if managed.descriptor.shape != shape or managed.descriptor.dtype != dtype:
+            raise ValueError(f"Output {parameter.name!r} has an invalid shape or dtype")
+        allocation_id = managed.descriptor.allocation_id
+        if allocation_id in input_allocations or allocation_id in output_allocations:
+            raise ValueError("Isolated outputs cannot alias inputs or each other")
+        output_allocations.add(allocation_id)
+        outputs.append(managed)
+    return tuple(outputs)
 
 
 def _validate_known_output(plan: OutputPlan, operation: OperationMetadata) -> None:

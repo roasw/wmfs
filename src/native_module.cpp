@@ -19,11 +19,26 @@ using wmfs::native::ScalarArgument;
 using wmfs::native::ScalarKind;
 using wmfs::native::Session;
 using wmfs::native::TensorDescriptor;
+using wmfs::native::TensorDescriptors;
+using wmfs::native::TensorDType;
 
 namespace {
 
 std::uint64_t integer(nb::handle value) {
     return nb::cast<std::uint64_t>(value);
+}
+
+TensorDType dtype_from_object(nb::handle value) {
+    const auto name = nb::cast<std::string>(value);
+    if (name == "float32")
+        return TensorDType::float32;
+    if (name == "float64")
+        return TensorDType::float64;
+    if (name == "int64")
+        return TensorDType::int64;
+    if (name == "uint8")
+        return TensorDType::uint8;
+    throw std::invalid_argument("Unsupported tensor dtype: " + name);
 }
 
 TensorDescriptor descriptor_from_object(nb::handle value) {
@@ -33,17 +48,24 @@ TensorDescriptor descriptor_from_object(nb::handle value) {
         .allocation_id = integer(value.attr("allocation_id")),
         .offset = integer(value.attr("offset")),
         .byte_length = integer(value.attr("byte_length")),
-        .dtype = nb::cast<std::string>(value.attr("dtype")),
+        .dtype = dtype_from_object(value.attr("dtype")),
         .shape = nb::cast<std::vector<std::uint64_t>>(value.attr("shape")),
         .strides = nb::cast<std::vector<std::int64_t>>(value.attr("strides")),
     };
 }
 
-std::vector<TensorDescriptor> descriptors_from_list(const nb::list &values) {
-    std::vector<TensorDescriptor> result;
-    result.reserve(values.size());
+struct DescriptorReferences {
+    TensorDescriptors values;
+    std::vector<nb::object> owners;
+};
+
+DescriptorReferences descriptors_from_list(const nb::list &values) {
+    DescriptorReferences result;
+    result.values.reserve(values.size());
+    result.owners.reserve(values.size());
     for (nb::handle value : values) {
-        result.push_back(descriptor_from_object(value));
+        result.owners.push_back(nb::borrow<nb::object>(value));
+        result.values.push_back(&nb::cast<const TensorDescriptor &>(value));
     }
     return result;
 }
@@ -111,21 +133,30 @@ void retire_buffer(Session &session, nb::object buffer) {
     session.retire_buffer(mapping);
 }
 
-nb::object invoke(Session &session, std::uint64_t invocation_id,
-                  std::uint32_t operation_id, const nb::list &inputs,
-                  const nb::list &outputs, const nb::list &scalars,
-                  bool profiled) {
+void invoke(Session &session, std::uint64_t invocation_id,
+            std::uint32_t operation_id, const nb::list &inputs,
+            const nb::list &outputs, const nb::list &scalars) {
+    auto native_inputs = descriptors_from_list(inputs);
+    auto native_outputs = descriptors_from_list(outputs);
+    auto native_scalars = scalars_from_list(scalars);
+    nb::gil_scoped_release release;
+    session.invoke(invocation_id, operation_id, native_inputs.values,
+                   native_outputs.values, native_scalars);
+}
+
+nb::dict invoke_profiled(Session &session, std::uint64_t invocation_id,
+                         std::uint32_t operation_id, const nb::list &inputs,
+                         const nb::list &outputs, const nb::list &scalars) {
     auto native_inputs = descriptors_from_list(inputs);
     auto native_outputs = descriptors_from_list(outputs);
     auto native_scalars = scalars_from_list(scalars);
     InvocationProfile profile;
     {
         nb::gil_scoped_release release;
-        profile = session.invoke(invocation_id, operation_id, native_inputs,
-                                 native_outputs, native_scalars, profiled);
+        profile = session.invoke_profiled(
+            invocation_id, operation_id, native_inputs.values,
+            native_outputs.values, native_scalars);
     }
-    if (!profiled)
-        return nb::none();
     nb::dict result;
     result["queue_wait_ns"] = profile.queue_wait_ns;
     result["rpc_ns"] = profile.rpc_ns;
@@ -139,14 +170,21 @@ nb::object invoke(Session &session, std::uint64_t invocation_id,
 } // namespace
 
 NB_MODULE(_native, module) {
+    nb::class_<TensorDescriptor>(module, "_TensorDescriptor");
+    module.def("_make_tensor_descriptor", &descriptor_from_object,
+               "descriptor"_a);
     nb::class_<Session>(module, "Session")
         .def(nb::init<int, int, std::uint64_t>(), "rpc_fd"_a, "control_fd"_a,
              "expected_fingerprint"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("ensure_mapped", &ensure_mapped, "buffer"_a, "invocation_id"_a,
              "writable"_a = false)
         .def("retire_buffer", &retire_buffer, "buffer"_a)
+        .def("abort_invocation", &Session::abort_invocation, "invocation_id"_a,
+             nb::call_guard<nb::gil_scoped_release>())
         .def("invoke", &invoke, "invocation_id"_a, "operation_id"_a, "inputs"_a,
-             "outputs"_a, "scalars"_a, "profiled"_a = false)
+             "outputs"_a, "scalars"_a)
+        .def("invoke_profiled", &invoke_profiled, "invocation_id"_a,
+             "operation_id"_a, "inputs"_a, "outputs"_a, "scalars"_a)
         .def(
             "ping",
             [](Session &session, std::uint64_t nonce) {

@@ -75,3 +75,50 @@ def test_isolated_backend_handles_repeated_calls(isolated_runtime: None) -> None
 
     for value in range(5):
         torch.testing.assert_close(add_scalar(source, value), source + value)
+
+
+def test_isolated_operations_reuse_managed_outputs(isolated_runtime: None) -> None:
+    a = torch.arange(6, dtype=torch.float64).reshape(2, 3)
+    b = torch.arange(6, dtype=torch.float64).reshape(3, 2)
+
+    product = matmul(a, b)
+    assert matmul(a, b, out=product) is product
+    torch.testing.assert_close(product, a @ b)
+
+    added = add_scalar(a, 0.0)
+    version = added._version
+    assert add_scalar(a, 1.5, out=added) is added
+    assert added._version == version + 1
+    torch.testing.assert_close(added, a + 1.5)
+
+    outputs = svd(a, full_matrices=False)
+    result = svd(a, full_matrices=False, out=outputs)
+    assert all(actual is expected for actual, expected in zip(result, outputs))
+    torch.testing.assert_close(result[0] @ torch.diag(result[1]) @ result[2], a)
+
+
+def test_isolated_out_requires_non_aliasing_managed_tensor(
+    isolated_runtime: None,
+) -> None:
+    source = torch.arange(4, dtype=torch.float32)
+    with pytest.raises(ValueError, match="managed"):
+        add_scalar(source, 1.0, out=torch.empty_like(source))
+
+    managed = add_scalar(source, 0.0)
+    with pytest.raises(ValueError, match="alias"):
+        add_scalar(managed, 1.0, out=managed)
+
+    differentiable = source.clone().requires_grad_()
+    with pytest.raises(RuntimeError, match="autograd"):
+        add_scalar(differentiable, 1.0, out=managed)
+
+
+def test_isolated_out_upgrades_prior_read_only_mapping(
+    isolated_runtime: None,
+) -> None:
+    source = torch.arange(4, dtype=torch.float32)
+    reusable = add_scalar(source, 0.0)
+    add_scalar(reusable, 1.0)
+
+    assert add_scalar(source, 2.0, out=reusable) is reusable
+    torch.testing.assert_close(reusable, source + 2.0)

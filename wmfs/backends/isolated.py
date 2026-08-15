@@ -23,7 +23,14 @@ class IsolatedBackend:
         self._control_mode = control_mode
         self._sessions: dict[str, WorkerSession | NativeWorkerSession] = {}
 
-    def invoke(self, operation: str, /, *args: object, **kwargs: object) -> object:
+    def invoke(
+        self,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
         plugin_name = self._registry.plugin_for_operation(operation)
         session = self._sessions.get(plugin_name)
         if session is None:
@@ -39,7 +46,7 @@ class IsolatedBackend:
             else:
                 session = WorkerSession(self._manifests[plugin_name], self._buffers)
             self._sessions[plugin_name] = session
-        return session.invoke(operation, *args, **kwargs)
+        return session.invoke(operation, *args, out=out, **kwargs)
 
     def close(self) -> None:
         for session in self._sessions.values():

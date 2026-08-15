@@ -141,6 +141,20 @@ isolated modes. The current prototype supports contiguous CPU tensors and
 serializes calls within each worker. Repeated calls reuse the persistent RPC
 connection and cached arena or read-only pooled mappings.
 
+Like PyTorch, these operations accept an optional `out=` argument. Local mode
+accepts an ordinary compatible Torch tensor. Isolated mode requires a live
+managed result from the same runtime so the worker can write it without a copy:
+
+```python
+result = add_scalar(a, 0.0)
+for value in values:
+    add_scalar(a, value, out=result)
+```
+
+Reusable isolated outputs must have the schema-derived shape and dtype, cannot
+require gradients, and cannot alias an input or another output. Existing calls
+without `out=` retain the allocate-and-return behavior.
+
 ## Incompatible Worker Environment
 
 `environments/nixos-25.05` is an independent nested flake that rebuilds the
@@ -193,6 +207,13 @@ largest avoidable cheap-operation cost, so each worker mapping keeps a bounded
 cache of validated tensor views. Moving the worker control plane and view
 construction to C++ reduced the remaining Python worker scheduling overhead.
 Ordinary calls leave profiling disabled.
+
+Protocol v7 uses separate ordinary and profiled RPC methods, so ordinary calls
+carry no metrics result. The native session caches value-only tensor descriptors
+and uses an allocation-free synchronous handoff to its thread-affine KJ event
+loop. At this point process scheduling and the required RPC completion dominate
+cheap calls; larger improvements require output reuse, batching, or changing the
+eager execution model.
 
 Write a machine-readable report with:
 

@@ -1,6 +1,6 @@
 {
-    "schema_version": 4,
-    "generated_at_utc": "2026-08-15T09:41:11.093353+00:00",
+    "schema_version": 5,
+    "generated_at_utc": "2026-08-15T10:24:10.049851+00:00",
     "environment": {
         "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.42",
         "machine": "x86_64",
@@ -13,15 +13,15 @@
         "worker": {
             "plugin_name": "reference",
             "plugin_version": "0.1.0",
-            "worker": "/nix/store/0qx5dhmwrap88vwpw0a5drgvk9i2145y-wmfs-reference-worker-0.1.0/bin/wmfs-reference-worker",
+            "worker": "/nix/store/mv69bz37ca2i164q0hsa96zgl13b627c-wmfs-reference-worker-0.1.0/bin/wmfs-reference-worker",
             "python_version": "none",
             "torch_version": "2.12.0",
             "glibc_version": "2.42",
-            "executable": "/nix/store/0qx5dhmwrap88vwpw0a5drgvk9i2145y-wmfs-reference-worker-0.1.0/bin/wmfs-reference-worker"
+            "executable": "/nix/store/mv69bz37ca2i164q0hsa96zgl13b627c-wmfs-reference-worker-0.1.0/bin/wmfs-reference-worker"
         }
     },
     "configuration": {
-        "plugin_directory": "../../../../../nix/store/0qx5dhmwrap88vwpw0a5drgvk9i2145y-wmfs-reference-worker-0.1.0/share/wmfs/plugins/reference",
+        "plugin_directory": "../../../../../nix/store/mv69bz37ca2i164q0hsa96zgl13b627c-wmfs-reference-worker-0.1.0/share/wmfs/plugins/reference",
         "operations": [
             "matmul",
             "svd",
@@ -64,25 +64,35 @@
     },
     "worker_startup_ms": {
         "count": 3,
-        "median_ms": 99.905273,
-        "p95_ms": 100.705126,
-        "standard_deviation_ms": 0.5676420394867409
+        "median_ms": 102.741907,
+        "p95_ms": 108.527131,
+        "standard_deviation_ms": 3.4093966466763588
     },
     "rpc_round_trip_ms": {
         "count": 50,
-        "median_ms": 0.0859195,
-        "p95_ms": 0.145134,
-        "standard_deviation_ms": 0.021516860311197823
+        "median_ms": 0.09004,
+        "p95_ms": 0.231803,
+        "standard_deviation_ms": 0.12597778516406613
     },
     "high_frequency_add_scalar": {
         "iterations": 1000,
         "latency_ms": {
             "count": 1000,
-            "median_ms": 0.1858425,
-            "p95_ms": 0.326956,
-            "standard_deviation_ms": 0.16331563346661243
+            "median_ms": 0.2017785,
+            "p95_ms": 0.325821,
+            "standard_deviation_ms": 0.08986442565708563
         },
-        "calls_per_second": 4585.451773840749
+        "calls_per_second": 4440.337724094687
+    },
+    "high_frequency_add_scalar_out": {
+        "iterations": 1000,
+        "latency_ms": {
+            "count": 1000,
+            "median_ms": 0.1575025,
+            "p95_ms": 0.261878,
+            "standard_deviation_ms": 0.06570055315031159
+        },
+        "calls_per_second": 5608.085243792999
     },
     "operations": [
         {
@@ -91,18 +101,18 @@
             "shape": "64x64",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.013478,
-                "p95_ms": 0.030193,
-                "standard_deviation_ms": 0.00712965060925148
+                "median_ms": 0.0211035,
+                "p95_ms": 0.036818,
+                "standard_deviation_ms": 0.008876441642910744
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 0.2180825,
-                "p95_ms": 0.373452,
-                "standard_deviation_ms": 0.06488423048969603
+                "median_ms": 0.338928,
+                "p95_ms": 0.600122,
+                "standard_deviation_ms": 0.09414703897866358
             },
-            "absolute_overhead_ms": 0.20460450000000002,
-            "percentage_overhead": 1518.0627689568187,
+            "absolute_overhead_ms": 0.3178245,
+            "percentage_overhead": 1506.0274362072641,
             "memory_pool": {
                 "allocation_requests": 45,
                 "pool_hits": 44,
@@ -120,118 +130,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 0.391302,
-                    "p95_ms": 0.669058,
-                    "standard_deviation_ms": 0.14075147644270025
+                    "median_ms": 0.235833,
+                    "p95_ms": 0.592777,
+                    "standard_deviation_ms": 0.14649410214558128
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.057129,
-                    "p95_ms": 0.146568,
-                    "standard_deviation_ms": 0.03690773992863827
+                    "median_ms": 0.04628,
+                    "p95_ms": 0.131469,
+                    "standard_deviation_ms": 0.03468551929898124
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.200197,
-                    "p95_ms": 0.2591,
-                    "standard_deviation_ms": 0.03422305015395326
+                    "median_ms": 0.199258,
+                    "p95_ms": 0.233252,
+                    "standard_deviation_ms": 0.01815402029303702
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.004104,
-                    "p95_ms": 0.006138,
-                    "standard_deviation_ms": 0.0009907212726090017
+                    "median_ms": 0.004171,
+                    "p95_ms": 0.005702,
+                    "standard_deviation_ms": 0.0008246758393453757
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.025311,
-                    "p95_ms": 0.053892,
-                    "standard_deviation_ms": 0.01159722236744644
+                    "median_ms": 0.024395,
+                    "p95_ms": 0.051189,
+                    "standard_deviation_ms": 0.010848694269818835
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.018119,
-                    "p95_ms": 0.052218,
-                    "standard_deviation_ms": 0.013724944438503202
+                    "median_ms": 0.016245,
+                    "p95_ms": 0.036529,
+                    "standard_deviation_ms": 0.007940099455296513
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.009089,
-                    "p95_ms": 0.014481,
-                    "standard_deviation_ms": 0.0027005897226346693
+                    "median_ms": 0.0073065,
+                    "p95_ms": 0.012648,
+                    "standard_deviation_ms": 0.002618212779741173
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.025442,
-                    "p95_ms": 0.203711,
-                    "standard_deviation_ms": 0.07092205395220869
+                    "median_ms": 0.021121,
+                    "p95_ms": 0.03679,
+                    "standard_deviation_ms": 0.007072091204163023
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.023483,
-                    "p95_ms": 0.200761,
-                    "standard_deviation_ms": 0.07052329108429357
+                    "median_ms": 0.019082,
+                    "p95_ms": 0.035179,
+                    "standard_deviation_ms": 0.007042149512755321
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.001603,
-                    "p95_ms": 0.002529,
-                    "standard_deviation_ms": 0.0005447645362906804
+                    "median_ms": 0.001675,
+                    "p95_ms": 0.002319,
+                    "standard_deviation_ms": 0.0003881841830883891
                 },
                 "output_allocations_per_invocation": 1,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.001305,
-                    "p95_ms": 0.001704,
-                    "standard_deviation_ms": 0.00019702243527070718
+                    "median_ms": 0.00116,
+                    "p95_ms": 0.00169,
+                    "standard_deviation_ms": 0.0002790161285660741
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.002885,
-                    "p95_ms": 0.00359,
-                    "standard_deviation_ms": 0.0003237078930146746
+                    "median_ms": 0.002561,
+                    "p95_ms": 0.004186,
+                    "standard_deviation_ms": 0.0006750758772167762
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 0.230266,
-                    "p95_ms": 0.303754,
-                    "standard_deviation_ms": 0.05997852473477486
+                    "median_ms": 0.115726,
+                    "p95_ms": 0.180601,
+                    "standard_deviation_ms": 0.02577064397643179
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.02498,
-                    "p95_ms": 0.036563,
-                    "standard_deviation_ms": 0.00735616725204097
+                    "median_ms": 0.013763,
+                    "p95_ms": 0.019393,
+                    "standard_deviation_ms": 0.0022155495029450366
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 0.153748,
-                    "p95_ms": 0.227242,
-                    "standard_deviation_ms": 0.05288636513280148
+                    "median_ms": 0.076393,
+                    "p95_ms": 0.12518,
+                    "standard_deviation_ms": 0.019113241644472558
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.001188,
-                    "p95_ms": 0.001445,
-                    "standard_deviation_ms": 0.00016069523950634009
+                    "median_ms": 0.001058,
+                    "p95_ms": 0.001885,
+                    "standard_deviation_ms": 0.0003515625691111043
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.002355,
-                    "p95_ms": 0.003094,
-                    "standard_deviation_ms": 0.0003188483024888168
+                    "median_ms": 0.001647,
+                    "p95_ms": 0.003281,
+                    "standard_deviation_ms": 0.0006530750033495388
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000144,
-                    "p95_ms": 0.000161,
-                    "standard_deviation_ms": 8.546344247688599e-06
+                    "median_ms": 0.000135,
+                    "p95_ms": 0.000153,
+                    "standard_deviation_ms": 8.818163074019441e-06
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 0.010583,
-                    "p95_ms": 0.012205,
-                    "standard_deviation_ms": 0.0008955868690417474
+                    "median_ms": 0.008209,
+                    "p95_ms": 0.022238,
+                    "standard_deviation_ms": 0.005467876128809065
                 }
             }
         },
@@ -241,18 +251,18 @@
             "shape": "256x256",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.2455325,
-                "p95_ms": 0.259012,
-                "standard_deviation_ms": 0.015550024097730524
+                "median_ms": 0.23237,
+                "p95_ms": 0.290415,
+                "standard_deviation_ms": 0.02512517991199267
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 0.480586,
-                "p95_ms": 1.956989,
-                "standard_deviation_ms": 0.44978173448800696
+                "median_ms": 0.5228255,
+                "p95_ms": 0.695127,
+                "standard_deviation_ms": 0.07031609931900376
             },
-            "absolute_overhead_ms": 0.23505350000000003,
-            "percentage_overhead": 95.73213322065308,
+            "absolute_overhead_ms": 0.2904555000000001,
+            "percentage_overhead": 124.99698756293847,
             "memory_pool": {
                 "allocation_requests": 45,
                 "pool_hits": 44,
@@ -270,118 +280,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 0.543756,
-                    "p95_ms": 1.177525,
-                    "standard_deviation_ms": 0.2539753190352165
+                    "median_ms": 0.520038,
+                    "p95_ms": 1.112032,
+                    "standard_deviation_ms": 0.23852274831755568
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.082467,
-                    "p95_ms": 0.252776,
-                    "standard_deviation_ms": 0.07086312483485328
+                    "median_ms": 0.067793,
+                    "p95_ms": 0.230022,
+                    "standard_deviation_ms": 0.06429776128731077
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.199504,
-                    "p95_ms": 0.259106,
-                    "standard_deviation_ms": 0.04395764315065129
+                    "median_ms": 0.174831,
+                    "p95_ms": 0.191136,
+                    "standard_deviation_ms": 0.01578722091566467
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.005152,
-                    "p95_ms": 0.006862,
-                    "standard_deviation_ms": 0.0009623416441160592
+                    "median_ms": 0.004749,
+                    "p95_ms": 0.005565,
+                    "standard_deviation_ms": 0.000788418264628617
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.024234,
-                    "p95_ms": 0.056011,
-                    "standard_deviation_ms": 0.01285910670925473
+                    "median_ms": 0.023174,
+                    "p95_ms": 0.049584,
+                    "standard_deviation_ms": 0.010457745963638626
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.017856,
-                    "p95_ms": 0.047432,
-                    "standard_deviation_ms": 0.011926630830205152
+                    "median_ms": 0.017488,
+                    "p95_ms": 0.045578,
+                    "standard_deviation_ms": 0.011387349566953673
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.010355,
-                    "p95_ms": 0.016944,
-                    "standard_deviation_ms": 0.003411003548810819
+                    "median_ms": 0.0094125,
+                    "p95_ms": 0.012151,
+                    "standard_deviation_ms": 0.002280791836183215
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.033347,
-                    "p95_ms": 0.049133,
-                    "standard_deviation_ms": 0.00758704900208243
+                    "median_ms": 0.032055,
+                    "p95_ms": 0.034979,
+                    "standard_deviation_ms": 0.004724092480043125
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.031226,
-                    "p95_ms": 0.04677,
-                    "standard_deviation_ms": 0.007500287690482279
+                    "median_ms": 0.029946,
+                    "p95_ms": 0.03315,
+                    "standard_deviation_ms": 0.004444192282068812
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.001687,
-                    "p95_ms": 0.002006,
-                    "standard_deviation_ms": 0.00020656369477718004
+                    "median_ms": 0.001385,
+                    "p95_ms": 0.002236,
+                    "standard_deviation_ms": 0.0003933341581912255
                 },
                 "output_allocations_per_invocation": 1,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.001728,
-                    "p95_ms": 0.002211,
-                    "standard_deviation_ms": 0.0002609099461500078
+                    "median_ms": 0.001568,
+                    "p95_ms": 0.001823,
+                    "standard_deviation_ms": 0.0002167492560540866
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.003685,
-                    "p95_ms": 0.005874,
-                    "standard_deviation_ms": 0.000989438305302559
+                    "median_ms": 0.003374,
+                    "p95_ms": 0.004552,
+                    "standard_deviation_ms": 0.0006884244620871632
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 0.410993,
-                    "p95_ms": 0.517332,
-                    "standard_deviation_ms": 0.05776498548290305
+                    "median_ms": 0.387874,
+                    "p95_ms": 0.483341,
+                    "standard_deviation_ms": 0.0445615784908928
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.017564,
-                    "p95_ms": 0.037181,
-                    "standard_deviation_ms": 0.007984208429143118
+                    "median_ms": 0.018441,
+                    "p95_ms": 0.035257,
+                    "standard_deviation_ms": 0.006995100187988733
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 0.350655,
-                    "p95_ms": 0.437,
-                    "standard_deviation_ms": 0.051286481712045716
+                    "median_ms": 0.326821,
+                    "p95_ms": 0.400747,
+                    "standard_deviation_ms": 0.0327320488182454
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.001334,
-                    "p95_ms": 0.002731,
-                    "standard_deviation_ms": 0.0005827544937621674
+                    "median_ms": 0.001403,
+                    "p95_ms": 0.001629,
+                    "standard_deviation_ms": 0.00013964870210639267
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.002347,
-                    "p95_ms": 0.004897,
-                    "standard_deviation_ms": 0.0011248103128972456
+                    "median_ms": 0.003407,
+                    "p95_ms": 0.003466,
+                    "standard_deviation_ms": 0.0004049807896678557
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000149,
-                    "p95_ms": 0.000168,
-                    "standard_deviation_ms": 1.0575443253121828e-05
+                    "median_ms": 0.000148,
+                    "p95_ms": 0.00024,
+                    "standard_deviation_ms": 3.9646437418764377e-05
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 0.246625,
-                    "p95_ms": 0.290205,
-                    "standard_deviation_ms": 0.022581273994174908
+                    "median_ms": 0.225508,
+                    "p95_ms": 0.283145,
+                    "standard_deviation_ms": 0.023310709015386042
                 }
             }
         },
@@ -391,18 +401,18 @@
             "shape": "2048x2048",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 124.262425,
-                "p95_ms": 131.406551,
-                "standard_deviation_ms": 3.1644183304777593
+                "median_ms": 123.238316,
+                "p95_ms": 126.579488,
+                "standard_deviation_ms": 2.440704858762454
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 126.561603,
-                "p95_ms": 128.928931,
-                "standard_deviation_ms": 3.4180926549869826
+                "median_ms": 125.040196,
+                "p95_ms": 128.220145,
+                "standard_deviation_ms": 2.6919918546934887
             },
-            "absolute_overhead_ms": 2.299178000000012,
-            "percentage_overhead": 1.850260044418103,
+            "absolute_overhead_ms": 1.801879999999997,
+            "percentage_overhead": 1.4621102092956197,
             "memory_pool": {
                 "allocation_requests": 45,
                 "pool_hits": 44,
@@ -420,118 +430,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 131.837802,
-                    "p95_ms": 139.450457,
-                    "standard_deviation_ms": 3.41010631093079
+                    "median_ms": 127.088412,
+                    "p95_ms": 138.330881,
+                    "standard_deviation_ms": 5.532788234531917
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 3.060461,
-                    "p95_ms": 8.157082,
-                    "standard_deviation_ms": 2.05976040994238
+                    "median_ms": 2.970693,
+                    "p95_ms": 7.906553,
+                    "standard_deviation_ms": 2.0018642986094335
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.318008,
-                    "p95_ms": 0.392084,
-                    "standard_deviation_ms": 0.05607373895006468
+                    "median_ms": 0.217895,
+                    "p95_ms": 0.521877,
+                    "standard_deviation_ms": 0.12328475669343718
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.007565,
-                    "p95_ms": 0.008203,
-                    "standard_deviation_ms": 0.000538145556517937
+                    "median_ms": 0.007498,
+                    "p95_ms": 0.007658,
+                    "standard_deviation_ms": 0.0001844316675628131
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.028052,
-                    "p95_ms": 0.09303,
-                    "standard_deviation_ms": 0.026478860025310757
+                    "median_ms": 0.027999,
+                    "p95_ms": 0.063981,
+                    "standard_deviation_ms": 0.014200073512485771
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.018678,
-                    "p95_ms": 0.101799,
-                    "standard_deviation_ms": 0.033078898776108014
+                    "median_ms": 0.020247,
+                    "p95_ms": 0.103401,
+                    "standard_deviation_ms": 0.033213743224153464
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.0207485,
-                    "p95_ms": 0.026363,
-                    "standard_deviation_ms": 0.0026579629436845054
+                    "median_ms": 0.0219265,
+                    "p95_ms": 0.025722,
+                    "standard_deviation_ms": 0.002572774136996872
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.063651,
-                    "p95_ms": 0.068493,
-                    "standard_deviation_ms": 0.0026020749412728294
+                    "median_ms": 0.063623,
+                    "p95_ms": 0.07402,
+                    "standard_deviation_ms": 0.004736491317420523
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.061754,
-                    "p95_ms": 0.066419,
-                    "standard_deviation_ms": 0.002546139084967669
+                    "median_ms": 0.061373,
+                    "p95_ms": 0.07133,
+                    "standard_deviation_ms": 0.004596233588493953
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.001544,
-                    "p95_ms": 0.001909,
-                    "standard_deviation_ms": 0.00016650933907742232
+                    "median_ms": 0.001644,
+                    "p95_ms": 0.002107,
+                    "standard_deviation_ms": 0.0002012049701175396
                 },
                 "output_allocations_per_invocation": 1,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.002741,
-                    "p95_ms": 0.003107,
-                    "standard_deviation_ms": 0.00015568378207122283
+                    "median_ms": 0.002827,
+                    "p95_ms": 0.002893,
+                    "standard_deviation_ms": 9.44787806864589e-05
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.006224,
-                    "p95_ms": 0.006991,
-                    "standard_deviation_ms": 0.0003953972179972945
+                    "median_ms": 0.006329,
+                    "p95_ms": 0.006776,
+                    "standard_deviation_ms": 0.0003145475480750088
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 126.704411,
-                    "p95_ms": 130.68199,
-                    "standard_deviation_ms": 2.5840614035710217
+                    "median_ms": 121.480408,
+                    "p95_ms": 125.394809,
+                    "standard_deviation_ms": 1.7244173418997386
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.021066,
-                    "p95_ms": 0.033787,
-                    "standard_deviation_ms": 0.006139451460839152
+                    "median_ms": 0.0312,
+                    "p95_ms": 0.092625,
+                    "standard_deviation_ms": 0.025493793828302604
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 126.614511,
-                    "p95_ms": 130.593446,
-                    "standard_deviation_ms": 2.5943874002366414
+                    "median_ms": 121.341865,
+                    "p95_ms": 125.290476,
+                    "standard_deviation_ms": 1.7415053237549865
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.003193,
-                    "p95_ms": 0.004731,
-                    "standard_deviation_ms": 0.0006981654245234435
+                    "median_ms": 0.004117,
+                    "p95_ms": 0.004356,
+                    "standard_deviation_ms": 0.0006745142252021079
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.006088,
-                    "p95_ms": 0.007116,
-                    "standard_deviation_ms": 0.0005057147021790053
+                    "median_ms": 0.00635,
+                    "p95_ms": 0.007502,
+                    "standard_deviation_ms": 0.0005525368404007102
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000157,
-                    "p95_ms": 0.000167,
-                    "standard_deviation_ms": 5.571355310873647e-06
+                    "median_ms": 0.000274,
+                    "p95_ms": 0.000352,
+                    "standard_deviation_ms": 3.561235740582193e-05
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 126.403023,
-                    "p95_ms": 130.350381,
-                    "standard_deviation_ms": 2.5853048413487025
+                    "median_ms": 120.966768,
+                    "p95_ms": 124.908702,
+                    "standard_deviation_ms": 1.7397708834844432
                 }
             }
         },
@@ -541,18 +551,18 @@
             "shape": "32x32",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.111823,
-                "p95_ms": 0.122518,
-                "standard_deviation_ms": 0.017599375352835678
+                "median_ms": 0.1093575,
+                "p95_ms": 0.147725,
+                "standard_deviation_ms": 0.024123807731989574
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 0.4144255,
-                "p95_ms": 0.49501,
-                "standard_deviation_ms": 0.0479370077334829
+                "median_ms": 0.4762825,
+                "p95_ms": 0.686603,
+                "standard_deviation_ms": 0.09847608481961496
             },
-            "absolute_overhead_ms": 0.3026025,
-            "percentage_overhead": 270.6084615866145,
+            "absolute_overhead_ms": 0.366925,
+            "percentage_overhead": 335.52797018951605,
             "memory_pool": {
                 "allocation_requests": 80,
                 "pool_hits": 79,
@@ -570,118 +580,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 0.383555,
-                    "p95_ms": 0.83681,
-                    "standard_deviation_ms": 0.18571225340229977
+                    "median_ms": 0.536902,
+                    "p95_ms": 0.818474,
+                    "standard_deviation_ms": 0.17141022526955618
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.034787,
-                    "p95_ms": 0.091548,
-                    "standard_deviation_ms": 0.022232582372724945
+                    "median_ms": 0.045324,
+                    "p95_ms": 0.099141,
+                    "standard_deviation_ms": 0.02350258593942377
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.192813,
-                    "p95_ms": 0.245383,
-                    "standard_deviation_ms": 0.031187628248393627
+                    "median_ms": 0.188288,
+                    "p95_ms": 0.200365,
+                    "standard_deviation_ms": 0.005576658103201236
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.002514,
-                    "p95_ms": 0.004892,
-                    "standard_deviation_ms": 0.0009990013013004538
+                    "median_ms": 0.002977,
+                    "p95_ms": 0.003391,
+                    "standard_deviation_ms": 0.00043086814688486776
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.015537,
-                    "p95_ms": 0.043508,
-                    "standard_deviation_ms": 0.01133095066444118
+                    "median_ms": 0.017461,
+                    "p95_ms": 0.056656,
+                    "standard_deviation_ms": 0.016099345584215528
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.011256,
-                    "p95_ms": 0.038617,
-                    "standard_deviation_ms": 0.011205976394763643
+                    "median_ms": 0.012337,
+                    "p95_ms": 0.040136,
+                    "standard_deviation_ms": 0.01137396493048928
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.011778,
-                    "p95_ms": 0.018867,
-                    "standard_deviation_ms": 0.0026854039100291786
+                    "median_ms": 0.0125605,
+                    "p95_ms": 0.015826,
+                    "standard_deviation_ms": 0.0024585056213073824
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.049402,
-                    "p95_ms": 0.076001,
-                    "standard_deviation_ms": 0.01047872435747787
+                    "median_ms": 0.056758,
+                    "p95_ms": 0.087981,
+                    "standard_deviation_ms": 0.012903014323792717
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.045065,
-                    "p95_ms": 0.070592,
-                    "standard_deviation_ms": 0.01012192446919063
+                    "median_ms": 0.051431,
+                    "p95_ms": 0.081658,
+                    "standard_deviation_ms": 0.01244950918550607
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.003769,
-                    "p95_ms": 0.004181,
-                    "standard_deviation_ms": 0.00030490956036175707
+                    "median_ms": 0.004421,
+                    "p95_ms": 0.005273,
+                    "standard_deviation_ms": 0.0005756281438567785
                 },
                 "output_allocations_per_invocation": 3,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.004352,
-                    "p95_ms": 0.00713,
-                    "standard_deviation_ms": 0.0011738305499517383
+                    "median_ms": 0.004488,
+                    "p95_ms": 0.006616,
+                    "standard_deviation_ms": 0.0009142464875513605
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.007621,
-                    "p95_ms": 0.013357,
-                    "standard_deviation_ms": 0.002387830010700092
+                    "median_ms": 0.007784,
+                    "p95_ms": 0.010786,
+                    "standard_deviation_ms": 0.0012397201942373932
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 0.250163,
-                    "p95_ms": 0.318631,
-                    "standard_deviation_ms": 0.03412014739358551
+                    "median_ms": 0.315712,
+                    "p95_ms": 0.366396,
+                    "standard_deviation_ms": 0.05138165233466125
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.015284,
-                    "p95_ms": 0.021023,
-                    "standard_deviation_ms": 0.0023588955551274416
+                    "median_ms": 0.018832,
+                    "p95_ms": 0.024757,
+                    "standard_deviation_ms": 0.0033026427599726856
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 0.191962,
-                    "p95_ms": 0.247423,
-                    "standard_deviation_ms": 0.02808798671745627
+                    "median_ms": 0.251914,
+                    "p95_ms": 0.297804,
+                    "standard_deviation_ms": 0.04428179193122157
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.001709,
-                    "p95_ms": 0.004101,
-                    "standard_deviation_ms": 0.0009780467064511797
+                    "median_ms": 0.00179,
+                    "p95_ms": 0.002572,
+                    "standard_deviation_ms": 0.0004921212858635562
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.003103,
-                    "p95_ms": 0.005772,
-                    "standard_deviation_ms": 0.0011144800760892947
+                    "median_ms": 0.003274,
+                    "p95_ms": 0.00462,
+                    "standard_deviation_ms": 0.0006079225608578777
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.0002,
-                    "p95_ms": 0.000224,
-                    "standard_deviation_ms": 1.4207040508142432e-05
+                    "median_ms": 0.000188,
+                    "p95_ms": 0.000194,
+                    "standard_deviation_ms": 6.615134163416491e-06
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 0.106186,
-                    "p95_ms": 0.136764,
-                    "standard_deviation_ms": 0.01268547923257139
+                    "median_ms": 0.113014,
+                    "p95_ms": 0.136096,
+                    "standard_deviation_ms": 0.014179862529658036
                 }
             }
         },
@@ -691,18 +701,18 @@
             "shape": "128x128",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.974064,
-                "p95_ms": 1.278529,
-                "standard_deviation_ms": 0.09817678166552417
+                "median_ms": 1.0057495,
+                "p95_ms": 1.122423,
+                "standard_deviation_ms": 0.045730893871539405
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 1.3515815,
-                "p95_ms": 1.526158,
-                "standard_deviation_ms": 0.0821896850411291
+                "median_ms": 1.4232415,
+                "p95_ms": 2.09056,
+                "standard_deviation_ms": 0.2068871387748644
             },
-            "absolute_overhead_ms": 0.37751749999999995,
-            "percentage_overhead": 38.7569502619951,
+            "absolute_overhead_ms": 0.417492,
+            "percentage_overhead": 41.510535177994115,
             "memory_pool": {
                 "allocation_requests": 80,
                 "pool_hits": 79,
@@ -720,118 +730,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 1.322597,
-                    "p95_ms": 3.211302,
-                    "standard_deviation_ms": 0.737987901331885
+                    "median_ms": 1.359434,
+                    "p95_ms": 1.770089,
+                    "standard_deviation_ms": 0.18345690475247858
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.045649,
-                    "p95_ms": 0.10944,
-                    "standard_deviation_ms": 0.025416175161499025
+                    "median_ms": 0.040888,
+                    "p95_ms": 0.108629,
+                    "standard_deviation_ms": 0.02655765389939405
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.158007,
-                    "p95_ms": 0.218444,
-                    "standard_deviation_ms": 0.028037187322554308
+                    "median_ms": 0.187323,
+                    "p95_ms": 0.251939,
+                    "standard_deviation_ms": 0.033757962138731064
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.003162,
-                    "p95_ms": 0.00494,
-                    "standard_deviation_ms": 0.0007383187387571847
+                    "median_ms": 0.003085,
+                    "p95_ms": 0.009584,
+                    "standard_deviation_ms": 0.002588937001937282
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.017506,
-                    "p95_ms": 0.045603,
-                    "standard_deviation_ms": 0.011878976747178185
+                    "median_ms": 0.014861,
+                    "p95_ms": 0.047049,
+                    "standard_deviation_ms": 0.013008377878890203
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.010541,
-                    "p95_ms": 0.036842,
-                    "standard_deviation_ms": 0.010713582631407665
+                    "median_ms": 0.009985,
+                    "p95_ms": 0.034122,
+                    "standard_deviation_ms": 0.009769975447256763
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.013483,
-                    "p95_ms": 0.018534,
-                    "standard_deviation_ms": 0.002449898087676302
+                    "median_ms": 0.0110025,
+                    "p95_ms": 0.024316,
+                    "standard_deviation_ms": 0.004152477054722879
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.059583,
-                    "p95_ms": 0.097116,
-                    "standard_deviation_ms": 0.015780458378640335
+                    "median_ms": 0.062895,
+                    "p95_ms": 0.083706,
+                    "standard_deviation_ms": 0.008973586186135396
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.054117,
-                    "p95_ms": 0.073093,
-                    "standard_deviation_ms": 0.00855661347496777
+                    "median_ms": 0.058049,
+                    "p95_ms": 0.077747,
+                    "standard_deviation_ms": 0.009119885209803905
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.004312,
-                    "p95_ms": 0.028393,
-                    "standard_deviation_ms": 0.009602436878209613
+                    "median_ms": 0.00417,
+                    "p95_ms": 0.006843,
+                    "standard_deviation_ms": 0.001149150399208041
                 },
                 "output_allocations_per_invocation": 3,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.004796,
-                    "p95_ms": 0.007027,
-                    "standard_deviation_ms": 0.0009129957283580247
+                    "median_ms": 0.005967,
+                    "p95_ms": 0.011876,
+                    "standard_deviation_ms": 0.0027339316011926853
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.008857,
-                    "p95_ms": 0.01657,
-                    "standard_deviation_ms": 0.0031338990794216714
+                    "median_ms": 0.010156,
+                    "p95_ms": 0.012314,
+                    "standard_deviation_ms": 0.001312607389892347
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 1.284382,
-                    "p95_ms": 1.439228,
-                    "standard_deviation_ms": 0.13505344060334043
+                    "median_ms": 1.168999,
+                    "p95_ms": 1.287289,
+                    "standard_deviation_ms": 0.07900498102676817
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.017866,
-                    "p95_ms": 0.04392,
-                    "standard_deviation_ms": 0.010238703558556621
+                    "median_ms": 0.017598,
+                    "p95_ms": 0.063988,
+                    "standard_deviation_ms": 0.01857999875780405
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 1.225544,
-                    "p95_ms": 1.374343,
-                    "standard_deviation_ms": 0.12471866349604617
+                    "median_ms": 1.115635,
+                    "p95_ms": 1.226732,
+                    "standard_deviation_ms": 0.0691773649819072
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.00169,
-                    "p95_ms": 0.002314,
-                    "standard_deviation_ms": 0.0002598373337301628
+                    "median_ms": 0.001835,
+                    "p95_ms": 0.00392,
+                    "standard_deviation_ms": 0.0009126481468780835
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.003532,
-                    "p95_ms": 0.0074,
-                    "standard_deviation_ms": 0.0017085205764052125
+                    "median_ms": 0.003111,
+                    "p95_ms": 0.006615,
+                    "standard_deviation_ms": 0.001417667041304128
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000215,
-                    "p95_ms": 0.000224,
-                    "standard_deviation_ms": 7.914543574963752e-06
+                    "median_ms": 0.000165,
+                    "p95_ms": 0.000173,
+                    "standard_deviation_ms": 6.019966777316965e-06
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 1.039424,
-                    "p95_ms": 1.220391,
-                    "standard_deviation_ms": 0.11550637693322391
+                    "median_ms": 0.978778,
+                    "p95_ms": 1.029454,
+                    "standard_deviation_ms": 0.047174993939586254
                 }
             }
         },
@@ -841,18 +851,18 @@
             "shape": "768x768",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 69.760685,
-                "p95_ms": 71.136711,
-                "standard_deviation_ms": 2.33969271508238
+                "median_ms": 66.1619775,
+                "p95_ms": 68.424768,
+                "standard_deviation_ms": 2.2231570390967796
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 72.9919365,
-                "p95_ms": 82.836618,
-                "standard_deviation_ms": 4.059194264004791
+                "median_ms": 71.375583,
+                "p95_ms": 72.693328,
+                "standard_deviation_ms": 1.7904153216622924
             },
-            "absolute_overhead_ms": 3.231251499999999,
-            "percentage_overhead": 4.631909076007496,
+            "absolute_overhead_ms": 5.2136055,
+            "percentage_overhead": 7.880062986327759,
             "memory_pool": {
                 "allocation_requests": 80,
                 "pool_hits": 79,
@@ -870,118 +880,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 70.858506,
-                    "p95_ms": 73.782518,
-                    "standard_deviation_ms": 2.3798484539124423
+                    "median_ms": 67.806426,
+                    "p95_ms": 68.341785,
+                    "standard_deviation_ms": 0.8336707645796391
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.271064,
-                    "p95_ms": 0.419118,
-                    "standard_deviation_ms": 0.06271124927028643
+                    "median_ms": 0.259468,
+                    "p95_ms": 0.426541,
+                    "standard_deviation_ms": 0.06974789939030422
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.193679,
-                    "p95_ms": 0.338554,
-                    "standard_deviation_ms": 0.06502200288702278
+                    "median_ms": 0.199744,
+                    "p95_ms": 0.227453,
+                    "standard_deviation_ms": 0.01888713410340489
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.006652,
-                    "p95_ms": 0.008832,
-                    "standard_deviation_ms": 0.0010032061403320856
+                    "median_ms": 0.006466,
+                    "p95_ms": 0.007461,
+                    "standard_deviation_ms": 0.0005889778943220195
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.018169,
-                    "p95_ms": 0.057821,
-                    "standard_deviation_ms": 0.016113362176777384
+                    "median_ms": 0.018886,
+                    "p95_ms": 0.055719,
+                    "standard_deviation_ms": 0.015457743025422568
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.013229,
-                    "p95_ms": 0.093738,
-                    "standard_deviation_ms": 0.032469535968350394
+                    "median_ms": 0.011751,
+                    "p95_ms": 0.082319,
+                    "standard_deviation_ms": 0.028209933992124122
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.023901,
-                    "p95_ms": 0.032758,
-                    "standard_deviation_ms": 0.003622396974380362
+                    "median_ms": 0.022826,
+                    "p95_ms": 0.034423,
+                    "standard_deviation_ms": 0.004147897545745315
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.105153,
-                    "p95_ms": 0.127825,
-                    "standard_deviation_ms": 0.010444190622542275
+                    "median_ms": 0.093989,
+                    "p95_ms": 0.098123,
+                    "standard_deviation_ms": 0.0030596063537651377
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.099701,
-                    "p95_ms": 0.120515,
-                    "standard_deviation_ms": 0.010186529819325127
+                    "median_ms": 0.08719,
+                    "p95_ms": 0.091161,
+                    "standard_deviation_ms": 0.004059386919228075
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.005637,
-                    "p95_ms": 0.00617,
-                    "standard_deviation_ms": 0.0006384629668195329
+                    "median_ms": 0.00539,
+                    "p95_ms": 0.00804,
+                    "standard_deviation_ms": 0.0012124455286733503
                 },
                 "output_allocations_per_invocation": 3,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.009511,
-                    "p95_ms": 0.012664,
-                    "standard_deviation_ms": 0.0013245608177807463
+                    "median_ms": 0.009299,
+                    "p95_ms": 0.009797,
+                    "standard_deviation_ms": 0.00038642287716955887
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.016347,
-                    "p95_ms": 0.019048,
-                    "standard_deviation_ms": 0.0017668250168027394
+                    "median_ms": 0.014011,
+                    "p95_ms": 0.015536,
+                    "standard_deviation_ms": 0.000850916353115863
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 69.626723,
-                    "p95_ms": 75.00315,
-                    "standard_deviation_ms": 2.1723758725268514
+                    "median_ms": 67.218774,
+                    "p95_ms": 69.180892,
+                    "standard_deviation_ms": 2.060559566851529
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.049818,
-                    "p95_ms": 0.144086,
-                    "standard_deviation_ms": 0.03995824162597749
+                    "median_ms": 0.03848,
+                    "p95_ms": 0.06385,
+                    "standard_deviation_ms": 0.01626610875901179
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 69.495451,
-                    "p95_ms": 74.777944,
-                    "standard_deviation_ms": 2.1378603755558596
+                    "median_ms": 67.071874,
+                    "p95_ms": 69.071032,
+                    "standard_deviation_ms": 2.057972266049725
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.005607,
-                    "p95_ms": 0.009355,
-                    "standard_deviation_ms": 0.0016492111326328112
+                    "median_ms": 0.005788,
+                    "p95_ms": 0.007079,
+                    "standard_deviation_ms": 0.0007036648634115534
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.007321,
-                    "p95_ms": 0.036477,
-                    "standard_deviation_ms": 0.011931359312333191
+                    "median_ms": 0.006751,
+                    "p95_ms": 0.006928,
+                    "standard_deviation_ms": 0.000567299004053418
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000236,
-                    "p95_ms": 0.000503,
-                    "standard_deviation_ms": 0.00011097999819787348
+                    "median_ms": 0.000233,
+                    "p95_ms": 0.000251,
+                    "standard_deviation_ms": 1.7001176429882726e-05
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 69.16336,
-                    "p95_ms": 74.374031,
-                    "standard_deviation_ms": 2.097699594751603
+                    "median_ms": 66.834481,
+                    "p95_ms": 68.80039,
+                    "standard_deviation_ms": 2.12476302413488
                 }
             }
         },
@@ -991,18 +1001,18 @@
             "shape": "4096 elements",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.01672,
-                "p95_ms": 0.026527,
-                "standard_deviation_ms": 0.008127996727976703
+                "median_ms": 0.0169355,
+                "p95_ms": 0.02222,
+                "standard_deviation_ms": 0.007456933592301865
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 0.198211,
-                "p95_ms": 0.260327,
-                "standard_deviation_ms": 0.024413776205249364
+                "median_ms": 0.200428,
+                "p95_ms": 0.288062,
+                "standard_deviation_ms": 0.02885307326871784
             },
-            "absolute_overhead_ms": 0.181491,
-            "percentage_overhead": 1085.4724880382778,
+            "absolute_overhead_ms": 0.1834925,
+            "percentage_overhead": 1083.4784919252459,
             "memory_pool": {
                 "allocation_requests": 34,
                 "pool_hits": 33,
@@ -1020,118 +1030,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 0.240069,
-                    "p95_ms": 0.53587,
-                    "standard_deviation_ms": 0.12782416025556356
+                    "median_ms": 0.412405,
+                    "p95_ms": 0.908911,
+                    "standard_deviation_ms": 0.21073046832710263
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.037456,
-                    "p95_ms": 0.096172,
-                    "standard_deviation_ms": 0.02568155062763929
+                    "median_ms": 0.056596,
+                    "p95_ms": 0.142316,
+                    "standard_deviation_ms": 0.037219022419187744
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.191189,
-                    "p95_ms": 0.199311,
-                    "standard_deviation_ms": 0.015537005085923091
+                    "median_ms": 0.156677,
+                    "p95_ms": 0.549137,
+                    "standard_deviation_ms": 0.15932811368920427
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.002299,
-                    "p95_ms": 0.004511,
-                    "standard_deviation_ms": 0.0008624350642222289
+                    "median_ms": 0.00398,
+                    "p95_ms": 0.006726,
+                    "standard_deviation_ms": 0.0013693002008325274
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.014768,
-                    "p95_ms": 0.043951,
-                    "standard_deviation_ms": 0.011680658587596848
+                    "median_ms": 0.01476,
+                    "p95_ms": 0.062271,
+                    "standard_deviation_ms": 0.018857640312615997
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.011634,
-                    "p95_ms": 0.02651,
-                    "standard_deviation_ms": 0.006597810079109583
+                    "median_ms": 0.013632,
+                    "p95_ms": 0.036614,
+                    "standard_deviation_ms": 0.010404928109314355
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.0063815,
-                    "p95_ms": 0.012371,
-                    "standard_deviation_ms": 0.0024079335040652597
+                    "median_ms": 0.0105395,
+                    "p95_ms": 0.020705,
+                    "standard_deviation_ms": 0.0037520591799703796
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.021705,
-                    "p95_ms": 0.032636,
-                    "standard_deviation_ms": 0.0047945449419105465
+                    "median_ms": 0.039637,
+                    "p95_ms": 0.061172,
+                    "standard_deviation_ms": 0.01187682816917042
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.019912,
-                    "p95_ms": 0.03045,
-                    "standard_deviation_ms": 0.004620814967081024
+                    "median_ms": 0.036804,
+                    "p95_ms": 0.05637,
+                    "standard_deviation_ms": 0.010875998124310247
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.001456,
-                    "p95_ms": 0.001833,
-                    "standard_deviation_ms": 0.00018234187670417349
+                    "median_ms": 0.002309,
+                    "p95_ms": 0.003958,
+                    "standard_deviation_ms": 0.0008495071512353501
                 },
                 "output_allocations_per_invocation": 1,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.003479,
-                    "p95_ms": 0.006763,
-                    "standard_deviation_ms": 0.001380701792567823
+                    "median_ms": 0.006049,
+                    "p95_ms": 0.009205,
+                    "standard_deviation_ms": 0.0018235051302368194
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.005386,
-                    "p95_ms": 0.01272,
-                    "standard_deviation_ms": 0.0030203215457960766
+                    "median_ms": 0.010301,
+                    "p95_ms": 0.017186,
+                    "standard_deviation_ms": 0.0035596827386720855
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 0.122625,
-                    "p95_ms": 0.190716,
-                    "standard_deviation_ms": 0.029270010253500085
+                    "median_ms": 0.346048,
+                    "p95_ms": 1.35015,
+                    "standard_deviation_ms": 0.4993771045586291
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.015286,
-                    "p95_ms": 0.020856,
-                    "standard_deviation_ms": 0.002578553439430721
+                    "median_ms": 0.031657,
+                    "p95_ms": 0.915696,
+                    "standard_deviation_ms": 0.3544075695664527
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 0.08242,
-                    "p95_ms": 0.125872,
-                    "standard_deviation_ms": 0.018732714075648513
+                    "median_ms": 0.215133,
+                    "p95_ms": 1.260754,
+                    "standard_deviation_ms": 0.43168063493809866
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.000794,
-                    "p95_ms": 0.001492,
-                    "standard_deviation_ms": 0.00027579151546050143
+                    "median_ms": 0.001423,
+                    "p95_ms": 0.002113,
+                    "standard_deviation_ms": 0.00028067589850216924
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.001723,
-                    "p95_ms": 0.003723,
-                    "standard_deviation_ms": 0.0008075342717185444
+                    "median_ms": 0.00336,
+                    "p95_ms": 0.004804,
+                    "standard_deviation_ms": 0.000702019202016583
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000183,
-                    "p95_ms": 0.000194,
-                    "standard_deviation_ms": 1.5006665185843256e-05
+                    "median_ms": 0.000192,
+                    "p95_ms": 0.000333,
+                    "standard_deviation_ms": 6.104621200369438e-05
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 0.012326,
-                    "p95_ms": 0.026129,
-                    "standard_deviation_ms": 0.0057686899171302325
+                    "median_ms": 0.022792,
+                    "p95_ms": 0.032057,
+                    "standard_deviation_ms": 0.005311623081507196
                 }
             }
         },
@@ -1141,18 +1151,18 @@
             "shape": "65536 elements",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.024418,
-                "p95_ms": 0.039259,
-                "standard_deviation_ms": 0.010902664997604943
+                "median_ms": 0.026938,
+                "p95_ms": 0.032454,
+                "standard_deviation_ms": 0.010828756782290384
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 0.2185555,
-                "p95_ms": 0.306976,
-                "standard_deviation_ms": 0.03318719998794716
+                "median_ms": 0.246728,
+                "p95_ms": 0.333248,
+                "standard_deviation_ms": 0.03496464512847227
             },
-            "absolute_overhead_ms": 0.19413750000000002,
-            "percentage_overhead": 795.0589728888526,
+            "absolute_overhead_ms": 0.21979,
+            "percentage_overhead": 815.9106095478506,
             "memory_pool": {
                 "allocation_requests": 34,
                 "pool_hits": 33,
@@ -1170,118 +1180,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 0.350686,
-                    "p95_ms": 0.743039,
-                    "standard_deviation_ms": 0.17850912141579767
+                    "median_ms": 0.406959,
+                    "p95_ms": 0.844138,
+                    "standard_deviation_ms": 0.18571008067738273
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.054152,
-                    "p95_ms": 0.122349,
-                    "standard_deviation_ms": 0.029590371573199277
+                    "median_ms": 0.060743,
+                    "p95_ms": 0.129235,
+                    "standard_deviation_ms": 0.029266104685113117
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.15215,
-                    "p95_ms": 0.17791,
-                    "standard_deviation_ms": 0.017877538045267864
+                    "median_ms": 0.184181,
+                    "p95_ms": 0.28005,
+                    "standard_deviation_ms": 0.04050113322167665
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.003018,
-                    "p95_ms": 0.004258,
-                    "standard_deviation_ms": 0.0008651980120180582
+                    "median_ms": 0.004228,
+                    "p95_ms": 0.004958,
+                    "standard_deviation_ms": 0.000633974447434595
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.014109,
-                    "p95_ms": 0.041457,
-                    "standard_deviation_ms": 0.010895982481630557
+                    "median_ms": 0.014755,
+                    "p95_ms": 0.047729,
+                    "standard_deviation_ms": 0.013308434062653652
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.009253,
-                    "p95_ms": 0.027665,
-                    "standard_deviation_ms": 0.0073978115845160595
+                    "median_ms": 0.010529,
+                    "p95_ms": 0.036967,
+                    "standard_deviation_ms": 0.010691577425244602
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.0081075,
-                    "p95_ms": 0.015754,
-                    "standard_deviation_ms": 0.0027021094000798706
+                    "median_ms": 0.009403,
+                    "p95_ms": 0.015899,
+                    "standard_deviation_ms": 0.003052436168046762
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.02458,
-                    "p95_ms": 0.046244,
-                    "standard_deviation_ms": 0.009755491101938437
+                    "median_ms": 0.040293,
+                    "p95_ms": 0.04116,
+                    "standard_deviation_ms": 0.005786892796656942
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.022703,
-                    "p95_ms": 0.043412,
-                    "standard_deviation_ms": 0.009352112779473952
+                    "median_ms": 0.036786,
+                    "p95_ms": 0.038663,
+                    "standard_deviation_ms": 0.005504710731727871
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.001499,
-                    "p95_ms": 0.00229,
-                    "standard_deviation_ms": 0.00034809906635898926
+                    "median_ms": 0.001927,
+                    "p95_ms": 0.002913,
+                    "standard_deviation_ms": 0.00046564037625618335
                 },
                 "output_allocations_per_invocation": 1,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.004318,
-                    "p95_ms": 0.006642,
-                    "standard_deviation_ms": 0.001410420419591265
+                    "median_ms": 0.006232,
+                    "p95_ms": 0.00679,
+                    "standard_deviation_ms": 0.000865799514899379
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.006704,
-                    "p95_ms": 0.013139,
-                    "standard_deviation_ms": 0.0027926244287408216
+                    "median_ms": 0.010633,
+                    "p95_ms": 0.015832,
+                    "standard_deviation_ms": 0.0031606431877072108
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 0.178506,
-                    "p95_ms": 0.674335,
-                    "standard_deviation_ms": 0.2043838233358012
+                    "median_ms": 0.25795,
+                    "p95_ms": 0.975656,
+                    "standard_deviation_ms": 0.2954594170681314
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.020208,
-                    "p95_ms": 0.476988,
-                    "standard_deviation_ms": 0.1835947965772451
+                    "median_ms": 0.021542,
+                    "p95_ms": 0.724365,
+                    "standard_deviation_ms": 0.2805004470423532
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 0.125411,
-                    "p95_ms": 0.161034,
-                    "standard_deviation_ms": 0.02315132101112159
+                    "median_ms": 0.164414,
+                    "p95_ms": 0.211156,
+                    "standard_deviation_ms": 0.028200096960117
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.001133,
-                    "p95_ms": 0.001747,
-                    "standard_deviation_ms": 0.0002723897208045854
+                    "median_ms": 0.001484,
+                    "p95_ms": 0.002333,
+                    "standard_deviation_ms": 0.0003596750755890655
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.002523,
-                    "p95_ms": 0.003367,
-                    "standard_deviation_ms": 0.00048403735393045855
+                    "median_ms": 0.002943,
+                    "p95_ms": 0.004269,
+                    "standard_deviation_ms": 0.0006521654391333536
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000174,
-                    "p95_ms": 0.000191,
-                    "standard_deviation_ms": 8.685620300243386e-06
+                    "median_ms": 0.000197,
+                    "p95_ms": 0.000203,
+                    "standard_deviation_ms": 8.318653737234169e-06
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 0.031916,
-                    "p95_ms": 0.048469,
-                    "standard_deviation_ms": 0.00819360397871413
+                    "median_ms": 0.036848,
+                    "p95_ms": 0.049321,
+                    "standard_deviation_ms": 0.007450826998394206
                 }
             }
         },
@@ -1291,18 +1301,18 @@
             "shape": "1048576 elements",
             "local_kernel_ms": {
                 "count": 10,
-                "median_ms": 0.1798665,
-                "p95_ms": 0.31275,
-                "standard_deviation_ms": 0.053643784501468575
+                "median_ms": 0.169972,
+                "p95_ms": 0.593948,
+                "standard_deviation_ms": 0.12766296376353636
             },
             "isolated_end_to_end_ms": {
                 "count": 10,
-                "median_ms": 0.644424,
-                "p95_ms": 0.793157,
-                "standard_deviation_ms": 0.07260161817404623
+                "median_ms": 0.6216465,
+                "p95_ms": 0.761511,
+                "standard_deviation_ms": 0.06494629829666969
             },
-            "absolute_overhead_ms": 0.46455749999999996,
-            "percentage_overhead": 258.27905696725065,
+            "absolute_overhead_ms": 0.4516745,
+            "percentage_overhead": 265.7346504130092,
             "memory_pool": {
                 "allocation_requests": 34,
                 "pool_hits": 33,
@@ -1320,118 +1330,118 @@
             "diagnostics": {
                 "isolated_uncached_end_to_end_ms": {
                     "count": 5,
-                    "median_ms": 0.893903,
-                    "p95_ms": 3.02163,
-                    "standard_deviation_ms": 0.8697401759428157
+                    "median_ms": 0.933753,
+                    "p95_ms": 2.863846,
+                    "standard_deviation_ms": 0.7875032690078182
                 },
                 "input_shared_preparation_ms": {
                     "count": 5,
-                    "median_ms": 0.214543,
-                    "p95_ms": 0.596535,
-                    "standard_deviation_ms": 0.15177230658245924
+                    "median_ms": 0.237434,
+                    "p95_ms": 0.600987,
+                    "standard_deviation_ms": 0.15201679113492692
                 },
                 "first_use_fd_transfer_mmap_ms": {
                     "count": 5,
-                    "median_ms": 0.196235,
-                    "p95_ms": 0.247679,
-                    "standard_deviation_ms": 0.03436012743631781
+                    "median_ms": 0.18279,
+                    "p95_ms": 0.277327,
+                    "standard_deviation_ms": 0.04601017226483726
                 },
                 "cached_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.003085,
-                    "p95_ms": 0.004863,
-                    "standard_deviation_ms": 0.0008379886872744763
+                    "median_ms": 0.003118,
+                    "p95_ms": 0.007842,
+                    "standard_deviation_ms": 0.002133604405694739
                 },
                 "shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.016799,
-                    "p95_ms": 0.04352,
-                    "standard_deviation_ms": 0.010882630979685013
+                    "median_ms": 0.015237,
+                    "p95_ms": 0.047831,
+                    "standard_deviation_ms": 0.01312494288597097
                 },
                 "pooled_shared_memory_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.009045,
-                    "p95_ms": 0.027851,
-                    "standard_deviation_ms": 0.007360116096910428
+                    "median_ms": 0.016075,
+                    "p95_ms": 0.030726,
+                    "standard_deviation_ms": 0.006771815602923635
                 },
                 "buffer_reclamation_ms": {
                     "count": 10,
-                    "median_ms": 0.008734,
-                    "p95_ms": 0.016555,
-                    "standard_deviation_ms": 0.003022805888574389
+                    "median_ms": 0.009022,
+                    "p95_ms": 0.021394,
+                    "standard_deviation_ms": 0.005250576619762823
                 },
                 "output_preallocation_service_ms": {
                     "count": 5,
-                    "median_ms": 0.025342,
-                    "p95_ms": 0.044538,
-                    "standard_deviation_ms": 0.008016487545053632
+                    "median_ms": 0.029144,
+                    "p95_ms": 0.051735,
+                    "standard_deviation_ms": 0.01009171134347391
                 },
                 "output_shared_allocation_ms": {
                     "count": 5,
-                    "median_ms": 0.023028,
-                    "p95_ms": 0.042318,
-                    "standard_deviation_ms": 0.007867842230243309
+                    "median_ms": 0.027364,
+                    "p95_ms": 0.049461,
+                    "standard_deviation_ms": 0.009926833662351756
                 },
                 "output_ensure_mapped_ms": {
                     "count": 5,
-                    "median_ms": 0.001801,
-                    "p95_ms": 0.002067,
-                    "standard_deviation_ms": 0.00028066022162037853
+                    "median_ms": 0.001581,
+                    "p95_ms": 0.001875,
+                    "standard_deviation_ms": 0.000240937668287879
                 },
                 "output_allocations_per_invocation": 1,
                 "scalar_binding_ms": {
                     "count": 5,
-                    "median_ms": 0.004483,
-                    "p95_ms": 0.006927,
-                    "standard_deviation_ms": 0.00116953967012667
+                    "median_ms": 0.004643,
+                    "p95_ms": 0.020547,
+                    "standard_deviation_ms": 0.006449667507709215
                 },
                 "output_plan_evaluation_ms": {
                     "count": 5,
-                    "median_ms": 0.008121,
-                    "p95_ms": 0.014765,
-                    "standard_deviation_ms": 0.0029167667441878176
+                    "median_ms": 0.009365,
+                    "p95_ms": 0.018109,
+                    "standard_deviation_ms": 0.004193874456871593
                 },
                 "native_call_ms": {
                     "count": 5,
-                    "median_ms": 0.563927,
-                    "p95_ms": 0.67116,
-                    "standard_deviation_ms": 0.08022797672881948
+                    "median_ms": 0.604009,
+                    "p95_ms": 1.099343,
+                    "standard_deviation_ms": 0.21596470779032395
                 },
                 "native_queue_wait_ms": {
                     "count": 5,
-                    "median_ms": 0.019208,
-                    "p95_ms": 0.030699,
-                    "standard_deviation_ms": 0.005915858057796857
+                    "median_ms": 0.019043,
+                    "p95_ms": 0.232827,
+                    "standard_deviation_ms": 0.08591145988050722
                 },
                 "native_rpc_ms": {
                     "count": 5,
-                    "median_ms": 0.51688,
-                    "p95_ms": 0.570052,
-                    "standard_deviation_ms": 0.06424973148146224
+                    "median_ms": 0.543137,
+                    "p95_ms": 0.797389,
+                    "standard_deviation_ms": 0.120998101032041
                 },
                 "worker_input_views_ms": {
                     "count": 5,
-                    "median_ms": 0.001268,
-                    "p95_ms": 0.001826,
-                    "standard_deviation_ms": 0.0002376144776733943
+                    "median_ms": 0.001441,
+                    "p95_ms": 0.002508,
+                    "standard_deviation_ms": 0.0005001162264914027
                 },
                 "worker_output_views_ms": {
                     "count": 5,
-                    "median_ms": 0.002776,
-                    "p95_ms": 0.003745,
-                    "standard_deviation_ms": 0.0005172786483124931
+                    "median_ms": 0.003046,
+                    "p95_ms": 0.006723,
+                    "standard_deviation_ms": 0.0016134998729470046
                 },
                 "worker_dispatch_ms": {
                     "count": 5,
-                    "median_ms": 0.000198,
-                    "p95_ms": 0.000208,
-                    "standard_deviation_ms": 6.957010852370434e-06
+                    "median_ms": 0.000191,
+                    "p95_ms": 0.000199,
+                    "standard_deviation_ms": 6.711184694225007e-06
                 },
                 "worker_kernel_ms": {
                     "count": 5,
-                    "median_ms": 0.362218,
-                    "p95_ms": 0.41669,
-                    "standard_deviation_ms": 0.038411602838725696
+                    "median_ms": 0.375349,
+                    "p95_ms": 0.629226,
+                    "standard_deviation_ms": 0.10929320351311879
                 }
             }
         }

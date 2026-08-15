@@ -17,7 +17,11 @@ import capnp
 import torch
 
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
-from wmfs.output_metadata import evaluate_outputs, validate_operation_metadata
+from wmfs.output_metadata import (
+    bind_reusable_outputs,
+    evaluate_outputs,
+    validate_operation_metadata,
+)
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -187,6 +191,7 @@ class WorkerSession:
         self._invoke_lock: asyncio.Lock | None = None
         self._serve_task: asyncio.Task[None] | None = None
         self._closed = False
+        self._invalidated = False
         self._thread.start()
         if not self._ready.wait(_RPC_TIMEOUT_SECONDS):
             self._abort_startup()
@@ -198,14 +203,26 @@ class WorkerSession:
                 "Worker session failed to start"
             ) from self._startup_error
 
-    def invoke(self, operation: str, /, *args: object, **kwargs: object) -> object:
-        result, _metrics = self._submit_invocation(operation, args, kwargs, False)
+    def invoke(
+        self,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
+        result, _metrics = self._submit_invocation(operation, args, kwargs, out, False)
         return result
 
     def invoke_profiled(
-        self, operation: str, /, *args: object, **kwargs: object
+        self,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
     ) -> tuple[object, InvocationMetrics]:
-        result, metrics = self._submit_invocation(operation, args, kwargs, True)
+        result, metrics = self._submit_invocation(operation, args, kwargs, out, True)
         return result, metrics
 
     def ping(self) -> None:
@@ -258,6 +275,7 @@ class WorkerSession:
         operation: str,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        out: object | None,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
         if self._invoke_lock is None or self._plugin is None or self._fd_sender is None:
@@ -277,6 +295,12 @@ class WorkerSession:
                     f"Operation {operation!r} expected "
                     f"{len(metadata.tensor_inputs)} tensor inputs"
                 )
+            if (
+                out is not None
+                and torch.is_grad_enabled()
+                and any(item.requires_grad for item in tensor_args)
+            ):
+                raise RuntimeError("Isolated out does not support autograd inputs")
             inputs = [
                 await self._prepare_input(
                     item,
@@ -297,6 +321,12 @@ class WorkerSession:
                     invocation_id,
                     input_metrics,
                     output_metrics,
+                    collect_metrics,
+                    out,
+                )
+            if out is not None:
+                raise ValueError(
+                    f"Operation {operation!r} cannot reuse dynamic outputs"
                 )
             allocator = _OutputAllocator(
                 _load_runtime_schema(),
@@ -330,25 +360,46 @@ class WorkerSession:
         invocation_id: int,
         input_metrics: list[InputPreparationMetrics] | None,
         output_metrics: list[OutputAllocationMetrics] | None,
+        collect_metrics: bool,
+        out: object | None,
     ) -> tuple[object, InvocationMetrics]:
         if self._plugin is None or self._fd_sender is None:
             raise RuntimeError("Worker session is not ready")
         outputs: list[ManagedTensor] = []
+        dispatched = False
+        completed = False
         try:
-            for shape, dtype in evaluate_outputs(metadata, inputs, scalars):
-                service_start = perf_counter_ns()
-                allocation_start = perf_counter_ns()
-                managed = self._buffers.empty_named(shape, dtype)
-                allocation_ns = perf_counter_ns() - allocation_start
-                mapping_start = perf_counter_ns()
+            output_specs = evaluate_outputs(metadata, inputs, scalars)
+            reused_outputs = out is not None
+            if reused_outputs:
+                outputs.extend(
+                    bind_reusable_outputs(
+                        metadata, output_specs, inputs, out, self._buffers
+                    )
+                )
+            for index, (shape, dtype) in enumerate(output_specs):
+                service_start = perf_counter_ns() if collect_metrics else 0
+                allocation_start = perf_counter_ns() if collect_metrics else 0
+                managed = (
+                    outputs[index]
+                    if reused_outputs
+                    else self._buffers.empty_named(shape, dtype)
+                )
+                allocation_ns = (
+                    perf_counter_ns() - allocation_start
+                    if collect_metrics and not reused_outputs
+                    else 0
+                )
+                mapping_start = perf_counter_ns() if collect_metrics else 0
                 transferred = await asyncio.to_thread(
                     self._fd_sender.ensure_mapped,
                     managed.buffer,
                     invocation_id=invocation_id,
                     writable=True,
                 )
-                mapping_ns = perf_counter_ns() - mapping_start
-                outputs.append(managed)
+                mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
+                if not reused_outputs:
+                    outputs.append(managed)
                 if output_metrics is not None:
                     output_metrics.append(
                         OutputAllocationMetrics(
@@ -367,21 +418,48 @@ class WorkerSession:
                 "outputs": [item.descriptor.as_capnp() for item in outputs],
                 "scalars": _scalar_arguments(metadata, scalars),
             }
-            try:
+            if reused_outputs:
+                for output in outputs:
+                    torch.autograd.graph.increment_version(output.tensor)
+            dispatched = True
+            if collect_metrics:
+                response = await asyncio.wait_for(
+                    self._plugin.invokeKnownProfiled(invocation=invocation),
+                    _RPC_TIMEOUT_SECONDS,
+                )
+            else:
                 await asyncio.wait_for(
                     self._plugin.invokeKnown(invocation=invocation),
                     _RPC_TIMEOUT_SECONDS,
                 )
-            finally:
-                self._fd_sender.finish_invocation(invocation_id)
+                response = None
+            self._fd_sender.finish_invocation(invocation_id)
+            completed = True
             tensors = tuple(item.tensor for item in outputs)
             result: object = tensors[0] if len(tensors) == 1 else tensors
             outputs.clear()
+            worker = response.metrics if response is not None else None
             return result, InvocationMetrics(
                 inputs=tuple(input_metrics or ()),
                 outputs=tuple(output_metrics or ()),
+                worker_input_views_ns=(
+                    int(worker.inputViewsNs) if worker is not None else 0
+                ),
+                worker_output_views_ns=(
+                    int(worker.outputViewsNs) if worker is not None else 0
+                ),
+                worker_dispatch_ns=(
+                    int(worker.dispatchNs) if worker is not None else 0
+                ),
+                worker_kernel_ns=(int(worker.kernelNs) if worker is not None else 0),
             )
         finally:
+            if not dispatched:
+                self._fd_sender.finish_invocation(invocation_id)
+            elif not completed:
+                self._invalidated = True
+                if self._shutdown is not None:
+                    self._shutdown.set()
             for output in outputs:
                 self._buffers.release(output)
 
@@ -434,6 +512,7 @@ class WorkerSession:
         operation: str,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        out: object | None,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
         if self._closed or self._loop is None:
@@ -441,9 +520,14 @@ class WorkerSession:
         if threading.current_thread() is self._thread:
             raise RuntimeError("Worker session cannot synchronously invoke itself")
         future = asyncio.run_coroutine_threadsafe(
-            self._invoke(operation, args, kwargs, collect_metrics), self._loop
+            self._invoke(operation, args, kwargs, out, collect_metrics), self._loop
         )
-        return future.result(timeout=_RPC_TIMEOUT_SECONDS)
+        try:
+            return future.result()
+        except Exception:
+            if self._invalidated:
+                self.close()
+            raise
 
     async def _call_operation(
         self,

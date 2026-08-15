@@ -37,6 +37,28 @@ def test_add_scalar_matches_torch() -> None:
     torch.testing.assert_close(add_scalar(a, 1.5), torch.add(a, 1.5))
 
 
+def test_local_operations_support_reusable_outputs() -> None:
+    a = torch.arange(6, dtype=torch.float64).reshape(2, 3)
+    b = torch.arange(6, dtype=torch.float64).reshape(3, 2)
+    product = torch.empty((2, 2), dtype=torch.float64)
+
+    assert matmul(a, b, out=product) is product
+    torch.testing.assert_close(product, a @ b)
+
+    added = torch.empty_like(a)
+    assert add_scalar(a, 1.5, out=added) is added
+    torch.testing.assert_close(added, a + 1.5)
+
+    svd_outputs = (
+        torch.empty((2, 2), dtype=torch.float64),
+        torch.empty((2,), dtype=torch.float64),
+        torch.empty((2, 3), dtype=torch.float64),
+    )
+    result = svd(a, full_matrices=False, out=svd_outputs)
+    assert all(actual is expected for actual, expected in zip(result, svd_outputs))
+    torch.testing.assert_close(result[0] @ torch.diag(result[1]) @ result[2], a)
+
+
 def test_runtime_uses_local_backend_by_default() -> None:
     assert runtime.backend_name == "local"
     runtime.use_backend("local")
