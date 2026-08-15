@@ -47,6 +47,7 @@ in
     cmakeFlags = [
       "-DWMFS_BUILD_PYTHON_RUNTIME=OFF"
       "-DWMFS_BUILD_REFERENCE_WORKER=ON"
+      "-DWMFS_BUNDLED_PLUGINS="
     ];
 
     postInstall = ''

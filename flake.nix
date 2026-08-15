@@ -73,6 +73,7 @@
           };
 
           package = self.packages.${system}.default;
+          bundled-package = self.packages.${system}.bundled;
 
           schemas = pkgs.runCommand "wmfs-schema-check" { nativeBuildInputs = [ pkgs.capnproto ]; } ''
             capnp compile -o- \
@@ -104,7 +105,7 @@
             name = "wmfs-dev";
 
             inputsFrom = [
-              self.packages.${system}.default
+              self.packages.${system}.bundled
               self.packages.${system}.reference-worker
             ];
             packages = pre-commit-check.enabledPackages ++ [

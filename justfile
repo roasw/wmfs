@@ -12,7 +12,8 @@ build profile=build_type:
     cmake -S "{{ root }}" -B "{{ root }}/build/{{ profile }}" -G Ninja \
       -DCMAKE_BUILD_TYPE="{{ profile }}" \
       -DWMFS_BUILD_PYTHON_RUNTIME=ON \
-      -DWMFS_BUILD_REFERENCE_WORKER=ON
+      -DWMFS_BUILD_REFERENCE_WORKER=ON \
+      -DWMFS_BUNDLED_PLUGINS=reference
     cmake --build "{{ root }}/build/{{ profile }}"
     cmake --install "{{ root }}/build/{{ profile }}" \
       --prefix "{{ root }}/output/{{ profile }}"
@@ -39,7 +40,7 @@ test-release:
 
 # Build all packaged Release artifacts without creating result symlinks.
 package:
-    nix build .#default .#reference-worker .#reference-python-worker --no-link
+    nix build .#default .#bundled .#reference-worker .#reference-python-worker --no-link
 
 # Benchmark packaged Release artifacts in pooled or arena mode.
 benchmark mode="pooled":

@@ -1,9 +1,6 @@
+#include "wmfs/reference/kernels.hpp"
 #include "wmfs/reference/mapped_buffers.hpp"
 
-#include <ATen/ops/add.h>
-#include <ATen/ops/linalg_svd.h>
-#include <ATen/ops/matmul.h>
-#include <ATen/ops/result_type.h>
 #include <c10/core/InferenceMode.h>
 #include <capnp/rpc-twoparty.h>
 #include <gnu/libc-version.h>
@@ -13,14 +10,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -119,12 +114,6 @@ void require(bool condition, const char *message) {
     }
 }
 
-void validate_output(const at::Tensor &output, at::IntArrayRef shape,
-                     at::ScalarType dtype) {
-    require(output.sizes().equals(shape) && output.scalar_type() == dtype,
-            "Preallocated output has an invalid shape or dtype");
-}
-
 void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
                    std::vector<TensorLease> &outputs,
                    capnp::List<ScalarArgument>::Reader scalars) {
@@ -132,13 +121,7 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
         require(inputs.size() == 2 && outputs.size() == 1 &&
                     scalars.size() == 0,
                 "Invalid matmul invocation");
-        auto &a = inputs[0].tensor();
-        auto &b = inputs[1].tensor();
-        require(a.dim() == 2 && b.dim() == 2 && a.size(1) == b.size(0),
-                "matmul input dimensions are incompatible");
-        std::array<std::int64_t, 2> shape{a.size(0), b.size(1)};
-        validate_output(outputs[0].tensor(), shape, a.scalar_type());
-        at::matmul_out(outputs[0].tensor(), a, b);
+        matmul_out(inputs[0].tensor(), inputs[1].tensor(), outputs[0].tensor());
         return;
     }
     if (operation_id == 2) {
@@ -147,23 +130,8 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
                 "Invalid svd invocation");
         require(scalars[0].which() == ScalarArgument::BOOLEAN,
                 "Scalar argument does not match operation metadata");
-        auto &a = inputs[0].tensor();
-        require(a.dim() == 2, "svd initially supports two-dimensional tensors");
-        auto full_matrices = scalars[0].getBoolean();
-        auto rows = a.size(0);
-        auto columns = a.size(1);
-        auto rank = std::min(rows, columns);
-        std::array<std::int64_t, 2> u_shape{rows, full_matrices ? rows : rank};
-        std::array<std::int64_t, 1> s_shape{rank};
-        std::array<std::int64_t, 2> vh_shape{
-            full_matrices ? columns : rank,
-            columns,
-        };
-        validate_output(outputs[0].tensor(), u_shape, a.scalar_type());
-        validate_output(outputs[1].tensor(), s_shape, a.scalar_type());
-        validate_output(outputs[2].tensor(), vh_shape, a.scalar_type());
-        at::linalg_svd_out(outputs[0].tensor(), outputs[1].tensor(),
-                           outputs[2].tensor(), a, full_matrices, std::nullopt);
+        svd_out(inputs[0].tensor(), scalars[0].getBoolean(),
+                outputs[0].tensor(), outputs[1].tensor(), outputs[2].tensor());
         return;
     }
     if (operation_id == 3) {
@@ -172,11 +140,8 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
                 "Invalid add_scalar invocation");
         require(scalars[0].which() == ScalarArgument::FLOAT64,
                 "Scalar argument does not match operation metadata");
-        auto &input = inputs[0].tensor();
-        auto scalar = at::Scalar(scalars[0].getFloat64());
-        validate_output(outputs[0].tensor(), input.sizes(),
-                        at::result_type(input, scalar));
-        at::add_out(outputs[0].tensor(), input, scalar, at::Scalar(1));
+        add_scalar_out(inputs[0].tensor(), scalars[0].getFloat64(),
+                       outputs[0].tensor());
         return;
     }
     throw std::invalid_argument("Unknown operation ID " +

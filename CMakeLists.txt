@@ -11,6 +11,39 @@ find_package(Threads REQUIRED)
 
 option(WMFS_BUILD_PYTHON_RUNTIME "Build the Python runtime extension" ON)
 option(WMFS_BUILD_REFERENCE_WORKER "Build the C++ reference plugin worker" OFF)
+set(
+  WMFS_BUNDLED_PLUGINS
+  ""
+  CACHE STRING
+  "Semicolon-separated plugins to compile into the in-process backend"
+)
+
+set(WMFS_BUNDLE_REFERENCE OFF)
+foreach(plugin IN LISTS WMFS_BUNDLED_PLUGINS)
+  if(plugin STREQUAL "reference")
+    set(WMFS_BUNDLE_REFERENCE ON)
+  else()
+    message(FATAL_ERROR "Unknown bundled plugin: ${plugin}")
+  endif()
+endforeach()
+if(WMFS_BUNDLE_REFERENCE AND NOT WMFS_BUILD_PYTHON_RUNTIME)
+  message(FATAL_ERROR "Bundled plugins require the Python runtime")
+endif()
+
+if(WMFS_BUILD_REFERENCE_WORKER OR WMFS_BUNDLE_REFERENCE)
+  find_package(Torch CONFIG REQUIRED)
+  add_library(wmfs-reference-kernels STATIC src/reference_kernels.cpp)
+  set_target_properties(
+    wmfs-reference-kernels
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+  )
+  target_include_directories(
+    wmfs-reference-kernels
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+  )
+  target_link_libraries(wmfs-reference-kernels PUBLIC ${TORCH_LIBRARIES})
+  target_compile_options(wmfs-reference-kernels PRIVATE ${TORCH_CXX_FLAGS})
+endif()
 
 set(CAPNPC_SRC_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/wmfs/schemas")
 set(CAPNPC_IMPORT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/wmfs/schemas")
@@ -48,11 +81,22 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
   target_link_libraries(_native PRIVATE CapnProto::capnp-rpc CapnProto::kj-async)
 
   install(TARGETS _native LIBRARY DESTINATION wmfs)
+
+  if(WMFS_BUNDLE_REFERENCE)
+    nanobind_add_module(
+      _bundled
+      NB_STATIC
+      src/bundled_module.cpp
+      src/reference_torch_ops.cpp
+    )
+    target_link_libraries(_bundled PRIVATE wmfs-reference-kernels)
+    target_compile_options(_bundled PRIVATE ${TORCH_CXX_FLAGS})
+    set_target_properties(_bundled PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
+    install(TARGETS _bundled LIBRARY DESTINATION wmfs)
+  endif()
 endif()
 
 if(WMFS_BUILD_REFERENCE_WORKER)
-  find_package(Torch CONFIG REQUIRED)
-
   set(CAPNPC_SRC_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/schemas")
   set(
     CAPNPC_IMPORT_DIRS
@@ -84,7 +128,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       CapnProto::capnp-rpc
       CapnProto::kj-async
       Threads::Threads
-      ${TORCH_LIBRARIES}
+      wmfs-reference-kernels
   )
   target_compile_options(wmfs-reference-worker PRIVATE ${TORCH_CXX_FLAGS})
   set_target_properties(

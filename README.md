@@ -60,6 +60,18 @@ just check
 just check-pinned
 ```
 
+The `bundled` package compiles the reference plugin into an optional
+in-process extension against the application's LibTorch:
+
+```console
+nix build .#bundled
+```
+
+For development builds, `just build` configures
+`WMFS_BUNDLED_PLUGINS=reference`. Direct CMake builds can leave the list empty
+for an isolation-only runtime or provide a semicolon-separated build-time
+plugin list. Runtime discovery cannot add code to an already compiled bundle.
+
 Use `nix shell`, rather than a development build, when measuring packaged
 Release performance:
 
@@ -87,7 +99,25 @@ u, s, vh = svd(c)
 d = add_scalar(c, 1.0)
 ```
 
-The public calls will remain unchanged when the isolated backend is added.
+The `local` backend is the direct Torch baseline and remains the default. A
+runtime built with bundled plugins also exposes `bundled` without changing the
+public calls:
+
+```python
+runtime.use_backend("bundled")
+c = matmul(a, b)
+```
+
+The bundled extension is loaded lazily on its first invocation. It calls the
+same transport-neutral C++ kernels as the isolated worker but does not create a
+worker, allocate shared memory, transfer file descriptors, or use Cap'n Proto.
+Bundled plugins must use the application's compiler ABI, glibc, LibTorch, and
+dependency versions, and a plugin failure can terminate the application.
+
+The direct `local` backend is retained both as the benchmark reference and for
+Torch's unrestricted native operation semantics. Bundled dispatch has a small
+fixed custom-operator cost, so replacing `local` would not improve the existing
+three built-in operations.
 
 ## Plugin Discovery
 
@@ -182,7 +212,10 @@ runtime.discover_plugins(Path("plugins"))
 The native session owns synchronous Cap'n Proto/KJ dispatch and SCM_RIGHTS
 mapping control on a dedicated C++ thread. The Python layer remains the public
 Torch API and evaluates output metadata. Neither the native extension nor the
-main process loads plugin code or links against the worker's Torch runtime.
+main process loads the worker or links against the worker's Torch runtime.
+Selecting isolated execution does not load the optional bundled extension;
+applications that previously invoked bundled code have already opted out of
+process-level plugin isolation for that code.
 
 The packaged reference worker implements the server control plane in C++20 and
 constructs ATen tensor views directly over mapped memfds. It executes the

@@ -1,7 +1,9 @@
 import atexit
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Protocol
 
+from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
 from wmfs.plugins import discover_plugin_manifests
@@ -24,7 +26,7 @@ class Runtime:
     """Select and dispatch operations to an execution backend."""
 
     def __init__(self) -> None:
-        self._backends: dict[str, Backend] = {"local": LocalBackend()}
+        self._backends = _initial_backends()
         self._backend_name = "local"
         self._registry = OperationRegistry()
         self._memory_mode = "pooled"
@@ -102,8 +104,15 @@ class Runtime:
             close = getattr(backend, "close", None)
             if close is not None:
                 close()
-        self._backends = {"local": LocalBackend()}
+        self._backends = _initial_backends()
         self._backend_name = "local"
+
+
+def _initial_backends() -> dict[str, Backend]:
+    backends: dict[str, Backend] = {"local": LocalBackend()}
+    if find_spec("wmfs._bundled") is not None:
+        backends["bundled"] = BundledBackend()
+    return backends
 
 
 runtime = Runtime()
