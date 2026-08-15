@@ -37,10 +37,11 @@ let
         "-DWMFS_BUNDLED_PLUGINS=reference"
       ];
       dontUseCmakeConfigure = true;
-      dependencies = with pkgs.python3Packages; [
-        numpy
-        pycapnp
-        torch
+      dependencies = [
+        pkgs.python3Packages.numpy
+        pkgs.python3Packages.pycapnp
+        pkgs.python3Packages.torch
+        workers.wmfs-plugin
       ];
 
       nativeCheckInputs = [

@@ -8,9 +8,10 @@ environment.
 
 ## Development Build
 
-The `wmfs` Python distribution lives under `packages/wmfs`; root-level CMake,
-C++ sources, tests, plugins, Nix definitions, and benchmarks remain shared
-repository infrastructure.
+The `wmfs` Python distribution lives under `packages/wmfs`. The independent
+worker-side SDK and protocol schemas live under `packages/wmfs-plugin`.
+Root-level CMake, C++ sources, tests, plugins, Nix definitions, and benchmarks
+remain shared repository infrastructure.
 
 The development shell inherits build inputs from the runtime and worker package
 derivations with `inputsFrom`. This keeps the CMake and package builds on the
@@ -37,10 +38,11 @@ just build RelWithDebInfo
 WMFS_BUILD_TYPE=Release nix develop
 ```
 
-The shell adds the selected output prefix and `packages/wmfs` source directory
-to `PYTHONPATH`, and adds the output prefix to `PATH`. Re-run the corresponding
-`just build` recipe after source changes. Verify that the development artifacts
-are selected, then run tests directly from the source tree:
+The shell adds the selected output prefix plus the `packages/wmfs` and
+`packages/wmfs-plugin` source directories to `PYTHONPATH`, and adds the output
+prefix to `PATH`. Re-run the corresponding `just build` recipe after source
+changes. Verify that the development artifacts are selected, then run tests
+directly from the source tree:
 
 ```console
 python -c 'import wmfs._native; print(wmfs._native.__file__)'
@@ -124,6 +126,21 @@ fixed custom-operator cost, so replacing `local` would not improve the existing
 three built-in operations.
 
 ## Plugin Discovery
+
+Python plugins depend on the standalone `wmfs-plugin` distribution rather than
+the main runtime. The SDK provides the protocol schemas, FD receiver, mapped
+Torch views, and metadata-driven worker bootstrap:
+
+```python
+from wmfs_plugin.worker import worker_main
+
+worker_main({"my_operation": my_operation_handler})
+```
+
+Handlers receive ordinary input tensors, writable output tensors, and scalar
+values. Plugin kernels do not receive runtime object-store, RPC, memfd, or
+allocator internals. The reference Python worker under `plugins/reference`
+demonstrates the complete adapter.
 
 Plugin deployment metadata identifies a worker module and its Cap'n Proto
 schema. Operation signatures, numeric IDs, and known output shape/dtype

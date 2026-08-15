@@ -22,7 +22,7 @@
       workers = import (source + "/nix/reference-workers.nix") {
         inherit pkgs source;
       };
-      inherit (workers) reference-python-worker reference-worker;
+      inherit (workers) reference-python-worker reference-worker wmfs-plugin;
 
       runtime = wmfs.packages.${system}.default;
       runtimePython = runtime.pythonModule.withPackages (_: [ runtime ]);
@@ -102,12 +102,13 @@
     {
       packages.${system} = {
         default = reference-worker;
-        inherit reference-python-worker reference-worker;
+        inherit reference-python-worker reference-worker wmfs-plugin;
       };
 
       checks.${system} = {
         default = isolation-check;
         package = reference-worker;
+        plugin-package = wmfs-plugin;
       };
 
       devShells.${system}.default = pkgs.mkShell {

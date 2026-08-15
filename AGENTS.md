@@ -4,6 +4,8 @@
 
 - The `wmfs` Python distribution is in `packages/wmfs`; its import package is
   `packages/wmfs/wmfs`.
+- The independent Python plugin SDK is in `packages/wmfs-plugin`; plugins may
+  depend on `wmfs_plugin` but must not depend on the main `wmfs` runtime.
 - Implement the runtime in Python first.
 - Use nanobind instead of pybind11 for future Python/C++ bindings.
 - Use C++20 or newer for all C++ code.

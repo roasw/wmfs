@@ -8,7 +8,6 @@ import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from time import perf_counter_ns
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -42,6 +41,7 @@ from wmfs.registry import (
     TensorParameter,
 )
 from wmfs.transport.fd_broker import FdSender
+from wmfs_plugin.schema import schema_root
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
@@ -112,22 +112,18 @@ def _reserve_invocation_access(
     return buffers.reserve_access(reads=reads, writes=writes)
 
 
-def _schema_root() -> Path:
-    return Path(__file__).parent.parent / "schemas"
-
-
 def _load_runtime_schema() -> ModuleType:
-    root = _schema_root()
+    root = schema_root()
     return capnp.load(str(root / "wmfs" / "runtime.capnp"), imports=[str(root)])
 
 
 def _load_tensor_schema() -> ModuleType:
-    root = _schema_root()
+    root = schema_root()
     return capnp.load(str(root / "wmfs" / "tensor.capnp"), imports=[str(root)])
 
 
 def _load_plugin_schema(manifest: "PluginManifest") -> ModuleType:
-    imports = [_schema_root(), manifest.schema_path.parent.parent]
+    imports = [schema_root(), manifest.schema_path.parent.parent]
     return capnp.load(
         str(manifest.schema_path), imports=[str(item) for item in imports]
     )
@@ -814,7 +810,7 @@ async def _worker_connection(
 def _start_worker(
     manifest: "PluginManifest", rpc_fd: int, fd_socket_fd: int
 ) -> subprocess.Popen[str]:
-    schema_root = _schema_root().resolve()
+    protocol_schema_root = schema_root().resolve()
     environment = os.environ.copy()
     for variable in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH"):
         environment.pop(variable, None)
@@ -833,7 +829,7 @@ def _start_worker(
             "--interface",
             manifest.interface,
             "--schema-import",
-            str(schema_root),
+            str(protocol_schema_root),
             "--schema-import",
             str(manifest.schema_path.parent.parent),
         ],

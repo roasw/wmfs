@@ -4,8 +4,11 @@
 }:
 let
   pluginSrc = source + "/plugins/reference";
+  wmfsPlugin = import ./wmfs-plugin.nix { inherit pkgs source; };
 in
 {
+  wmfs-plugin = wmfsPlugin;
+
   reference-python-worker = pkgs.python3Packages.buildPythonApplication {
     pname = "wmfs-reference";
     version = "0.1.0";
@@ -13,10 +16,9 @@ in
     src = pluginSrc;
 
     build-system = [ pkgs.python3Packages.setuptools ];
-    dependencies = with pkgs.python3Packages; [
-      numpy
-      pycapnp
-      torch
+    dependencies = [
+      pkgs.python3Packages.torch
+      wmfsPlugin
     ];
 
     pythonImportsCheck = [ "wmfs_reference" ];

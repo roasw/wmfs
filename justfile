@@ -31,7 +31,7 @@ test profile=build_type:
     just build "{{ profile }}"
     env \
       PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
-      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs${PYTHONPATH:+:$PYTHONPATH}" \
+      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
       pytest -q
 
 # Test the local Release development artifacts.
@@ -40,7 +40,7 @@ test-release:
 
 # Build all packaged Release artifacts without creating result symlinks.
 package:
-    nix build .#default .#bundled .#reference-worker .#reference-python-worker --no-link
+    nix build .#default .#bundled .#wmfs-plugin .#reference-worker .#reference-python-worker --no-link
 
 # Benchmark packaged Release artifacts in pooled or arena mode.
 benchmark mode="pooled":
