@@ -45,14 +45,19 @@ let
       ];
 
       nativeCheckInputs = [
-        pkgs.python3Packages.pytestCheckHook
+        pkgs.python3Packages.pytest
         workers.reference-worker
       ];
-      pytestFlags = [
-        "-c"
-        "../../pytest.ini"
-        "../../tests"
-      ];
+      preCheck = pkgs.lib.optionalString bundled ''
+        export WMFS_REQUIRE_BUNDLED=1
+      '';
+      checkPhase = ''
+        runHook preCheck
+        for layer in ${if bundled then "contract package" else "unit contract integration native"}; do
+          pytest -c ../../pytest.ini -m "$layer" ../../tests
+        done
+        runHook postCheck
+      '';
       pythonImportsCheck = [ "wmfs" ];
     };
   bundledRuntime = buildRuntime { bundled = true; };

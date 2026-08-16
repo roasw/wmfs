@@ -16,6 +16,7 @@ pkgs.python3Packages.buildPythonPackage {
   ];
 
   nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook ];
+  pytestFlags = [ "tests" ];
   pythonImportsCheck = [
     "wmfs_plugin"
     "wmfs_plugin.fd_transport"

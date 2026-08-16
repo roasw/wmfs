@@ -26,14 +26,64 @@ debug:
 release:
     just build Release
 
-# Build and test a profile, defaulting to WMFS_BUILD_TYPE or Debug.
+# Build and run every test layer, defaulting to WMFS_BUILD_TYPE or Debug.
 test profile=build_type:
+    just test-all "{{ profile }}"
+
+# Build and run isolated Python component tests.
+test-unit profile=build_type:
     just build "{{ profile }}"
+    just _test-root-layer "{{ profile }}" unit
+
+# Build and run execution-backend contract tests.
+test-contract profile=build_type:
+    just build "{{ profile }}"
+    just _test-root-layer "{{ profile }}" contract
+
+# Build and run worker and transport integration tests.
+test-integration profile=build_type:
+    just build "{{ profile }}"
+    just _test-root-layer "{{ profile }}" integration
+
+# Run the independent plugin SDK tests explicitly.
+test-sdk:
+    just _test-sdk
+
+# Build and run native Python tests and CTest targets.
+test-native profile=build_type:
+    just build "{{ profile }}"
+    just _test-root-layer "{{ profile }}" native
+    ctest --test-dir "{{ root }}/build/{{ profile }}" --output-on-failure
+
+# Build and run installed/generated artifact tests.
+test-package profile=build_type:
+    just build "{{ profile }}"
+    just _test-root-layer "{{ profile }}" package
+
+# Build once, then run every independently selectable test layer.
+test-all profile=build_type:
+    just build "{{ profile }}"
+    just _test-root-layer "{{ profile }}" unit
+    just _test-root-layer "{{ profile }}" contract
+    just _test-root-layer "{{ profile }}" integration
+    just _test-sdk
+    just _test-root-layer "{{ profile }}" native
+    ctest --test-dir "{{ root }}/build/{{ profile }}" --output-on-failure
+    just _test-root-layer "{{ profile }}" package
+
+[private]
+_test-root-layer profile layer:
     env \
       PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
       PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
       WMFS_REQUIRE_BUNDLED="$([[ "{{ profile }}" == "Debug" ]] && printf 1 || printf 0)" \
-      pytest -q
+      pytest -q -m "{{ layer }}" "{{ root }}/tests"
+
+[private]
+_test-sdk:
+    env \
+      PYTHONPATH="{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
+      pytest -q "{{ root }}/packages/wmfs-plugin/tests"
 
 # Test the local Release development artifacts.
 test-release:

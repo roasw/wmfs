@@ -52,6 +52,10 @@ just test
 just test-release
 ```
 
+`just test` and `just test-all` build once and run every test layer. Use
+`just test-unit`, `just test-contract`, `just test-integration`, `just test-sdk`,
+`just test-native`, or `just test-package` to run one layer independently.
+
 The worker is normally launched by the runtime with private RPC and FD-passing
 descriptors; `--help` only verifies the executable outside an invocation.
 
