@@ -336,25 +336,28 @@ nix develop ./environments/nixos-25.05
 
 ## Benchmarking
 
-Run the local-versus-isolated benchmark with the packaged Release runtime and
-worker:
+Run the local, bundled, and isolated benchmark with the packaged Release
+runtime, bundled reference plugin, and worker:
 
 ```console
 just benchmark
 ```
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
-the deliberately cheap `add_scalar` operation. It reports median and standard
-deviation for local calls and isolated end-to-end calls, plus absolute and
-percentage overhead. Both primary timers stop when the backend returns; result
-destruction, collection, buffer retirement, and allocator reset are excluded
-and reported as post-return cleanup. JSON output also records nearest-rank p95
-and a 1,000-call sequential high-frequency `add_scalar` run.
+the deliberately cheap `add_scalar` operation. It instantiates and warms all
+three backends, verifies equivalent results, and rotates their measurement
+order. It reports backend-keyed median and standard deviation plus isolated
+overhead relative to both bundled and local execution. Every primary timer
+stops when its backend returns; result destruction, collection, buffer
+retirement, and allocator reset are excluded and reported as post-return
+cleanup. JSON output also records nearest-rank p95 and backend-keyed 1,000-call
+sequential high-frequency `add_scalar` runs, both allocating and with reusable
+`out=` storage.
 
 High-frequency call latency has the same backend-return boundary. Its
-cleanup-inclusive throughput times the complete sequential loop, including
-per-call result destruction and reclamation when outputs are not reused. These
-are deliberately distinct boundaries and neither measurement is batched.
+cleanup-inclusive throughput includes per-call result destruction and
+reclamation when outputs are not reused. These are deliberately distinct
+boundaries and neither measurement is batched.
 
 Separate diagnostics report worker startup, RPC-only round trips, shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
@@ -399,10 +402,14 @@ just benchmark-json arena.json arena
 
 Sizes, iteration counts, dtype, Torch thread count, control mode, and
 high-frequency iteration count are configurable; run `just benchmark-help` for
-all underlying options. The output allocation service metric measures
+all underlying options. Packaged reference benchmarks require bundled plugin
+support and fail with a direct error when it is absent; source-tree smoke tests
+must explicitly inject a substitute backend or skip. The output allocation
+service metric measures
 metadata-driven runtime allocation and output mapping before the single
 operation RPC. Lazy page faults remain part of isolated end-to-end time.
-The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) records a
-complete safe-pool run, [`benchmarks/arena.json`](benchmarks/arena.json) records
-the trusted-arena comparison, and
-[`benchmarks/README.md`](benchmarks/README.md) summarizes their primary results.
+The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) and
+[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 8 report shape
+but contain no fabricated samples until the packaged reference benchmark is
+rerun. [`benchmarks/README.md`](benchmarks/README.md) links the retained schema 5
+measurements and summarizes their historical primary results.

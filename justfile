@@ -52,7 +52,7 @@ benchmark-json output mode="pooled":
 
 # Show all underlying benchmark configuration options.
 benchmark-help:
-    nix shell .#default .#reference-worker -c wmfs-benchmark --help
+    nix shell .#bundled .#reference-worker -c wmfs-benchmark --help
 
 [private]
 _benchmark mode format output:
@@ -72,7 +72,7 @@ _benchmark mode format output:
       printf 'Memory mode must be pooled or arena\n' >&2
       exit 2
     fi
-    nix shell .#default .#reference-worker -c wmfs-benchmark "${arguments[@]}"
+    nix shell .#bundled .#reference-worker -c wmfs-benchmark "${arguments[@]}"
 
 # Run formatting and lint hooks.
 format:

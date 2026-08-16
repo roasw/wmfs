@@ -16,6 +16,7 @@ from typing import Any
 
 import torch
 
+from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.local import LocalBackend
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
@@ -30,6 +31,7 @@ _DEFAULT_SIZES = {
     "add_scalar": {"small": 64, "medium": 256, "large": 1024},
 }
 _DTYPES = {"float32": torch.float32, "float64": torch.float64}
+_BACKEND_NAMES = ("local", "bundled", "isolated")
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class BenchmarkConfig:
     arena_bytes: int | None = None
     control_mode: str = "native"
     high_frequency_iterations: int = 1000
+    bundled_backend: object | None = field(default=None, repr=False, compare=False)
 
     def validate(self) -> None:
         counts = (
@@ -112,6 +115,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             f"found {len(manifests)}"
         )
     manifest = manifests[0]
+    local = LocalBackend()
+    bundled = _bundled_backend(config)
     with BufferManager(
         mode=config.memory_mode, arena_bytes=config.arena_bytes
     ) as discovery_buffers:
@@ -139,24 +144,32 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                         config.sizes[operation][tier],
                         config,
                         generator,
+                        local,
+                        bundled,
                     )
                 )
 
     high_frequency = (
-        _benchmark_high_frequency(manifest, metadata, config, generator)
+        _benchmark_high_frequency(manifest, metadata, config, generator, local, bundled)
         if "add_scalar" in config.operations
         else None
     )
     high_frequency_out = (
         _benchmark_high_frequency(
-            manifest, metadata, config, generator, reuse_output=True
+            manifest,
+            metadata,
+            config,
+            generator,
+            local,
+            bundled,
+            reuse_output=True,
         )
         if "add_scalar" in config.operations
         else None
     )
 
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -212,8 +225,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                 "Each backend invocation through backend return; excludes per-call cleanup."
             ),
             "high_frequency_cleanup_inclusive_throughput": (
-                "Whole sequential loop, including per-call result destruction and "
-                "reclamation when outputs are not reused."
+                "Per-backend invocation and cleanup totals, including result destruction "
+                "and reclamation when outputs are not reused."
             ),
             "diagnostics": (
                 "Each summary uses diagnostic_iterations samples. Component metrics are "
@@ -232,7 +245,7 @@ def render_table(report: dict[str, Any]) -> str:
     environment = report["environment"]
     worker = environment["worker"]
     lines = [
-        "WMFS local versus isolated benchmark",
+        "WMFS local, bundled, and isolated benchmark",
         (
             f"runtime: Python {environment['python_version']}, "
             f"Torch {environment['torch_version']}, glibc {environment['glibc_version']}"
@@ -251,8 +264,12 @@ def render_table(report: dict[str, Any]) -> str:
     ]
     primary_rows = []
     for case in report["operations"]:
-        local = case["local_call_ms"]
-        isolated = case["isolated_end_to_end_ms"]
+        backends = case["backends"]
+        local = backends["local"]["call_ms"]
+        bundled = backends["bundled"]["call_ms"]
+        isolated = backends["isolated"]["call_ms"]
+        versus_bundled = case["overhead"]["isolated_vs_bundled"]
+        versus_local = case["overhead"]["isolated_vs_local"]
         primary_rows.append(
             (
                 case["operation"],
@@ -260,10 +277,14 @@ def render_table(report: dict[str, Any]) -> str:
                 case["shape"],
                 _number(local["median_ms"]),
                 _number(local["standard_deviation_ms"]),
+                _number(bundled["median_ms"]),
+                _number(bundled["standard_deviation_ms"]),
                 _number(isolated["median_ms"]),
                 _number(isolated["standard_deviation_ms"]),
-                _number(case["absolute_overhead_ms"]),
-                f"{case['percentage_overhead']:.1f}%",
+                _number(versus_bundled["absolute_ms"]),
+                f"{versus_bundled['percentage']:.1f}%",
+                _number(versus_local["absolute_ms"]),
+                f"{versus_local['percentage']:.1f}%",
             )
         )
     lines.extend(
@@ -274,10 +295,14 @@ def render_table(report: dict[str, Any]) -> str:
                 "shape",
                 "local med",
                 "local std",
+                "bundled med",
+                "bundled std",
                 "isolated med",
                 "isolated std",
-                "overhead",
-                "overhead %",
+                "vs bundled",
+                "vs bundled %",
+                "vs local",
+                "vs local %",
             ),
             primary_rows,
         )
@@ -287,14 +312,15 @@ def render_table(report: dict[str, Any]) -> str:
             "",
             "Post-return cleanup (median milliseconds; excluded from primary calls)",
             *_table(
-                ("operation", "tier", "local result", "isolated result+reclaim"),
+                ("operation", "tier", "local", "bundled", "isolated+reclaim"),
                 tuple(
                     (
                         case["operation"],
                         case["tier"],
-                        _number(case["local_result_cleanup_ms"]["median_ms"]),
+                        _number(case["backends"]["local"]["cleanup_ms"]["median_ms"]),
+                        _number(case["backends"]["bundled"]["cleanup_ms"]["median_ms"]),
                         _number(
-                            case["isolated_result_cleanup_reclamation_ms"]["median_ms"]
+                            case["backends"]["isolated"]["cleanup_ms"]["median_ms"]
                         ),
                     )
                     for case in report["operations"]
@@ -333,24 +359,11 @@ def render_table(report: dict[str, Any]) -> str:
         ]
     )
     if high_frequency is not None:
-        lines.extend(
-            [
-                "",
-                (
-                    "High-frequency add_scalar call latency: "
-                    f"{_number(high_frequency['call_latency_ms']['median_ms'])} ms median; "
-                    "cleanup-inclusive throughput: "
-                    f"{high_frequency['cleanup_inclusive_calls_per_second']:.0f} calls/s"
-                ),
-            ]
-        )
+        lines.extend(["", "High-frequency add_scalar"])
+        lines.extend(_render_high_frequency(high_frequency))
     if high_frequency_out is not None:
-        lines.append(
-            "High-frequency add_scalar with out call latency: "
-            f"{_number(high_frequency_out['call_latency_ms']['median_ms'])} ms median; "
-            "cleanup-inclusive throughput: "
-            f"{high_frequency_out['cleanup_inclusive_calls_per_second']:.0f} calls/s"
-        )
+        lines.append("High-frequency add_scalar with out")
+        lines.extend(_render_high_frequency(high_frequency_out))
     diagnostic_rows = []
     for case in report["operations"]:
         diagnostics = case["diagnostics"]
@@ -472,55 +485,46 @@ def _benchmark_case(
     size: int,
     config: BenchmarkConfig,
     generator: torch.Generator,
+    local: object,
+    bundled: object,
 ) -> dict[str, Any]:
     args, kwargs = _make_arguments(operation, size, config.dtype, generator)
     tensor_shapes = [
         tuple(item.shape) for item in args if isinstance(item, torch.Tensor)
     ]
-    local = LocalBackend()
     with _benchmark_session(manifest, metadata, config) as (buffers, session):
         managed_args = _manage_arguments(buffers, args)
-        local_result = local.invoke(operation, *managed_args, **kwargs)
-        isolated_result, _initial_metrics = session.invoke_profiled(
-            operation, *managed_args, **kwargs
-        )
-        _validate_result(operation, managed_args, local_result, isolated_result)
-        del local_result, isolated_result
+        backends = {
+            "local": local,
+            "bundled": bundled,
+            "isolated": session,
+        }
+        results = {
+            name: backend.invoke(operation, *managed_args, **kwargs)
+            for name, backend in backends.items()
+        }
+        _validate_results(operation, managed_args, results)
+        del results
         buffers.collect()
 
         for _ in range(config.warmups):
-            local.invoke(operation, *managed_args, **kwargs)
-            session.invoke(operation, *managed_args, **kwargs)
+            for backend in backends.values():
+                backend.invoke(operation, *managed_args, **kwargs)
             buffers.collect()
 
-        local_samples: list[int] = []
-        local_cleanup_samples: list[int] = []
-        isolated_samples: list[int] = []
-        isolated_cleanup_samples: list[int] = []
+        samples: dict[str, list[int]] = {name: [] for name in _BACKEND_NAMES}
+        cleanup_samples: dict[str, list[int]] = {name: [] for name in _BACKEND_NAMES}
         for iteration in range(config.iterations):
-            calls: tuple[
-                tuple[list[int], list[int], Callable[[], object], Callable[[], None]],
-                ...,
-            ] = (
-                (
-                    local_samples,
-                    local_cleanup_samples,
-                    lambda: local.invoke(operation, *managed_args, **kwargs),
-                    lambda: None,
-                ),
-                (
-                    isolated_samples,
-                    isolated_cleanup_samples,
-                    lambda: session.invoke(operation, *managed_args, **kwargs),
-                    buffers.collect,
-                ),
-            )
-            if iteration % 2:
-                calls = tuple(reversed(calls))
-            for samples, cleanup_samples, call, cleanup in calls:
-                call_elapsed, cleanup_elapsed = _sample_invocation(call, cleanup)
-                samples.append(call_elapsed)
-                cleanup_samples.append(cleanup_elapsed)
+            for name in _rotated_backend_names(iteration):
+                backend = backends[name]
+                call_elapsed, cleanup_elapsed = _sample_invocation(
+                    lambda backend=backend: backend.invoke(
+                        operation, *managed_args, **kwargs
+                    ),
+                    buffers.collect if name == "isolated" else lambda: None,
+                )
+                samples[name].append(call_elapsed)
+                cleanup_samples[name].append(cleanup_elapsed)
 
         diagnostics = _benchmark_diagnostics(
             manifest,
@@ -537,23 +541,28 @@ def _benchmark_case(
         buffers.collect()
         pool_stats = buffers.stats()
 
-    local_summary = summarize(local_samples)
-    isolated_summary = summarize(isolated_samples)
-    absolute_overhead_ms = float(isolated_summary["median_ms"]) - float(
-        local_summary["median_ms"]
-    )
+    backend_summaries = {
+        name: {
+            "call_ms": summarize(samples[name]),
+            "cleanup_ms": summarize(cleanup_samples[name]),
+        }
+        for name in _BACKEND_NAMES
+    }
     return {
         "operation": operation,
         "tier": tier,
         "shape": _shape_label(operation, size),
-        "local_call_ms": local_summary,
-        "isolated_end_to_end_ms": isolated_summary,
-        "local_result_cleanup_ms": summarize(local_cleanup_samples),
-        "isolated_result_cleanup_reclamation_ms": summarize(isolated_cleanup_samples),
-        "absolute_overhead_ms": absolute_overhead_ms,
-        "percentage_overhead": (
-            absolute_overhead_ms / float(local_summary["median_ms"]) * 100
-        ),
+        "backends": backend_summaries,
+        "overhead": {
+            "isolated_vs_bundled": _overhead(
+                backend_summaries["isolated"]["call_ms"],
+                backend_summaries["bundled"]["call_ms"],
+            ),
+            "isolated_vs_local": _overhead(
+                backend_summaries["isolated"]["call_ms"],
+                backend_summaries["local"]["call_ms"],
+            ),
+        },
         "memory_pool": pool_stats,
         "diagnostics": diagnostics,
     }
@@ -746,6 +755,8 @@ def _benchmark_high_frequency(
     metadata: PluginMetadata,
     config: BenchmarkConfig,
     generator: torch.Generator,
+    local: object,
+    bundled: object,
     *,
     reuse_output: bool = False,
 ) -> dict[str, Any]:
@@ -753,43 +764,64 @@ def _benchmark_high_frequency(
     args, kwargs = _make_arguments("add_scalar", size, config.dtype, generator)
     with _benchmark_session(manifest, metadata, config) as (buffers, session):
         managed_args = _manage_arguments(buffers, args)
-        reusable = (
-            session.invoke("add_scalar", *managed_args, **kwargs)
+        backends = {"local": local, "bundled": bundled, "isolated": session}
+        reusable = {
+            name: backend.invoke("add_scalar", *managed_args, **kwargs)
             if reuse_output
             else None
-        )
+            for name, backend in backends.items()
+        }
         for _ in range(config.warmups):
-            result = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
-            if not reuse_output:
-                del result
-                buffers.collect()
-        samples = []
-        cleanup_samples = []
-        batch_start = perf_counter_ns()
-        for _ in range(config.high_frequency_iterations):
-            elapsed, cleanup_elapsed = _sample_invocation(
-                lambda: session.invoke(
-                    "add_scalar", *managed_args, out=reusable, **kwargs
-                ),
-                buffers.collect if not reuse_output else lambda: None,
+            for name, backend in backends.items():
+                result = backend.invoke(
+                    "add_scalar", *managed_args, out=reusable[name], **kwargs
+                )
+                if not reuse_output:
+                    del result
+                    if name == "isolated":
+                        buffers.collect()
+        samples: dict[str, list[int]] = {name: [] for name in _BACKEND_NAMES}
+        cleanup_samples: dict[str, list[int]] = {name: [] for name in _BACKEND_NAMES}
+        inclusive_ns = {name: 0 for name in _BACKEND_NAMES}
+        for iteration in range(config.high_frequency_iterations):
+            for name in _rotated_backend_names(iteration):
+                backend = backends[name]
+                elapsed, cleanup_elapsed = _sample_invocation(
+                    lambda backend=backend, name=name: backend.invoke(
+                        "add_scalar", *managed_args, out=reusable[name], **kwargs
+                    ),
+                    buffers.collect
+                    if name == "isolated" and not reuse_output
+                    else lambda: None,
+                )
+                samples[name].append(elapsed)
+                cleanup_samples[name].append(cleanup_elapsed)
+                inclusive_ns[name] += elapsed + cleanup_elapsed
+        validation = {
+            name: backend.invoke(
+                "add_scalar", *managed_args, out=reusable[name], **kwargs
             )
-            samples.append(elapsed)
-            cleanup_samples.append(cleanup_elapsed)
-        batch_elapsed = perf_counter_ns() - batch_start
-        validation = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
-        torch.testing.assert_close(validation, managed_args[0] + managed_args[1])
+            for name, backend in backends.items()
+        }
+        _validate_results("add_scalar", managed_args, validation)
         del validation
         if reuse_output:
-            del reusable
+            reusable.clear()
             buffers.collect()
-    latency = summarize(samples)
     return {
         "iterations": config.high_frequency_iterations,
-        "call_latency_ms": latency,
-        "result_cleanup_reclamation_ms": summarize(cleanup_samples),
-        "cleanup_inclusive_calls_per_second": (
-            config.high_frequency_iterations * 1_000_000_000 / batch_elapsed
-        ),
+        "backends": {
+            name: {
+                "call_latency_ms": summarize(samples[name]),
+                "result_cleanup_ms": summarize(cleanup_samples[name]),
+                "cleanup_inclusive_calls_per_second": (
+                    config.high_frequency_iterations
+                    * 1_000_000_000
+                    / inclusive_ns[name]
+                ),
+            }
+            for name in _BACKEND_NAMES
+        },
     }
 
 
@@ -852,32 +884,37 @@ def _make_arguments(
     raise ValueError(f"Unknown benchmark operation {operation!r}")
 
 
-def _validate_result(
+def _validate_results(
     operation: str,
     args: tuple[object, ...],
-    local_result: object,
-    isolated_result: object,
+    results: dict[str, object],
 ) -> None:
     if operation == "svd":
         source = args[0]
         if not isinstance(source, torch.Tensor):
             raise TypeError("SVD benchmark input is not a tensor")
-        for result in (local_result, isolated_result):
+        singular_values = None
+        for result in results.values():
             if not isinstance(result, tuple):
                 raise TypeError("SVD benchmark result is not a tuple")
-            u, singular_values, vh = result
+            u, current_singular_values, vh = result
             torch.testing.assert_close(
-                u @ torch.diag(singular_values) @ vh,
+                u @ torch.diag(current_singular_values) @ vh,
                 source,
                 rtol=1e-4,
                 atol=1e-5,
             )
+            if singular_values is not None:
+                torch.testing.assert_close(current_singular_values, singular_values)
+            singular_values = current_singular_values
         return
-    if not isinstance(local_result, torch.Tensor) or not isinstance(
-        isolated_result, torch.Tensor
-    ):
+    local_result = results["local"]
+    if not isinstance(local_result, torch.Tensor):
         raise TypeError("Benchmark operation did not return a tensor")
-    torch.testing.assert_close(isolated_result, local_result)
+    for result in results.values():
+        if not isinstance(result, torch.Tensor):
+            raise TypeError("Benchmark operation did not return a tensor")
+        torch.testing.assert_close(result, local_result)
 
 
 def _time_call(call: Callable[[], Any]) -> tuple[int, Any]:
@@ -902,6 +939,34 @@ def _sample_invocation(
     del result
     cleanup()
     return call_elapsed, perf_counter_ns() - cleanup_start
+
+
+def _rotated_backend_names(iteration: int) -> tuple[str, ...]:
+    offset = iteration % len(_BACKEND_NAMES)
+    return _BACKEND_NAMES[offset:] + _BACKEND_NAMES[:offset]
+
+
+def _overhead(
+    isolated: dict[str, float | int], baseline: dict[str, float | int]
+) -> dict[str, float]:
+    absolute_ms = float(isolated["median_ms"]) - float(baseline["median_ms"])
+    return {
+        "absolute_ms": absolute_ms,
+        "percentage": absolute_ms / float(baseline["median_ms"]) * 100,
+    }
+
+
+def _bundled_backend(config: BenchmarkConfig) -> Any:
+    backend = config.bundled_backend or BundledBackend()
+    try:
+        backend.invoke("add_scalar", torch.zeros(1, dtype=config.dtype), 0.0)
+    except (ImportError, RuntimeError) as error:
+        raise RuntimeError(
+            "The benchmark requires packaged wmfs support for the bundled reference "
+            "plugin. Use the packaged bundled runtime, or explicitly inject a backend "
+            "only for source-tree smoke tests."
+        ) from error
+    return backend
 
 
 def _configure_threads(threads: int) -> tuple[dict[str, str | None], int]:
@@ -975,6 +1040,21 @@ def _median(diagnostics: dict[str, Any], name: str) -> str:
     return _number(diagnostics[name]["median_ms"])
 
 
+def _render_high_frequency(measurement: dict[str, Any]) -> list[str]:
+    return _table(
+        ("backend", "median ms", "stddev ms", "cleanup-inclusive calls/s"),
+        tuple(
+            (
+                name,
+                _number(values["call_latency_ms"]["median_ms"]),
+                _number(values["call_latency_ms"]["standard_deviation_ms"]),
+                f"{values['cleanup_inclusive_calls_per_second']:.0f}",
+            )
+            for name, values in measurement["backends"].items()
+        ),
+    )
+
+
 def _number(value: float) -> str:
     return f"{value:.3f}"
 
@@ -990,7 +1070,7 @@ def _table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Benchmark local and process-isolated wmfs operations"
+        description="Benchmark local, bundled, and process-isolated wmfs operations"
     )
     parser.add_argument(
         "--plugin-directory",

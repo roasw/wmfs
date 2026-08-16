@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -5,9 +6,11 @@ import pytest
 import torch
 
 import wmfs.benchmark as benchmark
+from wmfs.backends.local import LocalBackend
 from wmfs.benchmark import (
     BenchmarkConfig,
     _project_home,
+    _rotated_backend_names,
     _sample_invocation,
     render_table,
     run_benchmarks,
@@ -35,6 +38,21 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
     assert summary["standard_deviation_ms"] == pytest.approx(0.0000057663, rel=1e-5)
 
 
+@pytest.mark.parametrize("name", ("baseline", "arena"))
+def test_checked_reports_use_schema_8_without_fabricated_samples(name: str) -> None:
+    benchmark_directory = Path(__file__).parents[1] / "benchmarks"
+    report = json.loads((benchmark_directory / f"{name}.json").read_text())
+    historical = json.loads(
+        (benchmark_directory / report["historical_report"]).read_text()
+    )
+
+    assert report["schema_version"] == 8
+    assert report["backends"] == ["local", "bundled", "isolated"]
+    assert report["operations"] == []
+    assert historical["schema_version"] == 5
+    assert historical["operations"]
+
+
 def test_sample_invocation_separates_call_return_from_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -60,6 +78,42 @@ def test_sample_invocation_separates_call_return_from_cleanup(
     assert _sample_invocation(call, cleanup) == (10, 50)
 
 
+def test_benchmark_order_rotates_each_backend_through_each_position() -> None:
+    orders = [_rotated_backend_names(iteration) for iteration in range(3)]
+
+    assert all(
+        {order[position] for order in orders} == {"local", "bundled", "isolated"}
+        for position in range(3)
+    )
+    assert [order[0] for order in orders] == ["local", "bundled", "isolated"]
+
+
+def test_benchmark_requires_bundled_reference_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MissingBundledBackend:
+        def invoke(self, *_args: object, **_kwargs: object) -> object:
+            raise ModuleNotFoundError("wmfs._bundled")
+
+    monkeypatch.setattr(benchmark, "BundledBackend", MissingBundledBackend)
+
+    with pytest.raises(RuntimeError, match="requires packaged wmfs support"):
+        run_benchmarks(
+            BenchmarkConfig(
+                plugin_directory=PLUGIN_DIRECTORY,
+                operations=("add_scalar",),
+                tiers=("small",),
+                sizes={"add_scalar": {"small": 1}},
+                iterations=1,
+                warmups=0,
+                startup_iterations=1,
+                rpc_iterations=1,
+                diagnostic_iterations=1,
+                high_frequency_iterations=1,
+            )
+        )
+
+
 def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     previous_threads = torch.get_num_threads()
     previous_omp_threads = os.environ.get("OMP_NUM_THREADS")
@@ -78,27 +132,42 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
             rpc_iterations=1,
             diagnostic_iterations=1,
             high_frequency_iterations=2,
+            control_mode="python",
+            bundled_backend=LocalBackend(),
         )
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 7
+    assert report["schema_version"] == 8
     assert report["configuration"]["plugin_directory"] == "plugins"
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
-    assert report["configuration"]["control_mode"] == "native"
+    assert report["configuration"]["control_mode"] == "python"
     assert report["high_frequency_add_scalar"]["iterations"] == 2
-    assert report["high_frequency_add_scalar"]["call_latency_ms"]["count"] == 2
-    assert report["high_frequency_add_scalar"]["cleanup_inclusive_calls_per_second"] > 0
-    assert report["high_frequency_add_scalar_out"]["iterations"] == 2
-    assert (
-        report["high_frequency_add_scalar_out"]["cleanup_inclusive_calls_per_second"]
-        > 0
+    assert set(report["high_frequency_add_scalar"]["backends"]) == {
+        "local",
+        "bundled",
+        "isolated",
+    }
+    assert all(
+        values["call_latency_ms"]["count"] == 2
+        and values["cleanup_inclusive_calls_per_second"] > 0
+        for values in report["high_frequency_add_scalar"]["backends"].values()
     )
-    assert svd_case["local_call_ms"]["count"] == 1
-    assert svd_case["isolated_end_to_end_ms"]["count"] == 1
-    assert svd_case["local_result_cleanup_ms"]["count"] == 1
-    assert svd_case["isolated_result_cleanup_reclamation_ms"]["count"] == 1
+    assert report["high_frequency_add_scalar_out"]["iterations"] == 2
+    assert all(
+        values["cleanup_inclusive_calls_per_second"] > 0
+        for values in report["high_frequency_add_scalar_out"]["backends"].values()
+    )
+    assert set(svd_case["backends"]) == {"local", "bundled", "isolated"}
+    assert all(
+        values["call_ms"]["count"] == 1 and values["cleanup_ms"]["count"] == 1
+        for values in svd_case["backends"].values()
+    )
+    assert set(svd_case["overhead"]) == {
+        "isolated_vs_bundled",
+        "isolated_vs_local",
+    }
     assert set(svd_case["diagnostics"]) == {
         "cached_buffer_reclamation_ms",
         "cached_buffer_reset_ms",

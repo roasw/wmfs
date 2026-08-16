@@ -15,11 +15,15 @@ and C++ worker were built in Release mode by their Nix packages. The worker
 contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
 glibc 2.42.
 Torch was limited to one CPU thread. Each operation was warmed up twice, then
-measured ten times. The checked-in numeric reports use the earlier schema 5
-boundary, which included result destruction and safe-pool retirement/reset in
-isolated end-to-end samples. They are retained rather than rerunning the
-expensive reference cases. Current schema 7 reports stop local and isolated
-primary samples at backend return and measure post-return cleanup separately.
+measured ten times. The checked report envelopes use schema 8 and explicitly
+contain no current operation samples because bundled measurements have not been
+generated on the reference host. Their `historical_report` links point to the
+earlier schema 5 numeric reports retained as `baseline.schema5.json` and
+`arena.schema5.json`, rather than relabeling or fabricating results. Those
+legacy boundaries included result destruction and safe-pool
+retirement/reset in isolated end-to-end samples. New schema 8 reports contain
+local, bundled, and isolated samples keyed by backend. All primary samples stop
+at backend return and post-return cleanup is measured separately.
 Known outputs are preallocated from schema metadata and each operation uses one
 Cap'n Proto RPC between the C++ client and C++ worker. The table reports
 medians; the JSON reports also contain p95, standard deviation, allocation
@@ -79,6 +83,6 @@ run-to-run noise: the mandatory RPC and thread wakeup now dominate. Reusable
 outputs are the measurable remaining eager-path optimization, improving the
 high-frequency cheap-operation median by roughly 19-22% in this report.
 
-These values characterize one WSL2 host and are not performance thresholds.
-Regenerate both reports on the target system when evaluating the security and
-performance tradeoff.
+These historical values characterize one WSL2 host and are not performance
+thresholds. Regenerate both schema 8 reports on the target system when
+evaluating the security and performance tradeoff.

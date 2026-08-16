@@ -1,0 +1,1455 @@
+{
+    "schema_version": 5,
+    "measurement_boundaries": {
+        "status": "Historical schema 5 report retained without regenerating numeric samples.",
+        "primary_calls": "Result destruction and isolated reclamation are included in these legacy samples.",
+        "high_frequency": "Legacy latency and throughput both include per-call cleanup when outputs are not reused.",
+        "diagnostics": "Component metrics are nested and overlapping; legacy buffer_reclamation_ms combines equal uncached and cached populations."
+    },
+    "generated_at_utc": "2026-08-15T12:29:44.227544+00:00",
+    "environment": {
+        "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.42",
+        "machine": "x86_64",
+        "cpu_count": 32,
+        "python_version": "3.14.6",
+        "torch_version": "2.12.0",
+        "glibc_version": "2.42",
+        "dtype": "float32",
+        "threads": 1,
+        "worker": {
+            "plugin_name": "reference",
+            "plugin_version": "0.1.0",
+            "worker": "wmfs-reference-worker",
+            "python_version": "none",
+            "torch_version": "2.12.0",
+            "glibc_version": "2.42",
+            "executable": "/nix/store/16qnlf1p8jjs3ly6m6w1n6n4qrlwmhsg-wmfs-reference-worker-0.1.0/bin/wmfs-reference-worker"
+        }
+    },
+    "configuration": {
+        "plugin_directory": "plugins",
+        "operations": [
+            "matmul",
+            "svd",
+            "add_scalar"
+        ],
+        "tiers": [
+            "small",
+            "medium",
+            "large"
+        ],
+        "iterations": 10,
+        "warmups": 2,
+        "startup_iterations": 3,
+        "rpc_iterations": 50,
+        "diagnostic_iterations": 5,
+        "threads": 1,
+        "dtype": "float32",
+        "seed": 1234,
+        "memory_mode": "arena",
+        "control_mode": "native",
+        "high_frequency_iterations": 1000,
+        "arena_bytes": 268435456,
+        "sizes": {
+            "matmul": {
+                "small": 64,
+                "medium": 256,
+                "large": 2048
+            },
+            "svd": {
+                "small": 32,
+                "medium": 128,
+                "large": 768
+            },
+            "add_scalar": {
+                "small": 64,
+                "medium": 256,
+                "large": 1024
+            }
+        }
+    },
+    "worker_startup_ms": {
+        "count": 3,
+        "median_ms": 104.339431,
+        "p95_ms": 113.302276,
+        "standard_deviation_ms": 5.576098383370839
+    },
+    "rpc_round_trip_ms": {
+        "count": 50,
+        "median_ms": 0.081069,
+        "p95_ms": 0.483034,
+        "standard_deviation_ms": 0.2608716214761092
+    },
+    "high_frequency_add_scalar": {
+        "iterations": 1000,
+        "latency_ms": {
+            "count": 1000,
+            "median_ms": 0.225817,
+            "p95_ms": 0.336274,
+            "standard_deviation_ms": 0.09804752358952981
+        },
+        "calls_per_second": 4107.437621535999
+    },
+    "high_frequency_add_scalar_out": {
+        "iterations": 1000,
+        "latency_ms": {
+            "count": 1000,
+            "median_ms": 0.1834035,
+            "p95_ms": 0.290993,
+            "standard_deviation_ms": 0.15400559441634215
+        },
+        "calls_per_second": 4674.534921755881
+    },
+    "operations": [
+        {
+            "operation": "matmul",
+            "tier": "small",
+            "shape": "64x64",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.0153265,
+                "p95_ms": 0.037206,
+                "standard_deviation_ms": 0.010170413735930313
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 0.2792415,
+                "p95_ms": 0.881153,
+                "standard_deviation_ms": 0.19174024750012714
+            },
+            "absolute_overhead_ms": 0.26391499999999996,
+            "percentage_overhead": 1721.9521743385637,
+            "memory_pool": {
+                "allocation_requests": 45,
+                "pool_hits": 44,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 43,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 2,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9777777777777777
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 0.265059,
+                    "p95_ms": 0.550731,
+                    "standard_deviation_ms": 0.1212644397201422
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.04621,
+                    "p95_ms": 0.1381,
+                    "standard_deviation_ms": 0.03641855077621843
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.186116,
+                    "p95_ms": 0.305427,
+                    "standard_deviation_ms": 0.0661818979208061
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.004091,
+                    "p95_ms": 0.00586,
+                    "standard_deviation_ms": 0.0010228365656349992
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.024106,
+                    "p95_ms": 0.051802,
+                    "standard_deviation_ms": 0.010943518819831216
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01771,
+                    "p95_ms": 0.034901,
+                    "standard_deviation_ms": 0.007006837820300967
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.0073345,
+                    "p95_ms": 0.009917,
+                    "standard_deviation_ms": 0.002111020359920766
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.023348,
+                    "p95_ms": 0.026024,
+                    "standard_deviation_ms": 0.0022427518275547117
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.021671,
+                    "p95_ms": 0.023362,
+                    "standard_deviation_ms": 0.0020972645040623753
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.001842,
+                    "p95_ms": 0.002249,
+                    "standard_deviation_ms": 0.0003118965213015368
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.001107,
+                    "p95_ms": 0.001389,
+                    "standard_deviation_ms": 0.00012441607613166396
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.00306,
+                    "p95_ms": 0.003521,
+                    "standard_deviation_ms": 0.00037109944758784
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.125176,
+                    "p95_ms": 0.143462,
+                    "standard_deviation_ms": 0.011916586836842167
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.014922,
+                    "p95_ms": 0.016789,
+                    "standard_deviation_ms": 0.0009217844433488775
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 0.082169,
+                    "p95_ms": 0.095866,
+                    "standard_deviation_ms": 0.00862412213735404
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001003,
+                    "p95_ms": 0.001318,
+                    "standard_deviation_ms": 0.0001367523308759306
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001707,
+                    "p95_ms": 0.002567,
+                    "standard_deviation_ms": 0.00038720361568559764
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000157,
+                    "p95_ms": 0.000162,
+                    "standard_deviation_ms": 9.402127418834526e-06
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.00885,
+                    "p95_ms": 0.010589,
+                    "standard_deviation_ms": 0.0009107901185234719
+                }
+            }
+        },
+        {
+            "operation": "matmul",
+            "tier": "medium",
+            "shape": "256x256",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.229713,
+                "p95_ms": 0.306201,
+                "standard_deviation_ms": 0.026772223209886772
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 0.520793,
+                "p95_ms": 0.626782,
+                "standard_deviation_ms": 0.05977175129448693
+            },
+            "absolute_overhead_ms": 0.29107999999999995,
+            "percentage_overhead": 126.71463957198763,
+            "memory_pool": {
+                "allocation_requests": 45,
+                "pool_hits": 44,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 43,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 2,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9777777777777777
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 0.51333,
+                    "p95_ms": 1.217981,
+                    "standard_deviation_ms": 0.285863690261635
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.083305,
+                    "p95_ms": 0.24355,
+                    "standard_deviation_ms": 0.06924276408289894
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.189589,
+                    "p95_ms": 0.203968,
+                    "standard_deviation_ms": 0.008758649681315038
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.003999,
+                    "p95_ms": 0.005471,
+                    "standard_deviation_ms": 0.0007452874881547388
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.028791,
+                    "p95_ms": 0.05487,
+                    "standard_deviation_ms": 0.011651008134921202
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.018365,
+                    "p95_ms": 0.055248,
+                    "standard_deviation_ms": 0.014744867234397196
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.008347,
+                    "p95_ms": 0.011869,
+                    "standard_deviation_ms": 0.001965390790657166
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.024537,
+                    "p95_ms": 0.037514,
+                    "standard_deviation_ms": 0.005416364847386114
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.022548,
+                    "p95_ms": 0.035266,
+                    "standard_deviation_ms": 0.005300964682017793
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.001618,
+                    "p95_ms": 0.001852,
+                    "standard_deviation_ms": 0.0002784159478190859
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.001127,
+                    "p95_ms": 0.001583,
+                    "standard_deviation_ms": 0.00019822815138117997
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.00332,
+                    "p95_ms": 0.003959,
+                    "standard_deviation_ms": 0.0005152713459916047
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.452491,
+                    "p95_ms": 0.491906,
+                    "standard_deviation_ms": 0.06537472284117157
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.015777,
+                    "p95_ms": 0.02713,
+                    "standard_deviation_ms": 0.004779670800379458
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 0.397544,
+                    "p95_ms": 0.420573,
+                    "standard_deviation_ms": 0.05631591393203168
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001305,
+                    "p95_ms": 0.001999,
+                    "standard_deviation_ms": 0.00037313514977820034
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002623,
+                    "p95_ms": 0.003762,
+                    "standard_deviation_ms": 0.0005832138544307739
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000152,
+                    "p95_ms": 0.000168,
+                    "standard_deviation_ms": 9.971960689854328e-06
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.237279,
+                    "p95_ms": 0.267795,
+                    "standard_deviation_ms": 0.017064032306579827
+                }
+            }
+        },
+        {
+            "operation": "matmul",
+            "tier": "large",
+            "shape": "2048x2048",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 121.4060325,
+                "p95_ms": 125.36781,
+                "standard_deviation_ms": 3.6060680122361877
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 123.6335605,
+                "p95_ms": 126.648342,
+                "standard_deviation_ms": 4.737298425083288
+            },
+            "absolute_overhead_ms": 2.2275280000000066,
+            "percentage_overhead": 1.8347753848228312,
+            "memory_pool": {
+                "allocation_requests": 45,
+                "pool_hits": 44,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 43,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 2,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9777777777777777
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 126.044844,
+                    "p95_ms": 142.052307,
+                    "standard_deviation_ms": 6.512741911413423
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 3.091819,
+                    "p95_ms": 10.685979,
+                    "standard_deviation_ms": 3.0465191696108262
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.250424,
+                    "p95_ms": 0.282304,
+                    "standard_deviation_ms": 0.02859530231768848
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.007339,
+                    "p95_ms": 0.007937,
+                    "standard_deviation_ms": 0.00038916649393286676
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.039214,
+                    "p95_ms": 0.071653,
+                    "standard_deviation_ms": 0.01888188258622535
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.018725,
+                    "p95_ms": 0.101142,
+                    "standard_deviation_ms": 0.03299401953930439
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.019105,
+                    "p95_ms": 0.031223,
+                    "standard_deviation_ms": 0.004623874186220901
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.061358,
+                    "p95_ms": 0.062811,
+                    "standard_deviation_ms": 0.0010544069423140195
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.058796,
+                    "p95_ms": 0.060765,
+                    "standard_deviation_ms": 0.0010463717121558668
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.001537,
+                    "p95_ms": 0.002085,
+                    "standard_deviation_ms": 0.000245995121902854
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.002474,
+                    "p95_ms": 0.002523,
+                    "standard_deviation_ms": 0.00012879906831961168
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.006008,
+                    "p95_ms": 0.006244,
+                    "standard_deviation_ms": 0.00025974479783048593
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 121.752468,
+                    "p95_ms": 126.571691,
+                    "standard_deviation_ms": 2.0432795859432846
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.047993,
+                    "p95_ms": 0.347841,
+                    "standard_deviation_ms": 0.12168221064954401
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 121.611292,
+                    "p95_ms": 126.421282,
+                    "standard_deviation_ms": 2.0942236746976195
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002505,
+                    "p95_ms": 0.004049,
+                    "standard_deviation_ms": 0.0008051808740897912
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.00619,
+                    "p95_ms": 0.00704,
+                    "standard_deviation_ms": 0.0006049212841353823
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000219,
+                    "p95_ms": 0.000227,
+                    "standard_deviation_ms": 7.833262411026456e-06
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 121.381919,
+                    "p95_ms": 126.223407,
+                    "standard_deviation_ms": 2.100626795529049
+                }
+            }
+        },
+        {
+            "operation": "svd",
+            "tier": "small",
+            "shape": "32x32",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.111172,
+                "p95_ms": 0.168215,
+                "standard_deviation_ms": 0.0334031495833851
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 0.444878,
+                "p95_ms": 0.537559,
+                "standard_deviation_ms": 0.05512926463177248
+            },
+            "absolute_overhead_ms": 0.333706,
+            "percentage_overhead": 300.17090634332385,
+            "memory_pool": {
+                "allocation_requests": 80,
+                "pool_hits": 79,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 79,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 1,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9875
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 0.423873,
+                    "p95_ms": 0.98176,
+                    "standard_deviation_ms": 0.22943088297489506
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.044072,
+                    "p95_ms": 0.096533,
+                    "standard_deviation_ms": 0.02210348148686084
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.183436,
+                    "p95_ms": 0.221605,
+                    "standard_deviation_ms": 0.018301730525827335
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.002824,
+                    "p95_ms": 0.017632,
+                    "standard_deviation_ms": 0.005904676722734277
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.022233,
+                    "p95_ms": 0.051134,
+                    "standard_deviation_ms": 0.013990834219588194
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.009687,
+                    "p95_ms": 0.03206,
+                    "standard_deviation_ms": 0.009023474288764832
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.0104045,
+                    "p95_ms": 0.016963,
+                    "standard_deviation_ms": 0.0021477814623466697
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.061899,
+                    "p95_ms": 0.098739,
+                    "standard_deviation_ms": 0.016114318025904788
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.054248,
+                    "p95_ms": 0.085557,
+                    "standard_deviation_ms": 0.013385514065585975
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.005006,
+                    "p95_ms": 0.011688,
+                    "standard_deviation_ms": 0.002903658079044432
+                },
+                "output_allocations_per_invocation": 3,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.004489,
+                    "p95_ms": 0.006736,
+                    "standard_deviation_ms": 0.0010170406874850189
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.008184,
+                    "p95_ms": 0.017193,
+                    "standard_deviation_ms": 0.00355256808520259
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.246805,
+                    "p95_ms": 0.41388,
+                    "standard_deviation_ms": 0.0717818903969518
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.016881,
+                    "p95_ms": 0.036011,
+                    "standard_deviation_ms": 0.007970082820146851
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 0.18942,
+                    "p95_ms": 0.345369,
+                    "standard_deviation_ms": 0.06574071205090495
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.00163,
+                    "p95_ms": 0.002209,
+                    "standard_deviation_ms": 0.0002512616166468727
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002933,
+                    "p95_ms": 0.00498,
+                    "standard_deviation_ms": 0.0008265229821366131
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000209,
+                    "p95_ms": 0.000263,
+                    "standard_deviation_ms": 2.287881115792514e-05
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.108229,
+                    "p95_ms": 0.18003,
+                    "standard_deviation_ms": 0.029219570499239036
+                }
+            }
+        },
+        {
+            "operation": "svd",
+            "tier": "medium",
+            "shape": "128x128",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.995066,
+                "p95_ms": 1.692576,
+                "standard_deviation_ms": 0.21567195789772947
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 1.452863,
+                "p95_ms": 1.566308,
+                "standard_deviation_ms": 0.09270314459504596
+            },
+            "absolute_overhead_ms": 0.457797,
+            "percentage_overhead": 46.006697043211204,
+            "memory_pool": {
+                "allocation_requests": 80,
+                "pool_hits": 79,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 79,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 1,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9875
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 1.391337,
+                    "p95_ms": 2.125365,
+                    "standard_deviation_ms": 0.31309703374040454
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.04793,
+                    "p95_ms": 0.097035,
+                    "standard_deviation_ms": 0.02158701421317918
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.175419,
+                    "p95_ms": 0.217632,
+                    "standard_deviation_ms": 0.019441753001208508
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.003322,
+                    "p95_ms": 0.005379,
+                    "standard_deviation_ms": 0.0008562210929427047
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.018031,
+                    "p95_ms": 0.047701,
+                    "standard_deviation_ms": 0.012515250782944782
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.011228,
+                    "p95_ms": 0.038543,
+                    "standard_deviation_ms": 0.01124182395165482
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.011394,
+                    "p95_ms": 0.015962,
+                    "standard_deviation_ms": 0.0017705615521636066
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.059279,
+                    "p95_ms": 0.075733,
+                    "standard_deviation_ms": 0.006888204485931004
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.053684,
+                    "p95_ms": 0.069279,
+                    "standard_deviation_ms": 0.006486916759139122
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.004498,
+                    "p95_ms": 0.005423,
+                    "standard_deviation_ms": 0.0004409519701736234
+                },
+                "output_allocations_per_invocation": 3,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.005064,
+                    "p95_ms": 0.006888,
+                    "standard_deviation_ms": 0.00097820026579428
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.008982,
+                    "p95_ms": 0.012814,
+                    "standard_deviation_ms": 0.0015572706380074083
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 1.306501,
+                    "p95_ms": 1.761955,
+                    "standard_deviation_ms": 0.2129487063397193
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.019749,
+                    "p95_ms": 0.029838,
+                    "standard_deviation_ms": 0.004545563349025068
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 1.239396,
+                    "p95_ms": 1.696392,
+                    "standard_deviation_ms": 0.21157112562502475
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001833,
+                    "p95_ms": 0.003076,
+                    "standard_deviation_ms": 0.0005276487468003691
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.003642,
+                    "p95_ms": 0.005922,
+                    "standard_deviation_ms": 0.0010122425796220984
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000206,
+                    "p95_ms": 0.000233,
+                    "standard_deviation_ms": 1.5992498241363042e-05
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 1.024398,
+                    "p95_ms": 1.11662,
+                    "standard_deviation_ms": 0.07040452696695007
+                }
+            }
+        },
+        {
+            "operation": "svd",
+            "tier": "large",
+            "shape": "768x768",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 63.987751,
+                "p95_ms": 68.603591,
+                "standard_deviation_ms": 2.8236276267901914
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 70.31801,
+                "p95_ms": 73.685438,
+                "standard_deviation_ms": 1.8628306886686294
+            },
+            "absolute_overhead_ms": 6.330258999999998,
+            "percentage_overhead": 9.892923100235228,
+            "memory_pool": {
+                "allocation_requests": 80,
+                "pool_hits": 79,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 79,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 1,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9875
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 65.798216,
+                    "p95_ms": 67.778261,
+                    "standard_deviation_ms": 1.8335951306960214
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.268091,
+                    "p95_ms": 0.38655,
+                    "standard_deviation_ms": 0.04820266171654839
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.200231,
+                    "p95_ms": 0.357217,
+                    "standard_deviation_ms": 0.07516001779829487
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.005647,
+                    "p95_ms": 0.007017,
+                    "standard_deviation_ms": 0.0005563547069990511
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.016723,
+                    "p95_ms": 0.04943,
+                    "standard_deviation_ms": 0.013321519546958599
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.009875,
+                    "p95_ms": 0.082855,
+                    "standard_deviation_ms": 0.029026491227153173
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.018847,
+                    "p95_ms": 0.022062,
+                    "standard_deviation_ms": 0.0016508698192165244
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.086554,
+                    "p95_ms": 0.091836,
+                    "standard_deviation_ms": 0.00394678049047575
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.080034,
+                    "p95_ms": 0.085363,
+                    "standard_deviation_ms": 0.0029043109062219905
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.004487,
+                    "p95_ms": 0.004726,
+                    "standard_deviation_ms": 0.00040497733269900425
+                },
+                "output_allocations_per_invocation": 3,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.008249,
+                    "p95_ms": 0.008839,
+                    "standard_deviation_ms": 0.00033809442468044336
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01422,
+                    "p95_ms": 0.016865,
+                    "standard_deviation_ms": 0.001209805538092796
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 68.381835,
+                    "p95_ms": 69.988089,
+                    "standard_deviation_ms": 1.8737320420553842
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.056664,
+                    "p95_ms": 0.067331,
+                    "standard_deviation_ms": 0.02067373256477891
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 68.253892,
+                    "p95_ms": 69.856405,
+                    "standard_deviation_ms": 1.8784328463251063
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.005047,
+                    "p95_ms": 0.005565,
+                    "standard_deviation_ms": 0.00042651002332887795
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.005339,
+                    "p95_ms": 0.005529,
+                    "standard_deviation_ms": 0.0004729120848529883
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000216,
+                    "p95_ms": 0.000225,
+                    "standard_deviation_ms": 9.979979959899718e-06
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 67.986528,
+                    "p95_ms": 69.63107,
+                    "standard_deviation_ms": 1.8744029545907785
+                }
+            }
+        },
+        {
+            "operation": "add_scalar",
+            "tier": "small",
+            "shape": "4096 elements",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.017882,
+                "p95_ms": 0.026322,
+                "standard_deviation_ms": 0.008939594646850605
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 0.265844,
+                "p95_ms": 2.707525,
+                "standard_deviation_ms": 0.7324166303187004
+            },
+            "absolute_overhead_ms": 0.24796200000000002,
+            "percentage_overhead": 1386.656973492898,
+            "memory_pool": {
+                "allocation_requests": 34,
+                "pool_hits": 33,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 33,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 1,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9705882352941176
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 0.274141,
+                    "p95_ms": 0.638341,
+                    "standard_deviation_ms": 0.15109230922134986
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.034763,
+                    "p95_ms": 0.088981,
+                    "standard_deviation_ms": 0.022225719933446474
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.17756,
+                    "p95_ms": 0.287063,
+                    "standard_deviation_ms": 0.048009618567116316
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.002211,
+                    "p95_ms": 0.003688,
+                    "standard_deviation_ms": 0.0005804665020481372
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.014145,
+                    "p95_ms": 0.040317,
+                    "standard_deviation_ms": 0.010371262094846508
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01011,
+                    "p95_ms": 0.023271,
+                    "standard_deviation_ms": 0.005659875913834154
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.0067575,
+                    "p95_ms": 0.010036,
+                    "standard_deviation_ms": 0.0016592362248938517
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.022579,
+                    "p95_ms": 0.029029,
+                    "standard_deviation_ms": 0.0029636997823666283
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.020972,
+                    "p95_ms": 0.026034,
+                    "standard_deviation_ms": 0.0024686915076614978
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.001348,
+                    "p95_ms": 0.002566,
+                    "standard_deviation_ms": 0.0005149871454706419
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.003618,
+                    "p95_ms": 0.004219,
+                    "standard_deviation_ms": 0.00032711258000877924
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.006126,
+                    "p95_ms": 0.007649,
+                    "standard_deviation_ms": 0.000762791872007037
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.181099,
+                    "p95_ms": 0.195733,
+                    "standard_deviation_ms": 0.022064120490969043
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.025799,
+                    "p95_ms": 0.028788,
+                    "standard_deviation_ms": 0.005069963968313778
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 0.120427,
+                    "p95_ms": 0.129345,
+                    "standard_deviation_ms": 0.018392233813215836
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001012,
+                    "p95_ms": 0.001418,
+                    "standard_deviation_ms": 0.00019428844535895594
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002092,
+                    "p95_ms": 0.002862,
+                    "standard_deviation_ms": 0.00043215154749231204
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.00017,
+                    "p95_ms": 0.000181,
+                    "standard_deviation_ms": 6.542170893518451e-06
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.014985,
+                    "p95_ms": 0.018201,
+                    "standard_deviation_ms": 0.002182729025784007
+                }
+            }
+        },
+        {
+            "operation": "add_scalar",
+            "tier": "medium",
+            "shape": "65536 elements",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.0267455,
+                "p95_ms": 0.03005,
+                "standard_deviation_ms": 0.010218029900621742
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 0.2756535,
+                "p95_ms": 0.293714,
+                "standard_deviation_ms": 0.02337574489529692
+            },
+            "absolute_overhead_ms": 0.248908,
+            "percentage_overhead": 930.6537548372625,
+            "memory_pool": {
+                "allocation_requests": 34,
+                "pool_hits": 33,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 33,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 1,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9705882352941176
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 0.310521,
+                    "p95_ms": 0.803593,
+                    "standard_deviation_ms": 0.2074773599186186
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.045054,
+                    "p95_ms": 0.122097,
+                    "standard_deviation_ms": 0.03211899251221931
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.172011,
+                    "p95_ms": 0.223249,
+                    "standard_deviation_ms": 0.025066547671348763
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.002562,
+                    "p95_ms": 0.003851,
+                    "standard_deviation_ms": 0.0006758889257858869
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01657,
+                    "p95_ms": 0.049037,
+                    "standard_deviation_ms": 0.014870046625347211
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.009754,
+                    "p95_ms": 0.036868,
+                    "standard_deviation_ms": 0.010826700383773443
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.0073745,
+                    "p95_ms": 0.018283,
+                    "standard_deviation_ms": 0.003664602346776523
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.025878,
+                    "p95_ms": 0.03388,
+                    "standard_deviation_ms": 0.004504482372037879
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.024099,
+                    "p95_ms": 0.031609,
+                    "standard_deviation_ms": 0.004300948434938508
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.001411,
+                    "p95_ms": 0.001717,
+                    "standard_deviation_ms": 0.00014983404152594962
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.003711,
+                    "p95_ms": 0.005274,
+                    "standard_deviation_ms": 0.0008214646918766502
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.006876,
+                    "p95_ms": 0.011014,
+                    "standard_deviation_ms": 0.001937971681939651
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.155641,
+                    "p95_ms": 0.23199,
+                    "standard_deviation_ms": 0.03030118570221304
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.018033,
+                    "p95_ms": 0.022137,
+                    "standard_deviation_ms": 0.0026228961550164354
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 0.108355,
+                    "p95_ms": 0.155507,
+                    "standard_deviation_ms": 0.01984161393032331
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001009,
+                    "p95_ms": 0.001151,
+                    "standard_deviation_ms": 7.219695284428561e-05
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002078,
+                    "p95_ms": 0.002893,
+                    "standard_deviation_ms": 0.0003797538149907121
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.00018,
+                    "p95_ms": 0.000199,
+                    "standard_deviation_ms": 1.1009087155618308e-05
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.028134,
+                    "p95_ms": 0.041125,
+                    "standard_deviation_ms": 0.005381581812069756
+                }
+            }
+        },
+        {
+            "operation": "add_scalar",
+            "tier": "large",
+            "shape": "1048576 elements",
+            "local_kernel_ms": {
+                "count": 10,
+                "median_ms": 0.1866905,
+                "p95_ms": 1.921308,
+                "standard_deviation_ms": 0.520938992341944
+            },
+            "isolated_end_to_end_ms": {
+                "count": 10,
+                "median_ms": 0.645327,
+                "p95_ms": 0.846974,
+                "standard_deviation_ms": 0.08322546723353376
+            },
+            "absolute_overhead_ms": 0.4586365,
+            "percentage_overhead": 245.666758619212,
+            "memory_pool": {
+                "allocation_requests": 34,
+                "pool_hits": 33,
+                "pool_misses": 1,
+                "memfds_created": 1,
+                "buffers_reclaimed": 33,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "mode": "arena",
+                "active_buffers": 1,
+                "cached_buffers": 0,
+                "cached_bytes": 0,
+                "pool_hit_rate": 0.9705882352941176
+            },
+            "diagnostics": {
+                "isolated_uncached_end_to_end_ms": {
+                    "count": 5,
+                    "median_ms": 0.980526,
+                    "p95_ms": 3.146407,
+                    "standard_deviation_ms": 0.8827550731099539
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.301425,
+                    "p95_ms": 0.661448,
+                    "standard_deviation_ms": 0.17103178124547497
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.197912,
+                    "p95_ms": 0.251537,
+                    "standard_deviation_ms": 0.03323428815184703
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.00312,
+                    "p95_ms": 0.011202,
+                    "standard_deviation_ms": 0.003374146505414369
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.014817,
+                    "p95_ms": 0.047312,
+                    "standard_deviation_ms": 0.0130143139750046
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.013024,
+                    "p95_ms": 0.041609,
+                    "standard_deviation_ms": 0.012398305351942255
+                },
+                "buffer_reclamation_ms": {
+                    "count": 10,
+                    "median_ms": 0.0075535,
+                    "p95_ms": 0.013931,
+                    "standard_deviation_ms": 0.0023795074385258813
+                },
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.026488,
+                    "p95_ms": 0.041073,
+                    "standard_deviation_ms": 0.0063662166975370854
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.024689,
+                    "p95_ms": 0.038566,
+                    "standard_deviation_ms": 0.0060997375877983465
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.001464,
+                    "p95_ms": 0.002058,
+                    "standard_deviation_ms": 0.0002374401819406311
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.003783,
+                    "p95_ms": 0.006463,
+                    "standard_deviation_ms": 0.0011541598849379576
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.010018,
+                    "p95_ms": 0.014516,
+                    "standard_deviation_ms": 0.0031991087883971687
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.552788,
+                    "p95_ms": 0.857378,
+                    "standard_deviation_ms": 0.1332189482492637
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.021297,
+                    "p95_ms": 0.154677,
+                    "standard_deviation_ms": 0.05305558482723567
+                },
+                "native_rpc_ms": {
+                    "count": 5,
+                    "median_ms": 0.485008,
+                    "p95_ms": 0.656333,
+                    "standard_deviation_ms": 0.08740377727077932
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001297,
+                    "p95_ms": 0.002607,
+                    "standard_deviation_ms": 0.0006084957189660418
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.003364,
+                    "p95_ms": 0.005633,
+                    "standard_deviation_ms": 0.0013297664456587857
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.000187,
+                    "p95_ms": 0.000362,
+                    "standard_deviation_ms": 7.127580234553659e-05
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.381512,
+                    "p95_ms": 0.504588,
+                    "standard_deviation_ms": 0.06373054594023184
+                }
+            }
+        }
+    ]
+}
