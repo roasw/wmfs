@@ -96,14 +96,23 @@ class IsolatedBackend:
             self._condition.wait_for(lambda: self._inflight == 0 and not self._creating)
             sessions = tuple(self._sessions.values())
             self._sessions.clear()
+        failures: list[BaseException] = []
         try:
             for session in sessions:
-                session.close()
-            self._buffers.close()
+                try:
+                    session.close()
+                except BaseException as error:
+                    failures.append(error)
+            try:
+                self._buffers.close()
+            except BaseException as error:
+                failures.append(error)
         finally:
             with self._condition:
                 self._state = "closed"
                 self._condition.notify_all()
+        if failures:
+            raise failures[0]
 
     def _acquire_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
         with self._condition:

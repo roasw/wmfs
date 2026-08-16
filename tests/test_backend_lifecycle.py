@@ -101,3 +101,39 @@ def test_backend_close_waits_for_inflight_invocation(
         assert invocation.result(timeout=2) == 1
         closing.result(timeout=2)
         assert session_closed.is_set()
+
+
+def test_backend_close_attempts_all_sessions_and_buffers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+    first_failure = RuntimeError("first session failed")
+
+    class Resource:
+        def __init__(self, name: str, failure: BaseException | None = None) -> None:
+            self.name = name
+            self.failure = failure
+
+        def close(self) -> None:
+            closed.append(self.name)
+            if self.failure is not None:
+                raise self.failure
+
+    class BufferManager(Resource):
+        def __init__(self, **_kwargs: object) -> None:
+            super().__init__("buffers", ValueError("buffers failed"))
+
+    monkeypatch.setattr(isolated_module, "BufferManager", BufferManager)
+    backend = _backend(monkeypatch, object)
+    backend._sessions = {
+        "first": Resource("first", first_failure),
+        "second": Resource("second", ValueError("second session failed")),
+        "third": Resource("third"),
+    }
+
+    with pytest.raises(RuntimeError, match="first session failed") as raised:
+        backend.close()
+
+    assert raised.value is first_failure
+    assert closed == ["first", "second", "third", "buffers"]
+    backend.close()

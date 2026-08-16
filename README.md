@@ -243,6 +243,20 @@ result = matmul(a, b)
 runtime.close()
 ```
 
+`runtime.close()` is idempotent and the runtime remains reusable. Close first
+stops accepting invocations, waits for every invocation and plugin discovery
+already accepted by the runtime, and then attempts to close every backend even
+if one fails. Calls arriving while close is in progress fail with
+`RuntimeError`; concurrent close calls wait for that close. After cleanup, the
+runtime has the same state as a new instance: the local backend is selected,
+the plugin registry is empty, and memory and control modes are `pooled` and
+`auto`. Cleanup raises the first resource failure after attempting the rest,
+but the reset still completes.
+
+Managed tensors already returned by isolated operations remain valid after
+close. Their shared storage is released only after the last Torch storage alias
+dies; close does not invalidate live tensor views.
+
 The default `auto` control mode uses the native extension when it is installed.
 Selection can be made explicit before discovery:
 

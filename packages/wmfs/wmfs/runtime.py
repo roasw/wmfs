@@ -24,10 +24,19 @@ class Backend(Protocol):
 
 
 class Runtime:
-    """Select and dispatch operations to an execution backend."""
+    """Select and dispatch operations to an execution backend.
+
+    ``close()`` waits for invocations and discovery accepted before closing,
+    rejects invocations while closing, and then restores constructor defaults.
+    The runtime can be configured and used again after close returns.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._condition = threading.Condition(self._lock)
+        self._state = "open"
+        self._active_work = 0
+        self._close_generation = 0
         self._backends = _initial_backends()
         self._backend_name = "local"
         self._registry = OperationRegistry()
@@ -37,41 +46,50 @@ class Runtime:
 
     @property
     def backend_name(self) -> str:
-        with self._lock:
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
             return self._backend_name
 
     @property
     def operation_names(self) -> tuple[str, ...]:
-        with self._lock:
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
             return self._registry.operation_names
 
     def operation_metadata(self, name: str) -> OperationMetadata:
-        with self._lock:
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
             return self._registry.operation(name)
 
     def discover_plugins(self, *plugin_directories: Path) -> None:
-        registry, manifests = discover_plugin_manifests(list(plugin_directories))
-        with self._lock:
-            replacement = IsolatedBackend(
-                manifests,
-                registry,
-                memory_mode=self._memory_mode,
-                arena_bytes=self._arena_bytes,
-                control_mode=self._control_mode,
-            )
-            previous = self._backends.get("isolated")
-            self._registry = registry
-            self._backends["isolated"] = replacement
-            if self._backend_name == "isolated":
-                self._backend_name = "local"
-        if previous is not None:
-            previous.close()
+        with self._condition:
+            self._accept_work()
+        try:
+            registry, manifests = discover_plugin_manifests(list(plugin_directories))
+            with self._condition:
+                replacement = IsolatedBackend(
+                    manifests,
+                    registry,
+                    memory_mode=self._memory_mode,
+                    arena_bytes=self._arena_bytes,
+                    control_mode=self._control_mode,
+                )
+                previous = self._backends.get("isolated")
+                self._registry = registry
+                self._backends["isolated"] = replacement
+                if self._backend_name == "isolated":
+                    self._backend_name = "local"
+            if previous is not None:
+                previous.close()
+        finally:
+            self._finish_work()
 
     def configure_memory(
         self, mode: str = "pooled", *, arena_bytes: int | None = None
     ) -> None:
         """Configure isolated shared memory before plugin discovery."""
-        with self._lock:
+        with self._condition:
+            self._ensure_open()
             if "isolated" in self._backends:
                 raise RuntimeError("Configure memory before discovering plugins")
             if mode not in {"pooled", "arena"}:
@@ -81,7 +99,8 @@ class Runtime:
 
     def configure_control(self, mode: str = "auto") -> None:
         """Select the isolated control path before plugin discovery."""
-        with self._lock:
+        with self._condition:
+            self._ensure_open()
             if "isolated" in self._backends:
                 raise RuntimeError("Configure control before discovering plugins")
             if mode not in {"auto", "native", "python"}:
@@ -89,7 +108,8 @@ class Runtime:
             self._control_mode = mode
 
     def use_backend(self, name: str) -> None:
-        with self._lock:
+        with self._condition:
+            self._ensure_open()
             if name not in self._backends:
                 available = ", ".join(sorted(self._backends))
                 raise ValueError(
@@ -105,19 +125,58 @@ class Runtime:
         out: object | None = None,
         **kwargs: object,
     ) -> object:
-        with self._lock:
+        with self._condition:
+            self._accept_work()
             backend = self._backends[self._backend_name]
-        return backend.invoke(operation, *args, out=out, **kwargs)
+        try:
+            return backend.invoke(operation, *args, out=out, **kwargs)
+        finally:
+            self._finish_work()
 
     def close(self) -> None:
-        with self._lock:
+        with self._condition:
+            if self._state == "closing":
+                generation = self._close_generation
+                self._condition.wait_for(lambda: self._close_generation != generation)
+                return
+            self._state = "closing"
+            self._condition.wait_for(lambda: self._active_work == 0)
             backends = tuple(self._backends.values())
-            self._backends = _initial_backends()
-            self._backend_name = "local"
+        failures: list[BaseException] = []
         for backend in backends:
             close = getattr(backend, "close", None)
             if close is not None:
-                close()
+                try:
+                    close()
+                except BaseException as error:
+                    failures.append(error)
+
+        replacements = _initial_backends()
+        with self._condition:
+            self._backends = replacements
+            self._backend_name = "local"
+            self._registry = OperationRegistry()
+            self._memory_mode = "pooled"
+            self._arena_bytes = None
+            self._control_mode = "auto"
+            self._state = "open"
+            self._close_generation += 1
+            self._condition.notify_all()
+        if failures:
+            raise failures[0]
+
+    def _accept_work(self) -> None:
+        self._ensure_open()
+        self._active_work += 1
+
+    def _finish_work(self) -> None:
+        with self._condition:
+            self._active_work -= 1
+            self._condition.notify_all()
+
+    def _ensure_open(self) -> None:
+        if self._state != "open":
+            raise RuntimeError("Runtime is closing")
 
 
 def _initial_backends() -> dict[str, Backend]:

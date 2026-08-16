@@ -65,10 +65,12 @@ def test_isolated_svd_matches_torch(
 
 def test_result_remains_valid_after_runtime_closes(isolated_runtime: None) -> None:
     result = add_scalar(torch.ones((2, 2)), 2.0)
+    alias = result.view(4)
 
     runtime.close()
+    del result
 
-    torch.testing.assert_close(result, torch.full((2, 2), 3.0))
+    torch.testing.assert_close(alias, torch.full((4,), 3.0))
 
 
 def test_isolated_backend_handles_repeated_calls(isolated_runtime: None) -> None:
