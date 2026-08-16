@@ -6,7 +6,7 @@ const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
   protocolVersion = 8,
-  fingerprint = 0xaa78411d1a8057f0,
+  fingerprint = 0x76eb7777a147ed5d,
   operations = [
     (
       name = "matmul",

@@ -124,6 +124,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     wmfs-reference-worker
     PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/generated"
       "${CMAKE_CURRENT_BINARY_DIR}"
   )
   target_link_libraries(

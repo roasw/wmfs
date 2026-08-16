@@ -114,55 +114,7 @@ void require(bool condition, const char *message) {
     }
 }
 
-void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
-                   std::vector<TensorLease> &outputs,
-                   capnp::List<ScalarArgument>::Reader scalars) {
-    if (operation_id == 1) {
-        require(inputs.size() == 2 && outputs.size() == 1 &&
-                    scalars.size() == 0,
-                "Invalid matmul invocation");
-        matmul_out(inputs[0].tensor(), inputs[1].tensor(), outputs[0].tensor());
-        return;
-    }
-    if (operation_id == 2) {
-        require(inputs.size() == 1 && outputs.size() == 3 &&
-                    scalars.size() == 1 && scalars[0].getParameter() == 0,
-                "Invalid svd invocation");
-        require(scalars[0].which() == ScalarArgument::BOOLEAN,
-                "Scalar argument does not match operation metadata");
-        svd_out(inputs[0].tensor(), scalars[0].getBoolean(),
-                outputs[0].tensor(), outputs[1].tensor(), outputs[2].tensor());
-        return;
-    }
-    if (operation_id == 3) {
-        require(inputs.size() == 1 && outputs.size() == 1 &&
-                    scalars.size() == 1 && scalars[0].getParameter() == 0,
-                "Invalid add_scalar invocation");
-        require(scalars[0].which() == ScalarArgument::FLOAT64,
-                "Scalar argument does not match operation metadata");
-        add_scalar_out(inputs[0].tensor(), scalars[0].getFloat64(),
-                       outputs[0].tensor());
-        return;
-    }
-    if (operation_id == 4) {
-        require(inputs.size() == 3 && outputs.size() == 2 &&
-                    scalars.size() == 0,
-                "Invalid matmul VJP invocation");
-        matmul_vjp_out(inputs[0].tensor(), inputs[1].tensor(),
-                       inputs[2].tensor(), outputs[0].tensor(),
-                       outputs[1].tensor());
-        return;
-    }
-    if (operation_id == 5) {
-        require(inputs.size() == 1 && outputs.size() == 1 &&
-                    scalars.size() == 0,
-                "Invalid add_scalar VJP invocation");
-        add_scalar_vjp_out(inputs[0].tensor(), outputs[0].tensor());
-        return;
-    }
-    throw std::invalid_argument("Unknown operation ID " +
-                                std::to_string(operation_id));
-}
+#include "reference_dispatch.inc"
 
 class ReferenceServer final : public ReferencePlugin::Server {
   public:
@@ -170,6 +122,11 @@ class ReferenceServer final : public ReferencePlugin::Server {
 
   protected:
     kj::Promise<void> getMetadata(GetMetadataContext context) override {
+        if (PLUGIN_METADATA.get().getFingerprint() !=
+            REFERENCE_METADATA_FINGERPRINT) {
+            throw std::logic_error(
+                "Reference schema and generated dispatch fingerprints differ");
+        }
         context.getResults().setMetadata(PLUGIN_METADATA.get());
         return kj::READY_NOW;
     }

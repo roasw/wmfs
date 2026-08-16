@@ -1,7 +1,12 @@
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from wmfs.memory import BufferManager
 from wmfs.plugins import discover_plugins, find_manifests
 from wmfs.runtime import Runtime
+from wmfs.transport.worker_process import WorkerSession, inspect_plugin
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
@@ -51,3 +56,16 @@ def test_runtime_registers_discovered_operations() -> None:
 
     assert discovered_runtime.operation_names == ("add_scalar", "matmul", "svd")
     assert discovered_runtime.operation_metadata("add_scalar").name == "add_scalar"
+
+
+def test_worker_session_rejects_metadata_changed_after_discovery() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    metadata = inspect_plugin(manifest)
+    expected = replace(metadata, version="changed")
+
+    with BufferManager() as buffers:
+        with pytest.raises(RuntimeError, match="failed to start") as raised:
+            WorkerSession(manifest, buffers, expected)
+
+    assert raised.value.__cause__ is not None
+    assert "metadata changed after plugin discovery" in str(raised.value.__cause__)

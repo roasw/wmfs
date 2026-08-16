@@ -10,6 +10,8 @@ from wmfs_plugin.metadata import (
     PluginMetadata,
     TensorParameter,
     VjpMetadata,
+    canonical_metadata_bytes,
+    metadata_fingerprint,
     metadata_from_reader,
     validate_plugin_metadata,
 )
@@ -46,7 +48,7 @@ def test_metadata_reader_decodes_and_validates_plugin() -> None:
         name="example",
         version="1.0.0",
         protocolVersion=PROTOCOL_VERSION,
-        fingerprint=42,
+        fingerprint=0,
         operations=[
             {
                 "name": "identity",
@@ -66,6 +68,8 @@ def test_metadata_reader_decodes_and_validates_plugin() -> None:
         ],
     )
 
+    parsed = metadata_from_reader(reader, validate_fingerprint=False)
+    reader.fingerprint = metadata_fingerprint(parsed)
     metadata = metadata_from_reader(reader)
 
     assert metadata.name == "example"
@@ -107,6 +111,19 @@ def test_plugin_validation_accepts_vjp_relationship() -> None:
             TensorParameter("cotangent", "readOnly"),
         ),
     )
-    plugin = PluginMetadata("example", "1.0.0", PROTOCOL_VERSION, (operation, vjp), 1)
+    plugin = PluginMetadata("example", "1.0.0", PROTOCOL_VERSION, (operation, vjp), 0)
+    plugin = replace(plugin, fingerprint=metadata_fingerprint(plugin))
 
     validate_plugin_metadata(plugin)
+
+
+def test_fingerprint_is_canonical_and_excludes_declared_value() -> None:
+    plugin = PluginMetadata("example", "1.0.0", PROTOCOL_VERSION, (_operation(),), 0)
+    fingerprint = metadata_fingerprint(plugin)
+
+    assert canonical_metadata_bytes(plugin).startswith(
+        b'{"encoding":"wmfs-plugin-metadata-v1"'
+    )
+    assert metadata_fingerprint(replace(plugin, fingerprint=123)) == fingerprint
+    with pytest.raises(ValueError, match="fingerprint"):
+        validate_plugin_metadata(replace(plugin, fingerprint=fingerprint ^ 1))

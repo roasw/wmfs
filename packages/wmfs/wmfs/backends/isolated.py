@@ -153,4 +153,8 @@ class IsolatedBackend:
                 self._buffers,
                 self._registry.plugin(plugin_name),
             )
-        return WorkerSession(self._manifests[plugin_name], self._buffers)
+        return WorkerSession(
+            self._manifests[plugin_name],
+            self._buffers,
+            self._registry.plugin(plugin_name),
+        )

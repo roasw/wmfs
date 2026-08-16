@@ -1,27 +1,30 @@
 import torch
 
-from wmfs_plugin import InvocationContext, worker_main
+from wmfs_plugin import worker_main
 from wmfs_reference import kernels
+from wmfs_reference._generated import bind_operations
 
 
-def _matmul(context: InvocationContext) -> None:
-    a = context.input("a")
-    b = context.input("b")
-    result = context.output("result")
+def _matmul(a: torch.Tensor, b: torch.Tensor, result: torch.Tensor) -> None:
     if a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[0]:
         raise ValueError("matmul input dimensions are incompatible")
     _validate_output(result, (a.shape[0], b.shape[1]), a.dtype)
     kernels.matmul(a, b, out=result)
 
 
-def _svd(context: InvocationContext) -> None:
-    a = context.input("a")
+def _svd(
+    a: torch.Tensor,
+    full_matrices: bool,
+    u: torch.Tensor,
+    s: torch.Tensor,
+    vh: torch.Tensor,
+) -> None:
     if a.ndim != 2:
         raise ValueError("svd initially supports two-dimensional tensors")
-    full_matrices = bool(context.scalar("fullMatrices"))
+    full_matrices = bool(full_matrices)
     rows, columns = a.shape
     rank = min(rows, columns)
-    outputs = context.outputs
+    outputs = (u, s, vh)
     expected_shapes = (
         (rows, rows if full_matrices else rank),
         (rank,),
@@ -32,32 +35,28 @@ def _svd(context: InvocationContext) -> None:
     kernels.svd(a, full_matrices=full_matrices, out=outputs)
 
 
-def _add_scalar(context: InvocationContext) -> None:
-    value = context.scalar("value")
+def _add_scalar(a: torch.Tensor, value: float, result: torch.Tensor) -> None:
     if not isinstance(value, float):
         raise TypeError("add_scalar requires a numeric scalar")
-    a = context.input("a")
-    result = context.output("result")
     _validate_output(result, tuple(a.shape), torch.result_type(a, value))
     kernels.add_scalar(a, value, out=result)
 
 
-def _matmul_vjp(context: InvocationContext) -> None:
-    a = context.input("a")
-    b = context.input("b")
-    result_cotangent = context.input("resultCotangent")
+def _matmul_vjp(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    result_cotangent: torch.Tensor,
+    a_gradient: torch.Tensor,
+    b_gradient: torch.Tensor,
+) -> None:
     if a.ndim != 2 or b.ndim != 2 or result_cotangent.shape != (a.shape[0], b.shape[1]):
         raise ValueError("matmul VJP input dimensions are incompatible")
-    a_gradient = context.output("aGradient")
-    b_gradient = context.output("bGradient")
     _validate_output(a_gradient, tuple(a.shape), a.dtype)
     _validate_output(b_gradient, tuple(b.shape), b.dtype)
     kernels.matmul_vjp(a, b, result_cotangent, out=(a_gradient, b_gradient))
 
 
-def _add_scalar_vjp(context: InvocationContext) -> None:
-    result_cotangent = context.input("resultCotangent")
-    a_gradient = context.output("aGradient")
+def _add_scalar_vjp(result_cotangent: torch.Tensor, a_gradient: torch.Tensor) -> None:
     _validate_output(a_gradient, tuple(result_cotangent.shape), result_cotangent.dtype)
     kernels.add_scalar_vjp(result_cotangent, out=a_gradient)
 
@@ -71,13 +70,15 @@ def _validate_output(
 
 def main() -> None:
     worker_main(
-        {
-            "matmul": _matmul,
-            "svd": _svd,
-            "add_scalar": _add_scalar,
-            "matmul_vjp": _matmul_vjp,
-            "add_scalar_vjp": _add_scalar_vjp,
-        }
+        bind_operations(
+            {
+                "matmul": _matmul,
+                "svd": _svd,
+                "add_scalar": _add_scalar,
+                "matmul_vjp": _matmul_vjp,
+                "add_scalar_vjp": _add_scalar_vjp,
+            }
+        )
     )
 
 

@@ -143,6 +143,17 @@
               ${./plugins/reference/schemas/wmfs-reference/reference.capnp} >/dev/null
             touch $out
           '';
+
+          generated =
+            pkgs.runCommand "wmfs-generated-check"
+              { nativeBuildInputs = [ self.packages.${system}.wmfs-plugin ]; }
+              ''
+                wmfs-plugin-codegen --check \
+                  --schema ${./plugins/reference/schemas/wmfs-reference/reference.capnp} \
+                  --python-output ${./plugins/reference/wmfs_reference/_generated.py} \
+                  --cpp-output ${./plugins/reference/generated/reference_dispatch.inc}
+                touch $out
+              '';
         }
       );
 

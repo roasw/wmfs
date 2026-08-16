@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["pycapnp", "torch>=2.1"]
 
+[project.scripts]
+wmfs-plugin-codegen = "wmfs_plugin.codegen:main"
+
 [tool.setuptools.packages.find]
 include = ["wmfs_plugin*"]
 

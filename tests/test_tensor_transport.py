@@ -8,7 +8,7 @@ import torch
 
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
-from wmfs.transport.worker_process import WorkerSession
+from wmfs.transport.worker_process import WorkerSession, inspect_plugin
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
@@ -17,7 +17,7 @@ def test_invoke_known_reads_cached_transferred_input() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
         source = manager.from_tensor(torch.arange(12, dtype=torch.float64))
-        session = WorkerSession(manifest, manager)
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         try:
             first, first_metrics = session.invoke_profiled(
                 "add_scalar", source.tensor, 1.0
@@ -38,7 +38,7 @@ def test_safe_pool_reuses_memfd_but_transfers_each_generation() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
         source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
-        session = WorkerSession(manifest, manager)
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         try:
             first, first_metrics = session.invoke_profiled(
                 "add_scalar", source.tensor, 1.0
@@ -75,7 +75,7 @@ def test_trusted_arena_maps_once_for_inputs_and_outputs() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager(mode="arena", arena_bytes=1024 * 1024) as manager:
         source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
-        session = WorkerSession(manifest, manager)
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         try:
             result, metrics = session.invoke_profiled("add_scalar", source.tensor, 1.0)
 
@@ -92,7 +92,7 @@ def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
         source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
-        session = WorkerSession(manifest, manager)
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         try:
             output = session.invoke("add_scalar", source.tensor, 0.0)
             managed_output = manager.managed(output)
@@ -125,7 +125,7 @@ def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
 def test_python_session_close_waits_for_active_submission() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
-        session = WorkerSession(manifest, manager)
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         session._submit_lock.acquire()
         submit_lock_held = True
         started = threading.Event()

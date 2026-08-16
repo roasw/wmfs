@@ -61,9 +61,15 @@ def _load_plugin_schema(manifest: "PluginManifest") -> ModuleType:
 
 
 class WorkerSession:
-    def __init__(self, manifest: "PluginManifest", buffers: BufferManager) -> None:
+    def __init__(
+        self,
+        manifest: "PluginManifest",
+        buffers: BufferManager,
+        expected_metadata: PluginMetadata,
+    ) -> None:
         self._manifest = manifest
         self._buffers = buffers
+        self._expected_metadata = expected_metadata
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._submit_lock = threading.RLock()
@@ -145,6 +151,12 @@ class WorkerSession:
         self._invoke_lock = asyncio.Lock()
         async with _worker_connection(self._manifest) as (plugin, fd_sender):
             metadata = await _validate_worker(plugin)
+            if metadata != self._expected_metadata:
+                raise RuntimeError(
+                    "Worker metadata changed after plugin discovery "
+                    f"(expected fingerprint 0x{self._expected_metadata.fingerprint:016x}, "
+                    f"received 0x{metadata.fingerprint:016x})"
+                )
             self._plugin = plugin
             self._operations = {item.name: item for item in metadata.operations}
             self._fd_sender = fd_sender

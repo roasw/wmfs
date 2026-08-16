@@ -1,8 +1,11 @@
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import asdict, dataclass
 
 _MAX_EXPRESSION_DEPTH = 16
 _MAX_OUTPUTS = 8
 _MAX_RANK = 16
+_FINGERPRINT_ENCODING = "wmfs-plugin-metadata-v1"
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,9 @@ class EnvironmentMetadata:
     executable: str
 
 
-def metadata_from_reader(metadata: object) -> PluginMetadata:
+def metadata_from_reader(
+    metadata: object, *, validate_fingerprint: bool = True
+) -> PluginMetadata:
     plugin = PluginMetadata(
         name=str(metadata.name),
         version=str(metadata.version),
@@ -112,11 +117,32 @@ def metadata_from_reader(metadata: object) -> PluginMetadata:
             _operation_from_reader(operation) for operation in metadata.operations
         ),
     )
-    validate_plugin_metadata(plugin)
+    validate_plugin_metadata(plugin, validate_fingerprint=validate_fingerprint)
     return plugin
 
 
-def validate_plugin_metadata(plugin: PluginMetadata) -> None:
+def canonical_metadata_bytes(plugin: PluginMetadata) -> bytes:
+    """Encode metadata deterministically without its declared fingerprint."""
+    document = asdict(plugin)
+    del document["fingerprint"]
+    envelope = {"encoding": _FINGERPRINT_ENCODING, "metadata": document}
+    return json.dumps(
+        envelope,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def metadata_fingerprint(plugin: PluginMetadata) -> int:
+    digest = hashlib.sha256(canonical_metadata_bytes(plugin)).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def validate_plugin_metadata(
+    plugin: PluginMetadata, *, validate_fingerprint: bool = True
+) -> None:
     operation_ids = [item.operation_id for item in plugin.operations]
     if any(operation_id == 0 for operation_id in operation_ids):
         raise ValueError("Plugin operation IDs must be non-zero")
@@ -130,6 +156,13 @@ def validate_plugin_metadata(plugin: PluginMetadata) -> None:
     for operation in plugin.operations:
         validate_operation_metadata(operation)
         _validate_vjp(operation, operations_by_id)
+    if validate_fingerprint:
+        expected = metadata_fingerprint(plugin)
+        if plugin.fingerprint != expected:
+            raise ValueError(
+                f"Plugin metadata fingerprint is 0x{plugin.fingerprint:016x}, "
+                f"expected 0x{expected:016x}"
+            )
 
 
 def validate_operation_metadata(operation: OperationMetadata) -> None:

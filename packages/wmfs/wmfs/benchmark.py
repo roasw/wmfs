@@ -711,7 +711,7 @@ def _new_session(
 ) -> WorkerSession | NativeWorkerSession:
     if config.control_mode == "native":
         return NativeWorkerSession(manifest, buffers, metadata)
-    return WorkerSession(manifest, buffers)
+    return WorkerSession(manifest, buffers, metadata)
 
 
 @contextmanager
