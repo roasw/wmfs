@@ -94,7 +94,10 @@ class IsolatedBackend:
         out: object | None = None,
         **kwargs: object,
     ) -> object:
-        plugin_name = self._registry.plugin_for_operation(operation)
+        try:
+            plugin_name = self._registry.plugin_for_operation(operation)
+        except KeyError:
+            raise ValueError(f"Unknown operation {operation!r}") from None
         metadata = self._registry.operation(operation)
         if metadata.internal:
             raise ValueError(f"Operation {operation!r} is internal to its plugin")

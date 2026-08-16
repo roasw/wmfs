@@ -32,6 +32,7 @@ test profile=build_type:
     env \
       PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
       PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
+      WMFS_REQUIRE_BUNDLED="$([[ "{{ profile }}" == "Debug" ]] && printf 1 || printf 0)" \
       pytest -q
 
 # Test the local Release development artifacts.

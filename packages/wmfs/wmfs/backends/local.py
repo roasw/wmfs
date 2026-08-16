@@ -1,7 +1,16 @@
 import torch
 
+
+def _add_scalar(
+    a: torch.Tensor, value: object, *, out: torch.Tensor | None = None
+) -> torch.Tensor:
+    if isinstance(value, bool) or not isinstance(value, (float, int)):
+        raise TypeError("Scalar 'value' must be numeric")
+    return torch.add(a, float(value), out=out)
+
+
 _OPERATIONS = {
-    "add_scalar": torch.add,
+    "add_scalar": _add_scalar,
     "matmul": torch.matmul,
     "svd": torch.linalg.svd,
 }
