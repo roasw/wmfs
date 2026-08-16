@@ -69,10 +69,12 @@ the reproducible documentation shell:
 nix develop -c just doc
 ```
 
-From an existing development shell, run `just doc`. The generated site starts
-at `build/docs/html/index.html`. The data-flow guide follows a simple Python
-call through runtime dispatch, shared-memory allocation, batched FD transfer,
-worker view construction, kernel execution, and reclamation.
+From an existing development shell, run `just doc`. This configures and builds
+the normal CMake `doc` target. The generated site starts at
+`build/Debug/docs/html/index.html` by default, or under the selected
+`WMFS_BUILD_TYPE`. The data-flow guide follows a simple Python call through
+runtime dispatch, shared-memory allocation, batched FD transfer, worker view
+construction, kernel execution, and reclamation.
 
 ## Buffer Transport Protocol
 

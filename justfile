@@ -93,13 +93,15 @@ test-release:
 package:
     nix build .#default .#bundled .#benchmark .#wmfs-plugin .#reference-worker .#reference-python-worker --no-link
 
-# Build unified Python and C++ HTML documentation reproducibly.
-doc:
-    nix develop "path:{{ root }}#docs" -c bash "{{ root }}/docs/build.sh" "{{ root }}"
-
-[private]
-_doc:
-    bash "{{ root }}/docs/build.sh" "{{ root }}"
+# Configure and build the unified CMake documentation target.
+doc profile=build_type:
+    cmake -S "{{ root }}" -B "{{ root }}/build/{{ profile }}" -G Ninja \
+      -DCMAKE_BUILD_TYPE="{{ profile }}" \
+      -DWMFS_BUILD_PYTHON_RUNTIME=ON \
+      -DWMFS_BUILD_REFERENCE_WORKER=ON \
+      -DWMFS_BUNDLED_PLUGINS=reference \
+      -DWMFS_BUILD_DOCUMENTATION=ON
+    cmake --build "{{ root }}/build/{{ profile }}" --target doc
 
 # Benchmark packaged Release artifacts in pooled or arena mode.
 benchmark mode="pooled":

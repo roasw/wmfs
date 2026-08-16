@@ -46,9 +46,9 @@
           referenceWorker = self.packages.${system}.reference-worker;
           pythonWorker = self.packages.${system}.reference-python-worker;
           documentationPython = pkgs.python3.withPackages (ps: [
-            self.packages.${system}.wmfs-plugin
             ps.breathe
             ps.myst-parser
+            ps.numpy
             ps.pycapnp
             ps.sphinx
             ps.torch
@@ -216,23 +216,31 @@
                 touch $out
               '';
 
-          documentation = pkgs.stdenvNoCC.mkDerivation {
+          documentation = pkgs.stdenv.mkDerivation {
             name = "wmfs-documentation";
             src = ./.;
             nativeBuildInputs = [
+              pkgs.capnproto
               pkgs.cmake
               pkgs.doxygen
+              pkgs.ninja
               documentationPython
             ];
-            dontConfigure = true;
+            buildInputs = [ pkgs.capnproto ];
+            cmakeFlags = [
+              "-DBUILD_TESTING=OFF"
+              "-DWMFS_BUILD_DOCUMENTATION=ON"
+              "-DWMFS_BUILD_PYTHON_RUNTIME=OFF"
+              "-DWMFS_BUILD_REFERENCE_WORKER=OFF"
+            ];
             buildPhase = ''
               runHook preBuild
-              bash docs/build.sh "$PWD"
+              cmake --build . --target doc
               runHook postBuild
             '';
             installPhase = ''
               mkdir -p "$out"
-              cp -R build/docs/html/. "$out/"
+              cp -R "$NIX_BUILD_TOP/$sourceRoot/build/docs/html/." "$out/"
             '';
           };
         }
@@ -252,25 +260,49 @@
           pkgs = pkgsFactory system nixpkgs;
           pre-commit-check = self.checks.${system}.pre-commit-check;
           documentationPython = pkgs.python3.withPackages (ps: [
-            self.packages.${system}.wmfs-plugin
             ps.breathe
             ps.myst-parser
+            ps.numpy
             ps.pycapnp
             ps.sphinx
             ps.torch
           ]);
+          withoutWmfsPackages =
+            dependencies:
+            builtins.filter (
+              dependency:
+              !(builtins.elem (pkgs.lib.getName dependency) [
+                "wmfs"
+                "wmfs-plugin"
+                "wmfs-reference"
+              ])
+            ) dependencies;
+          developmentRuntimeInputs = self.packages.${system}.bundled.overridePythonAttrs (previous: {
+            dependencies = withoutWmfsPackages previous.dependencies;
+            nativeCheckInputs = [ ];
+            propagatedBuildInputs = withoutWmfsPackages (previous.propagatedBuildInputs or [ ]);
+          });
+          developmentWorkerInputs = self.packages.${system}.reference-worker.overrideAttrs (previous: {
+            doCheck = false;
+            propagatedBuildInputs = withoutWmfsPackages (previous.propagatedBuildInputs or [ ]);
+          });
         in
         {
           default = pkgs.mkShell {
             name = "wmfs-dev";
 
             inputsFrom = [
-              self.packages.${system}.bundled
-              self.packages.${system}.reference-worker
+              developmentRuntimeInputs
+              developmentWorkerInputs
             ];
             packages = pre-commit-check.enabledPackages ++ [
+              pkgs.doxygen
               pkgs.just
+              pkgs.python3Packages.build
               pkgs.python3Packages.pytest
+              pkgs.python3Packages.setuptools
+              pkgs.python3Packages.wheel
+              documentationPython
             ];
 
             shellHook = pre-commit-check.shellHook + ''
@@ -280,15 +312,6 @@
               export PATH="$development_output/bin:$PATH"
               export PYTHONPATH="$development_output:$repo_root/packages/wmfs:$repo_root/packages/wmfs-plugin''${PYTHONPATH:+:$PYTHONPATH}"
             '';
-          };
-
-          docs = pkgs.mkShell {
-            name = "wmfs-docs";
-            packages = [
-              pkgs.cmake
-              pkgs.doxygen
-              documentationPython
-            ];
           };
         }
       );

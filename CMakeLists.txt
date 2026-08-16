@@ -15,12 +15,34 @@ find_package(Threads REQUIRED)
 
 option(WMFS_BUILD_PYTHON_RUNTIME "Build the Python runtime extension" ON)
 option(WMFS_BUILD_REFERENCE_WORKER "Build the C++ reference plugin worker" OFF)
+option(WMFS_BUILD_DOCUMENTATION "Build the unified API documentation" OFF)
 set(
   WMFS_BUNDLED_PLUGINS
   ""
   CACHE STRING
   "Semicolon-separated plugins to compile into the in-process backend"
 )
+
+if(WMFS_BUILD_DOCUMENTATION)
+  find_package(Doxygen REQUIRED)
+  find_program(WMFS_BASH_EXECUTABLE bash REQUIRED)
+  find_program(WMFS_SPHINX_EXECUTABLE sphinx-build REQUIRED)
+  add_custom_target(
+    doc
+    COMMAND
+      "${CMAKE_COMMAND}" -E env
+      "WMFS_CMAKE_COMMAND=${CMAKE_COMMAND}"
+      "WMFS_DOXYGEN_EXECUTABLE=${DOXYGEN_EXECUTABLE}"
+      "WMFS_SPHINX_EXECUTABLE=${WMFS_SPHINX_EXECUTABLE}"
+      "${WMFS_BASH_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/docs/build.sh"
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+      "${CMAKE_CURRENT_BINARY_DIR}/docs"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/docs/html/index.html"
+    COMMENT "Building unified Python and C++ documentation"
+    VERBATIM
+  )
+endif()
 
 if(BUILD_TESTING)
   add_executable(wmfs-unique-fd-test tests/unique_fd_test.cpp)

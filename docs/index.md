@@ -25,4 +25,4 @@ This is one Sphinx site for both implementation languages:
   `literalinclude` snippets.
 
 Run `just doc` to build the complete site reproducibly. Open
-`build/docs/html/index.html` after the build completes.
+`build/Debug/docs/html/index.html` after the default build completes.
