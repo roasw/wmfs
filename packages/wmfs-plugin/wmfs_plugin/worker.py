@@ -15,6 +15,7 @@ import capnp
 import torch
 
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
+from wmfs_plugin.metadata import OperationMetadata, metadata_from_reader
 from wmfs_plugin.schema import PROTOCOL_VERSION, load_tensor_schema, schema_root
 
 OperationHandler: TypeAlias = Callable[
@@ -110,7 +111,8 @@ def _make_server(
     metadata = plugin_schema.pluginMetadata
     if int(metadata.protocolVersion) != PROTOCOL_VERSION:
         raise RuntimeError("Worker schema does not match its protocol version")
-    operations = _compile_operations(metadata.operations, handlers)
+    parsed_metadata = metadata_from_reader(metadata)
+    operations = _compile_operations(parsed_metadata.operations, handlers)
     interface = getattr(plugin_schema, interface_name)
 
     class PluginServer(interface.Server):
@@ -165,26 +167,24 @@ def _make_server(
 
 
 def _compile_operations(
-    metadata_operations: object,
+    metadata_operations: tuple[OperationMetadata, ...],
     handlers: Mapping[str, OperationHandler],
 ) -> dict[int, _Operation]:
     compiled = {}
     metadata_names = set()
     for metadata in metadata_operations:
-        name = str(metadata.name)
+        name = metadata.name
         metadata_names.add(name)
         try:
             handler = handlers[name]
         except KeyError:
             raise ValueError(f"Plugin has no handler for operation {name!r}") from None
-        operation_id = int(metadata.operationId)
-        if operation_id in compiled:
-            raise ValueError("Plugin operation IDs must be unique")
+        operation_id = metadata.operation_id
         compiled[operation_id] = _Operation(
             handler=handler,
-            input_accesses=tuple(str(item.access) for item in metadata.tensorInputs),
-            output_count=len(metadata.tensorOutputs),
-            scalar_kinds=tuple(str(item.kind) for item in metadata.scalarParameters),
+            input_accesses=tuple(item.access for item in metadata.tensor_inputs),
+            output_count=len(metadata.tensor_outputs),
+            scalar_kinds=tuple(item.kind for item in metadata.scalar_parameters),
         )
     unknown = set(handlers) - metadata_names
     if unknown:

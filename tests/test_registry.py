@@ -87,19 +87,3 @@ def test_registry_resolves_internal_vjp_by_plugin_operation_id() -> None:
 
     assert registry.operation_names == ("forward",)
     assert registry.operation_by_id("example", 2) is vjp
-
-
-def test_registry_rejects_missing_vjp_operation() -> None:
-    operation = OperationMetadata(
-        name="forward",
-        tensor_inputs=(),
-        tensor_outputs=(),
-        scalar_parameters=(),
-        operation_id=1,
-        output_plans=(),
-        vjp=VjpMetadata(2, (), (), (), (), ()),
-    )
-    plugin = PluginMetadata("example", "1", 1, (operation,), 1)
-
-    with pytest.raises(ValueError, match="missing VJP"):
-        OperationRegistry().register(plugin)

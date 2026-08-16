@@ -29,23 +29,13 @@ from wmfs.invocation import (
     share_input,
 )
 from wmfs.memory.buffers import BufferManager, ManagedTensor
-from wmfs.output_metadata import validate_operation_metadata
 from wmfs.registry import (
-    DimensionExpression,
-    DTypeExpression,
     EnvironmentMetadata,
-    InputAxis,
-    KnownOutput,
     OperationMetadata,
-    OutputPlan,
     PluginMetadata,
-    PromoteTensorScalar,
-    ScalarParameter,
-    SelectDimension,
-    TensorParameter,
-    VjpMetadata,
 )
 from wmfs.transport.fd_broker import FdSender
+from wmfs_plugin.metadata import metadata_from_reader
 from wmfs_plugin.schema import schema_root
 
 if TYPE_CHECKING:
@@ -443,7 +433,7 @@ async def _validate_worker(plugin: object) -> PluginMetadata:
     if ping.nonce != nonce:
         raise RuntimeError("Worker returned an invalid ping response")
     response = await asyncio.wait_for(plugin.getMetadata(), _RPC_TIMEOUT_SECONDS)
-    metadata = _metadata_from_reader(response.metadata)
+    metadata = metadata_from_reader(response.metadata)
     if metadata.protocol_version != runtime_schema.protocolVersion:
         raise RuntimeError(
             f"Worker uses protocol {metadata.protocol_version}, but runtime uses "
@@ -560,124 +550,3 @@ async def _wait_for_worker(process: subprocess.Popen[str]) -> None:
         raise RuntimeError("Worker did not stop after its RPC connection closed")
     if process.returncode != 0:
         raise RuntimeError(f"Worker failed with exit status {process.returncode}")
-
-
-def _metadata_from_reader(metadata: object) -> PluginMetadata:
-    plugin = PluginMetadata(
-        name=str(metadata.name),
-        version=str(metadata.version),
-        protocol_version=int(metadata.protocolVersion),
-        fingerprint=int(metadata.fingerprint),
-        operations=tuple(
-            _operation_metadata_from_reader(operation)
-            for operation in metadata.operations
-        ),
-    )
-    for operation in plugin.operations:
-        validate_operation_metadata(operation)
-    return plugin
-
-
-def _operation_metadata_from_reader(operation: object) -> OperationMetadata:
-    vjp_plan = operation.vjp
-    vjp = None
-    if vjp_plan.which() == "known":
-        known = vjp_plan.known
-        vjp = VjpMetadata(
-            operation_id=int(known.operationId),
-            saved_inputs=tuple(int(item) for item in known.savedInputs),
-            saved_outputs=tuple(int(item) for item in known.savedOutputs),
-            output_cotangents=tuple(int(item) for item in known.outputCotangents),
-            input_gradients=tuple(int(item) for item in known.inputGradients),
-            scalar_parameters=tuple(int(item) for item in known.scalarParameters),
-        )
-    return OperationMetadata(
-        name=str(operation.name),
-        tensor_inputs=tuple(
-            TensorParameter(name=str(item.name), access=str(item.access))
-            for item in operation.tensorInputs
-        ),
-        tensor_outputs=tuple(
-            TensorParameter(name=str(item.name), access=str(item.access))
-            for item in operation.tensorOutputs
-        ),
-        scalar_parameters=tuple(
-            ScalarParameter(
-                name=str(item.name),
-                kind=str(item.kind),
-                required=bool(item.required),
-                default=_scalar_default_from_reader(item.default),
-            )
-            for item in operation.scalarParameters
-        ),
-        operation_id=int(operation.operationId),
-        output_plans=tuple(
-            _output_plan_from_reader(item) for item in operation.outputPlans
-        ),
-        vjp=vjp,
-        internal=bool(operation.internal),
-    )
-
-
-def _scalar_default_from_reader(default: object) -> bool | float | int | str | None:
-    kind = default.which()
-    return None if kind == "none" else getattr(default, kind)
-
-
-def _output_plan_from_reader(plan: object) -> OutputPlan:
-    if plan.which() == "dynamic":
-        return OutputPlan(name=str(plan.name), known=None)
-    known = plan.known
-    shape_kind = known.which()
-    shape: int | tuple[DimensionExpression, ...]
-    if shape_kind == "sameShapeAsInput":
-        shape = int(known.sameShapeAsInput)
-    else:
-        shape = tuple(_dimension_from_reader(item) for item in known.dimensions)
-    return OutputPlan(
-        name=str(plan.name),
-        known=KnownOutput(
-            shape_kind=shape_kind,
-            shape=shape,
-            dtype=_dtype_from_reader(known.dtype),
-        ),
-    )
-
-
-def _dimension_from_reader(expression: object, depth: int = 0) -> DimensionExpression:
-    if depth >= 16:
-        raise ValueError("Output dimension expression is too deeply nested")
-    kind = expression.which()
-    if kind == "constant":
-        value: object = int(expression.constant)
-    elif kind == "inputAxis":
-        value = InputAxis(
-            input=int(expression.inputAxis.input), axis=int(expression.inputAxis.axis)
-        )
-    elif kind == "minimum":
-        value = tuple(
-            _dimension_from_reader(item, depth + 1) for item in expression.minimum
-        )
-    else:
-        select = expression.select
-        value = SelectDimension(
-            scalar_parameter=int(select.scalarParameter),
-            when_true=_dimension_from_reader(select.whenTrue, depth + 1),
-            when_false=_dimension_from_reader(select.whenFalse, depth + 1),
-        )
-    return DimensionExpression(kind=kind, value=value)
-
-
-def _dtype_from_reader(expression: object) -> DTypeExpression:
-    kind = expression.which()
-    if kind == "fixed":
-        value: object = str(expression.fixed)
-    elif kind == "input":
-        value = int(expression.input)
-    else:
-        promotion = expression.promoteTensorScalar
-        value = PromoteTensorScalar(
-            tensor_input=int(promotion.tensorInput),
-            scalar_parameter=int(promotion.scalarParameter),
-        )
-    return DTypeExpression(kind=kind, value=value)

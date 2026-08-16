@@ -4,10 +4,10 @@ import pytest
 import torch
 
 from wmfs.memory import BufferManager
-from wmfs.output_metadata import validate_operation_metadata
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationMetadata, OutputPlan, TensorParameter
-from wmfs.transport.worker_process import _load_plugin_schema, _metadata_from_reader
+from wmfs.transport.worker_process import _load_plugin_schema
+from wmfs_plugin.metadata import metadata_from_reader, validate_operation_metadata
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
@@ -29,7 +29,7 @@ def test_dynamic_output_plans_are_rejected_during_discovery() -> None:
 def test_reference_output_plans_evaluate_rectangular_operations() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     schema = _load_plugin_schema(manifest)
-    metadata = _metadata_from_reader(schema.pluginMetadata)
+    metadata = metadata_from_reader(schema.pluginMetadata)
     operations = {item.name: item for item in metadata.operations}
 
     from wmfs.output_metadata import evaluate_outputs

@@ -1,7 +1,6 @@
-from types import SimpleNamespace
-
 import pytest
 
+from wmfs_plugin.metadata import OperationMetadata, ScalarParameter, TensorParameter
 from wmfs_plugin.worker import _compile_operations, _decode_scalars
 
 
@@ -15,13 +14,14 @@ class _ScalarArgument:
         return self._kind
 
 
-def _metadata(name: str = "operation", operation_id: int = 1) -> SimpleNamespace:
-    return SimpleNamespace(
+def _metadata(name: str = "operation", operation_id: int = 1) -> OperationMetadata:
+    return OperationMetadata(
         name=name,
-        operationId=operation_id,
-        tensorInputs=(SimpleNamespace(access="readOnly"),),
-        tensorOutputs=(SimpleNamespace(),),
-        scalarParameters=(SimpleNamespace(kind="float64"),),
+        operation_id=operation_id,
+        tensor_inputs=(TensorParameter("input", "readOnly"),),
+        tensor_outputs=(TensorParameter("output", "readOnly"),),
+        scalar_parameters=(ScalarParameter("scale", "float64", True, None),),
+        output_plans=(),
     )
 
 
