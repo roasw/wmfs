@@ -21,13 +21,12 @@ struct MappingSpec {
 
 class TensorLease {
   public:
-    TensorLease(at::Tensor tensor, std::shared_ptr<void> mapping);
+    explicit TensorLease(at::Tensor tensor);
 
     [[nodiscard]] const at::Tensor &tensor() const noexcept;
     [[nodiscard]] at::Tensor &tensor() noexcept;
 
   private:
-    std::shared_ptr<void> mapping_;
     at::Tensor tensor_;
 };
 

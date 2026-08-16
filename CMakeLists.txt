@@ -152,6 +152,39 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE
   )
 
+  if(BUILD_TESTING)
+    add_executable(
+      wmfs-reference-mapped-buffers-test
+      tests/reference_mapped_buffers_test.cpp
+      src/reference_mapped_buffers.cpp
+      ${WMFS_CAPNP_SOURCES}
+    )
+    target_include_directories(
+      wmfs-reference-mapped-buffers-test
+      PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+    )
+    target_link_libraries(
+      wmfs-reference-mapped-buffers-test
+      PRIVATE CapnProto::capnp-rpc Threads::Threads ${TORCH_LIBRARIES}
+    )
+    target_compile_options(
+      wmfs-reference-mapped-buffers-test
+      PRIVATE ${TORCH_CXX_FLAGS}
+    )
+    set_target_properties(
+      wmfs-reference-mapped-buffers-test
+      PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
+    foreach(operation IN ITEMS retire finish close)
+      add_test(
+        NAME wmfs-reference-mapped-buffers-${operation}
+        COMMAND wmfs-reference-mapped-buffers-test ${operation}
+      )
+    endforeach()
+  endif()
+
   install(TARGETS wmfs-reference-worker RUNTIME DESTINATION bin)
   install(
     FILES plugins/reference/plugin.toml

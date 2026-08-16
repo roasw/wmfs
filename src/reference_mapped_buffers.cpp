@@ -50,17 +50,23 @@ struct ViewKey {
     bool operator==(const ViewKey &) const = default;
 };
 
-struct Mapping {
-    explicit Mapping(MappingSpec specification, void *mapped_address)
-        : spec(specification), address(mapped_address) {}
+struct MappedRegion {
+    MappedRegion(void *mapped_address, std::size_t mapped_length)
+        : address(mapped_address), length(mapped_length) {}
 
-    ~Mapping() {
-        views.clear();
-        ::munmap(address, static_cast<std::size_t>(spec.byte_length));
-    }
+    ~MappedRegion() { ::munmap(address, length); }
+
+    void *address;
+    std::size_t length;
+};
+
+struct Mapping {
+    Mapping(MappingSpec specification,
+            std::shared_ptr<MappedRegion> mapped_region)
+        : spec(specification), region(std::move(mapped_region)) {}
 
     MappingSpec spec;
-    void *address;
+    std::shared_ptr<MappedRegion> region;
     std::list<std::pair<ViewKey, at::Tensor>> views;
 };
 
@@ -140,8 +146,7 @@ struct MappedBufferCache::Impl {
     std::unordered_map<std::uint64_t, std::shared_ptr<Mapping>> buffers;
 };
 
-TensorLease::TensorLease(at::Tensor tensor, std::shared_ptr<void> mapping)
-    : mapping_(std::move(mapping)), tensor_(std::move(tensor)) {}
+TensorLease::TensorLease(at::Tensor tensor) : tensor_(std::move(tensor)) {}
 
 const at::Tensor &TensorLease::tensor() const noexcept { return tensor_; }
 
@@ -173,7 +178,9 @@ void MappedBufferCache::map(MappingSpec spec, int raw_fd) {
     if (address == MAP_FAILED) {
         fail_errno("mmap transferred buffer");
     }
-    auto candidate = std::make_shared<Mapping>(spec, address);
+    auto region = std::make_shared<MappedRegion>(
+        address, static_cast<std::size_t>(spec.byte_length));
+    auto candidate = std::make_shared<Mapping>(spec, std::move(region));
 
     std::lock_guard lock(impl_->mutex);
     auto existing = impl_->buffers.find(spec.buffer_id);
@@ -211,6 +218,7 @@ void MappedBufferCache::retire(std::uint64_t buffer_id,
         retired = std::move(item->second);
         impl_->buffers.erase(item);
     }
+    retired->views.clear();
 }
 
 TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
@@ -276,7 +284,7 @@ TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
     if (cached != mapping->views.end()) {
         auto tensor = cached->second;
         mapping->views.splice(mapping->views.end(), mapping->views, cached);
-        return TensorLease(std::move(tensor), std::move(mapping));
+        return TensorLease(std::move(tensor));
     }
 
     auto offset = descriptor.getOffset();
@@ -303,15 +311,17 @@ TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
         fail("Tensor strides exceed its declared byte range");
     }
 
-    auto *data = static_cast<std::byte *>(mapping->address) + offset;
-    auto tensor =
-        at::from_blob(data, key.shape, element_strides,
-                      at::TensorOptions().device(at::kCPU).dtype(scalar_type));
+    auto region = mapping->region;
+    auto *data = static_cast<std::byte *>(region->address) + offset;
+    auto tensor = at::from_blob(
+        data, key.shape, element_strides,
+        [region = std::move(region)](void *) mutable { region.reset(); },
+        at::TensorOptions().device(at::kCPU).dtype(scalar_type));
     mapping->views.emplace_back(std::move(key), tensor);
     if (mapping->views.size() > MAX_CACHED_VIEWS) {
         mapping->views.pop_front();
     }
-    return TensorLease(std::move(tensor), std::move(mapping));
+    return TensorLease(std::move(tensor));
 }
 
 void MappedBufferCache::finish_invocation(std::uint64_t invocation_id) {
@@ -330,6 +340,9 @@ void MappedBufferCache::finish_invocation(std::uint64_t invocation_id) {
             }
         }
     }
+    for (auto &mapping : expired) {
+        mapping->views.clear();
+    }
 }
 
 void MappedBufferCache::close() {
@@ -337,6 +350,9 @@ void MappedBufferCache::close() {
     {
         std::lock_guard lock(impl_->mutex);
         buffers.swap(impl_->buffers);
+    }
+    for (auto &entry : buffers) {
+        entry.second->views.clear();
     }
 }
 
