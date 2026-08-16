@@ -1,0 +1,6 @@
+dl.py dt.sig,
+dl.cpp dt.sig {
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}

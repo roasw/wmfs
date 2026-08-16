@@ -54,17 +54,27 @@ class Runtime:
 
     @property
     def backend_name(self) -> str:
+        """Return the currently selected execution backend."""
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
             return self._backend_name
 
     @property
     def operation_names(self) -> tuple[str, ...]:
+        """Return the names of operations registered by discovered plugins."""
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
             return self._registry.operation_names
 
     def operation_metadata(self, name: str) -> OperationMetadata:
+        """Return registered metadata for an operation name.
+
+        Args:
+            name: Registered operation name.
+
+        Raises:
+            KeyError: If no operation with ``name`` is registered.
+        """
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
             return self._registry.operation(name)
@@ -138,11 +148,11 @@ class Runtime:
     def configure_deadlines(
         self,
         *,
-        startup: object = 30.0,
-        request: object = 30.0,
-        fd_transfer: object = 5.0,
-        shutdown: object = 30.0,
-        kill_grace: object = 30.0,
+        startup: float = 30.0,
+        request: float = 30.0,
+        fd_transfer: float = 5.0,
+        shutdown: float = 30.0,
+        kill_grace: float = 30.0,
     ) -> None:
         """Configure isolated transport deadlines before plugin discovery.
 

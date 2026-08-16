@@ -5,6 +5,12 @@ inside this Sphinx site through Breathe.
 
 ## Native Control Session
 
+```{doxygenenum} wmfs::native::TensorDType
+```
+
+```{doxygenenum} wmfs::native::ScalarKind
+```
+
 ```{doxygenclass} wmfs::native::Session
 ---
 members:
@@ -23,7 +29,25 @@ members:
 ---
 ```
 
+```{doxygenstruct} wmfs::native::ScalarArgument
+---
+members:
+---
+```
+
+```{doxygenstruct} wmfs::native::InvocationProfile
+---
+members:
+---
+```
+
 ## Worker Mapping API
+
+```{doxygenstruct} wmfs::reference::MappingSpec
+---
+members:
+---
+```
 
 ```{doxygenclass} wmfs::reference::MappedBufferCache
 ---
@@ -35,6 +59,9 @@ members:
 ---
 members:
 ---
+```
+
+```{doxygenfunction} wmfs::reference::receive_buffer_transfers
 ```
 
 ## Reference Kernels

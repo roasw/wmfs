@@ -11,13 +11,13 @@ namespace wmfs::reference {
 
 /// @brief Worker-side mapping metadata received from the runtime.
 struct MappingSpec {
-    std::uint64_t buffer_id;
-    std::uint32_t generation;
-    std::uint64_t allocation_id;
-    std::uint64_t byte_length;
-    std::uint64_t invocation_id;
-    bool writable;
-    bool arena;
+    std::uint64_t buffer_id;     ///< Runtime buffer capability identifier.
+    std::uint32_t generation;    ///< Reuse generation of the backing region.
+    std::uint64_t allocation_id; ///< Logical allocation within the region.
+    std::uint64_t byte_length;   ///< Number of mapped bytes.
+    std::uint64_t invocation_id; ///< Invocation owning writable access.
+    bool writable;               ///< Whether the worker may modify the mapping.
+    bool arena;                  ///< Whether the mapping belongs to an arena.
 };
 
 /// @brief Invocation-local ATen tensor handle.
@@ -30,7 +30,9 @@ class TensorLease {
     /// @brief Take ownership of an ATen tensor view.
     explicit TensorLease(at::Tensor tensor);
 
+    /// @brief Return the retained tensor as a read-only handle.
     [[nodiscard]] const at::Tensor &tensor() const noexcept;
+    /// @brief Return the retained tensor as a writable handle.
     [[nodiscard]] at::Tensor &tensor() noexcept;
 
   private:

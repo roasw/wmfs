@@ -10,13 +10,13 @@ namespace wmfs::native {
 
 /// @brief Metadata required to map one runtime-owned shared buffer.
 struct Mapping {
-    std::uint64_t buffer_id;
-    std::uint32_t generation;
-    std::uint64_t allocation_id;
-    std::uint64_t byte_length;
-    bool writable;
-    bool arena;
-    std::uint64_t invocation_id;
+    std::uint64_t buffer_id;     ///< Runtime buffer capability identifier.
+    std::uint32_t generation;    ///< Reuse generation of the backing region.
+    std::uint64_t allocation_id; ///< Logical allocation within the region.
+    std::uint64_t byte_length;   ///< Number of mapped bytes.
+    bool writable;               ///< Whether the worker may modify the mapping.
+    bool arena;                  ///< Whether the mapping belongs to an arena.
+    std::uint64_t invocation_id; ///< Invocation owning a writable mapping.
 };
 
 /// @brief Tensor element types supported by the native control path.
@@ -24,14 +24,14 @@ enum class TensorDType { float32, float64, int64, uint8 };
 
 /// @brief Process-independent tensor view metadata.
 struct TensorDescriptor {
-    std::uint64_t buffer_id;
-    std::uint32_t generation;
-    std::uint64_t allocation_id;
-    std::uint64_t offset;
-    std::uint64_t byte_length;
-    TensorDType dtype;
-    std::vector<std::uint64_t> shape;
-    std::vector<std::int64_t> strides;
+    std::uint64_t buffer_id;     ///< Runtime buffer capability identifier.
+    std::uint32_t generation;    ///< Reuse generation of the backing region.
+    std::uint64_t allocation_id; ///< Logical allocation within the region.
+    std::uint64_t offset;        ///< Byte offset from the mapped region start.
+    std::uint64_t byte_length;   ///< Number of bytes visible to the tensor.
+    TensorDType dtype;           ///< Element type.
+    std::vector<std::uint64_t> shape;  ///< Tensor dimensions.
+    std::vector<std::int64_t> strides; ///< Element strides.
 };
 
 using TensorDescriptors = std::vector<const TensorDescriptor *>;
@@ -41,22 +41,22 @@ enum class ScalarKind { boolean, float64, int64, text };
 
 /// @brief One indexed scalar argument for an operation invocation.
 struct ScalarArgument {
-    std::uint16_t parameter;
-    ScalarKind kind;
-    bool boolean_value{};
-    double float64_value{};
-    std::int64_t int64_value{};
-    std::string text_value;
+    std::uint16_t parameter; ///< Scalar parameter index in operation metadata.
+    ScalarKind kind;         ///< Active scalar representation.
+    bool boolean_value{};    ///< Boolean value when kind is boolean.
+    double float64_value{};  ///< Floating-point value when kind is float64.
+    std::int64_t int64_value{}; ///< Integer value when kind is int64.
+    std::string text_value;     ///< String value when kind is text.
 };
 
 /// @brief Timing values returned by a profiled native invocation.
 struct InvocationProfile {
-    std::uint64_t queue_wait_ns{};
-    std::uint64_t rpc_ns{};
-    std::uint64_t worker_input_views_ns{};
-    std::uint64_t worker_output_views_ns{};
-    std::uint64_t worker_dispatch_ns{};
-    std::uint64_t worker_kernel_ns{};
+    std::uint64_t queue_wait_ns{};          ///< Client-side serialization wait.
+    std::uint64_t rpc_ns{};                 ///< End-to-end RPC duration.
+    std::uint64_t worker_input_views_ns{};  ///< Input view construction time.
+    std::uint64_t worker_output_views_ns{}; ///< Output view construction time.
+    std::uint64_t worker_dispatch_ns{};     ///< Worker adapter dispatch time.
+    std::uint64_t worker_kernel_ns{};       ///< Numerical kernel time.
 };
 
 /// @brief Synchronous native client for worker RPC and FD-control traffic.
@@ -108,9 +108,13 @@ class Session {
     /// @brief Close RPC/control resources. Safe to call repeatedly.
     void close();
 
+    /// @brief Return the number of transferred mapping descriptors.
     std::uint64_t transfer_count() const;
+    /// @brief Return the number of acknowledged mapping batches.
     std::uint64_t mapping_batch_count() const;
+    /// @brief Return the number of retired mapping descriptors.
     std::uint64_t retirement_count() const;
+    /// @brief Return the number of acknowledged retirement batches.
     std::uint64_t retirement_batch_count() const;
 
   private:

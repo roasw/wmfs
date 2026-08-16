@@ -3,12 +3,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from docutils import nodes
+
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "wmfs"))
 sys.path.insert(0, str(ROOT / "packages" / "wmfs-plugin"))
 
 project = "WMFS"
 author = "WMFS contributors"
+copyright = "WMFS contributors"
 
 
 def git_version() -> str:
@@ -61,3 +64,22 @@ breathe_default_project = "wmfs"
 
 html_theme = "alabaster"
 html_title = f"WMFS {release}"
+html_static_path = ["_static"]
+
+
+def remove_breathe_rubric_ids(
+    app: object, doctree: nodes.document, docname: str
+) -> None:
+    """Remove duplicate IDs generated for repeated Breathe section rubrics."""
+    del app
+    if docname != "api/cpp":
+        return
+    for node in doctree.findall(nodes.rubric):
+        if "breathe-sectiondef-title" in node.get("classes", []):
+            node["ids"] = []
+            node["names"] = []
+
+
+def setup(app: object) -> None:
+    """Register documentation-only Sphinx transforms."""
+    app.connect("doctree-resolved", remove_breathe_rubric_ids)

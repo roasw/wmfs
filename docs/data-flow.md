@@ -86,8 +86,9 @@ Read next:
 ### 4. Runtime-Owned Shared Memory
 
 Unmanaged CPU tensors are copied once into runtime-owned contiguous storage.
-`BufferManager.empty` allocates pooled `memfd` regions, maps them, and creates
-Torch views. Known outputs are allocated before dispatch.
+`BufferManager.empty` allocates either a pooled `memfd` region or an arena
+subrange, then creates a Torch view. Known outputs are allocated before
+dispatch.
 
 ```{literalinclude} ../packages/wmfs/wmfs/memory/buffers.py
 ---
@@ -155,9 +156,11 @@ The Python worker equivalents are:
 
 The worker writes directly into output mappings allocated by the runtime. The
 RPC response contains only completion status and optional metrics. Python
-returns the preallocated managed Torch tensor. When its last storage alias is
-released, `BufferManager.collect` retires worker mappings in batches, resets the
-region, advances its generation, and places it in the size-matched pool.
+returns the preallocated managed Torch tensor. Releasing its last storage alias
+queues the allocation for later collection. Collection retires worker mappings
+in batches. In pooled mode it resets the whole region, advances its generation,
+and places it in the size-matched pool; in arena mode it returns and coalesces
+the allocation's subrange without recycling the arena mapping.
 
 ## Local And Bundled Differences
 

@@ -108,6 +108,18 @@ class EnvironmentMetadata:
 def metadata_from_reader(
     metadata: object, *, validate_fingerprint: bool = True
 ) -> PluginMetadata:
+    """Decode and validate plugin metadata from a Cap'n Proto reader.
+
+    Args:
+        metadata: Reader exposing the ``PluginMetadata`` schema fields.
+        validate_fingerprint: Whether to verify the declared metadata fingerprint.
+
+    Returns:
+        Immutable Python metadata used by runtime invocation planning.
+
+    Raises:
+        ValueError: If the metadata contract or fingerprint is invalid.
+    """
     plugin = PluginMetadata(
         name=str(metadata.name),
         version=str(metadata.version),
@@ -136,6 +148,7 @@ def canonical_metadata_bytes(plugin: PluginMetadata) -> bytes:
 
 
 def metadata_fingerprint(plugin: PluginMetadata) -> int:
+    """Return the deterministic 64-bit fingerprint for plugin metadata."""
     digest = hashlib.sha256(canonical_metadata_bytes(plugin)).digest()
     return int.from_bytes(digest[:8], "big")
 
@@ -143,6 +156,15 @@ def metadata_fingerprint(plugin: PluginMetadata) -> int:
 def validate_plugin_metadata(
     plugin: PluginMetadata, *, validate_fingerprint: bool = True
 ) -> None:
+    """Validate operation IDs, names, plans, VJPs, and the fingerprint.
+
+    Args:
+        plugin: Decoded plugin metadata to validate.
+        validate_fingerprint: Whether to verify the declared fingerprint.
+
+    Raises:
+        ValueError: If any metadata invariant is violated.
+    """
     operation_ids = [item.operation_id for item in plugin.operations]
     if any(operation_id == 0 for operation_id in operation_ids):
         raise ValueError("Plugin operation IDs must be non-zero")

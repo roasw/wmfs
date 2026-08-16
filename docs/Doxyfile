@@ -1,5 +1,5 @@
 PROJECT_NAME           = WMFS
-PROJECT_NUMBER         = 0.1.0
+PROJECT_NUMBER         = $(WMFS_GIT_VERSION)
 OUTPUT_DIRECTORY       = $(WMFS_DOXYGEN_OUTPUT)
 INPUT                  = $(WMFS_SOURCE_ROOT)/inc/wmfs
 FILE_PATTERNS           = *.hpp
