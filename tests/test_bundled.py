@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from importlib.util import find_spec
@@ -7,8 +8,12 @@ import torch
 
 from wmfs import add_scalar, matmul, runtime, svd
 
+BUNDLED_AVAILABLE = find_spec("wmfs._bundled") is not None
+if os.environ.get("WMFS_REQUIRE_BUNDLED") == "1" and not BUNDLED_AVAILABLE:
+    raise RuntimeError("The bundled package check requires wmfs._bundled")
+
 pytestmark = pytest.mark.skipif(
-    find_spec("wmfs._bundled") is None,
+    not BUNDLED_AVAILABLE,
     reason="bundled plugins were not compiled",
 )
 
@@ -28,14 +33,30 @@ def test_bundled_extension_loads_only_when_selected() -> None:
         [
             sys.executable,
             "-c",
-            "import sys, wmfs; print('wmfs._bundled' in sys.modules)",
+            """
+import sys
+from importlib.util import find_spec
+
+import torch
+import wmfs
+
+assert find_spec("wmfs._bundled") is not None
+assert "wmfs._bundled" not in sys.modules
+wmfs.runtime.use_backend("bundled")
+assert "wmfs._bundled" not in sys.modules
+value = torch.ones(1)
+torch.testing.assert_close(wmfs.add_scalar(value, 1.0), value + 1.0)
+assert "wmfs._bundled" in sys.modules
+assert "reference" in sys.modules["wmfs._bundled"].plugins
+wmfs.runtime.close()
+""",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
 
-    assert result.stdout.strip() == "False"
+    assert result.stdout == ""
 
 
 def test_bundled_operations_match_torch(bundled_runtime: None) -> None:
@@ -77,17 +98,20 @@ def test_bundled_functional_operations_preserve_autograd(
     a = torch.arange(4, dtype=torch.float64).reshape(2, 2).requires_grad_()
     b = torch.eye(2, dtype=torch.float64, requires_grad=True)
 
-    matmul(a, b).sum().backward()
+    add_scalar(matmul(a, b), 1.5).sum().backward()
 
     torch.testing.assert_close(a.grad, torch.ones_like(a))
     torch.testing.assert_close(b.grad, a.detach().T @ torch.ones_like(a))
 
 
 def test_runtime_close_preserves_bundled_backend() -> None:
+    value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     runtime.close()
     runtime.use_backend("bundled")
+    torch.testing.assert_close(add_scalar(value, 1.0), value + 1.0)
     runtime.close()
 
     runtime.use_backend("bundled")
     assert runtime.backend_name == "bundled"
+    torch.testing.assert_close(matmul(value, value), value @ value)
     runtime.close()

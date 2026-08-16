@@ -64,6 +64,21 @@ let
       pythonImportsCheck = [ "wmfs" ];
     };
   bundledRuntime = buildRuntime { bundled = true; };
+  bundledTestPython = pkgs.python3.withPackages (ps: [
+    bundledRuntime
+    ps.pytest
+  ]);
+  bundledCheck = pkgs.runCommand "wmfs-bundled-package-check" { } ''
+    mkdir -p "$TMPDIR/work"
+    cd "$TMPDIR/work"
+    env -u PYTHONPATH WMFS_REQUIRE_BUNDLED=1 \
+      ${bundledTestPython}/bin/python3 -m pytest \
+        -c ${source}/pytest.ini \
+        -o pythonpath= \
+        -p no:cacheprovider \
+        -q ${source}/tests/test_bundled.py
+    touch "$out"
+  '';
   benchmark = pkgs.writeShellApplication {
     name = "wmfs-benchmark";
     text = ''
@@ -77,5 +92,6 @@ workers
 // {
   default = buildRuntime { };
   bundled = bundledRuntime;
+  bundled-check = bundledCheck;
   inherit benchmark;
 }

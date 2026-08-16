@@ -79,7 +79,7 @@
           };
 
           package = self.packages.${system}.default;
-          bundled-package = self.packages.${system}.bundled;
+          bundled-package = self.packages.${system}.bundled-check;
           benchmark-package = benchmark;
           plugin-package = self.packages.${system}.wmfs-plugin;
           python-worker-package = self.packages.${system}.reference-python-worker;
