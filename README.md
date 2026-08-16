@@ -132,13 +132,20 @@ the main runtime. The SDK provides the protocol schemas, FD receiver, mapped
 Torch views, and metadata-driven worker bootstrap:
 
 ```python
-from wmfs_plugin.worker import worker_main
+from wmfs_plugin import InvocationContext, worker_main
+
+
+def my_operation_handler(context: InvocationContext) -> None:
+    context.output("result").copy_(context.input("value"))
+
 
 worker_main({"my_operation": my_operation_handler})
 ```
 
-Handlers receive ordinary input tensors, writable output tensors, and scalar
-values. Plugin kernels do not receive runtime object-store, RPC, memfd, or
+The operation-scoped context carries metadata, an invocation ID, ordinary input
+tensors, writable output tensors, and scalar values. Its `input()`, `output()`,
+and `scalar()` accessors accept metadata names or positional indices. Plugin
+kernels do not receive runtime object-store, mapping-cache, RPC, memfd, or
 allocator internals. The reference Python worker under `plugins/reference`
 demonstrates the complete adapter.
 

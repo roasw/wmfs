@@ -15,21 +15,19 @@ import capnp
 import torch
 
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
+from wmfs_plugin.invocation import InvocationContext
 from wmfs_plugin.metadata import OperationMetadata, metadata_from_reader
 from wmfs_plugin.schema import PROTOCOL_VERSION, load_tensor_schema, schema_root
 
-OperationHandler: TypeAlias = Callable[
-    [tuple[torch.Tensor, ...], tuple[torch.Tensor, ...], tuple[object, ...]],
-    None,
-]
+OperationHandler: TypeAlias = Callable[[InvocationContext], None]
 ExtraServerMethod: TypeAlias = Callable[..., object]
 
 
 @dataclass(frozen=True)
 class _Operation:
     handler: OperationHandler
+    metadata: OperationMetadata
     input_accesses: tuple[str, ...]
-    output_count: int
     scalar_kinds: tuple[str, ...]
 
 
@@ -182,8 +180,8 @@ def _compile_operations(
         operation_id = metadata.operation_id
         compiled[operation_id] = _Operation(
             handler=handler,
+            metadata=metadata,
             input_accesses=tuple(item.access for item in metadata.tensor_inputs),
-            output_count=len(metadata.tensor_outputs),
             scalar_kinds=tuple(item.kind for item in metadata.scalar_parameters),
         )
     unknown = set(handlers) - metadata_names
@@ -214,7 +212,7 @@ def _invoke_known(
             raise ValueError(f"Unknown operation ID {operation_id}") from None
         if len(invocation.inputs) != len(operation.input_accesses):
             raise ValueError("Invocation has an invalid input count")
-        if len(invocation.outputs) != operation.output_count:
+        if len(invocation.outputs) != len(operation.metadata.tensor_outputs):
             raise ValueError("Invocation has an invalid output count")
 
         view_started = perf_counter_ns() if profiled else 0
@@ -242,8 +240,15 @@ def _invoke_known(
         if profiled:
             output_views_ns = perf_counter_ns() - view_started
         scalars = _decode_scalars(invocation.scalars, operation.scalar_kinds)
+        context = InvocationContext(
+            operation.metadata,
+            invocation_id,
+            inputs,
+            outputs,
+            scalars,
+        )
         kernel_started = perf_counter_ns() if profiled else 0
-        operation.handler(inputs, outputs, scalars)
+        operation.handler(context)
         kernel_ns = perf_counter_ns() - kernel_started if profiled else 0
         elapsed_ns = perf_counter_ns() - started if profiled else 0
     finally:

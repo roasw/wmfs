@@ -1,37 +1,28 @@
 import torch
 
+from wmfs_plugin import InvocationContext, worker_main
 from wmfs_plugin.fd_transport import MappedBufferCache
-from wmfs_plugin.worker import worker_main
 from wmfs_reference import kernels
 
 
-def _matmul(
-    inputs: tuple[torch.Tensor, ...],
-    outputs: tuple[torch.Tensor, ...],
-    scalars: tuple[object, ...],
-) -> None:
-    if len(inputs) != 2 or len(outputs) != 1 or scalars:
-        raise ValueError("Invalid matmul invocation")
-    a, b = inputs
+def _matmul(context: InvocationContext) -> None:
+    a = context.input("a")
+    b = context.input("b")
+    result = context.output("result")
     if a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[0]:
         raise ValueError("matmul input dimensions are incompatible")
-    _validate_output(outputs[0], (a.shape[0], b.shape[1]), a.dtype)
-    kernels.matmul(a, b, out=outputs[0])
+    _validate_output(result, (a.shape[0], b.shape[1]), a.dtype)
+    kernels.matmul(a, b, out=result)
 
 
-def _svd(
-    inputs: tuple[torch.Tensor, ...],
-    outputs: tuple[torch.Tensor, ...],
-    scalars: tuple[object, ...],
-) -> None:
-    if len(inputs) != 1 or len(outputs) != 3 or len(scalars) != 1:
-        raise ValueError("Invalid svd invocation")
-    a = inputs[0]
+def _svd(context: InvocationContext) -> None:
+    a = context.input("a")
     if a.ndim != 2:
         raise ValueError("svd initially supports two-dimensional tensors")
-    full_matrices = bool(scalars[0])
+    full_matrices = bool(context.scalar("fullMatrices"))
     rows, columns = a.shape
     rank = min(rows, columns)
+    outputs = context.outputs
     expected_shapes = (
         (rows, rows if full_matrices else rank),
         (rank,),
@@ -42,45 +33,34 @@ def _svd(
     kernels.svd(a, full_matrices=full_matrices, out=outputs)
 
 
-def _add_scalar(
-    inputs: tuple[torch.Tensor, ...],
-    outputs: tuple[torch.Tensor, ...],
-    scalars: tuple[object, ...],
-) -> None:
-    if len(inputs) != 1 or len(outputs) != 1 or len(scalars) != 1:
-        raise ValueError("Invalid add_scalar invocation")
-    value = scalars[0]
+def _add_scalar(context: InvocationContext) -> None:
+    value = context.scalar("value")
     if not isinstance(value, float):
         raise TypeError("add_scalar requires a numeric scalar")
-    a = inputs[0]
-    _validate_output(outputs[0], tuple(a.shape), torch.result_type(a, value))
-    kernels.add_scalar(a, value, out=outputs[0])
+    a = context.input("a")
+    result = context.output("result")
+    _validate_output(result, tuple(a.shape), torch.result_type(a, value))
+    kernels.add_scalar(a, value, out=result)
 
 
-def _matmul_vjp(
-    inputs: tuple[torch.Tensor, ...],
-    outputs: tuple[torch.Tensor, ...],
-    scalars: tuple[object, ...],
-) -> None:
-    if len(inputs) != 3 or len(outputs) != 2 or scalars:
-        raise ValueError("Invalid matmul VJP invocation")
-    a, b, result_cotangent = inputs
+def _matmul_vjp(context: InvocationContext) -> None:
+    a = context.input("a")
+    b = context.input("b")
+    result_cotangent = context.input("resultCotangent")
     if a.ndim != 2 or b.ndim != 2 or result_cotangent.shape != (a.shape[0], b.shape[1]):
         raise ValueError("matmul VJP input dimensions are incompatible")
-    _validate_output(outputs[0], tuple(a.shape), a.dtype)
-    _validate_output(outputs[1], tuple(b.shape), b.dtype)
-    kernels.matmul_vjp(a, b, result_cotangent, out=(outputs[0], outputs[1]))
+    a_gradient = context.output("aGradient")
+    b_gradient = context.output("bGradient")
+    _validate_output(a_gradient, tuple(a.shape), a.dtype)
+    _validate_output(b_gradient, tuple(b.shape), b.dtype)
+    kernels.matmul_vjp(a, b, result_cotangent, out=(a_gradient, b_gradient))
 
 
-def _add_scalar_vjp(
-    inputs: tuple[torch.Tensor, ...],
-    outputs: tuple[torch.Tensor, ...],
-    scalars: tuple[object, ...],
-) -> None:
-    if len(inputs) != 1 or len(outputs) != 1 or scalars:
-        raise ValueError("Invalid add_scalar VJP invocation")
-    _validate_output(outputs[0], tuple(inputs[0].shape), inputs[0].dtype)
-    kernels.add_scalar_vjp(inputs[0], out=outputs[0])
+def _add_scalar_vjp(context: InvocationContext) -> None:
+    result_cotangent = context.input("resultCotangent")
+    a_gradient = context.output("aGradient")
+    _validate_output(a_gradient, tuple(result_cotangent.shape), result_cotangent.dtype)
+    kernels.add_scalar_vjp(result_cotangent, out=a_gradient)
 
 
 def _tensor_checksum(
