@@ -4,9 +4,11 @@ from pathlib import Path
 import pytest
 import torch
 
+import wmfs.benchmark as benchmark
 from wmfs.benchmark import (
     BenchmarkConfig,
     _project_home,
+    _sample_invocation,
     render_table,
     run_benchmarks,
     summarize,
@@ -33,6 +35,31 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
     assert summary["standard_deviation_ms"] == pytest.approx(0.0000057663, rel=1e-5)
 
 
+def test_sample_invocation_separates_call_return_from_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0
+
+    def advance(delay_ns: int) -> None:
+        nonlocal now
+        now += delay_ns
+
+    class DelayedResult:
+        def __del__(self) -> None:
+            advance(20)
+
+    def call() -> DelayedResult:
+        advance(10)
+        return DelayedResult()
+
+    def cleanup() -> None:
+        advance(30)
+
+    monkeypatch.setattr(benchmark, "perf_counter_ns", lambda: now)
+
+    assert _sample_invocation(call, cleanup) == (10, 50)
+
+
 def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     previous_threads = torch.get_num_threads()
     previous_omp_threads = os.environ.get("OMP_NUM_THREADS")
@@ -55,23 +82,29 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 5
+    assert report["schema_version"] == 6
     assert report["configuration"]["plugin_directory"] == "plugins"
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
     assert report["configuration"]["control_mode"] == "native"
     assert report["high_frequency_add_scalar"]["iterations"] == 2
-    assert report["high_frequency_add_scalar"]["calls_per_second"] > 0
+    assert report["high_frequency_add_scalar"]["call_latency_ms"]["count"] == 2
+    assert report["high_frequency_add_scalar"]["cleanup_inclusive_calls_per_second"] > 0
     assert report["high_frequency_add_scalar_out"]["iterations"] == 2
-    assert report["high_frequency_add_scalar_out"]["calls_per_second"] > 0
-    assert svd_case["local_kernel_ms"]["count"] == 1
+    assert (
+        report["high_frequency_add_scalar_out"]["cleanup_inclusive_calls_per_second"]
+        > 0
+    )
+    assert svd_case["local_call_ms"]["count"] == 1
     assert svd_case["isolated_end_to_end_ms"]["count"] == 1
+    assert svd_case["local_result_cleanup_ms"]["count"] == 1
+    assert svd_case["isolated_result_cleanup_reclamation_ms"]["count"] == 1
     assert set(svd_case["diagnostics"]) == {
-        "buffer_reclamation_ms",
+        "cached_buffer_reclamation_ms",
         "cached_ensure_mapped_ms",
         "first_use_fd_transfer_mmap_ms",
         "input_shared_preparation_ms",
-        "isolated_uncached_end_to_end_ms",
+        "isolated_uncached_call_ms",
         "native_call_ms",
         "native_queue_wait_ms",
         "native_rpc_ms",
@@ -83,15 +116,24 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "pooled_shared_memory_allocation_ms",
         "scalar_binding_ms",
         "shared_memory_allocation_ms",
+        "uncached_buffer_reclamation_ms",
         "worker_dispatch_ms",
         "worker_input_views_ms",
         "worker_kernel_ms",
         "worker_output_views_ms",
     }
     assert svd_case["diagnostics"]["output_allocations_per_invocation"] == 3
+    assert all(
+        summary["count"] == 1
+        for name, summary in svd_case["diagnostics"].items()
+        if name != "output_allocations_per_invocation"
+    )
     assert add_scalar_case["diagnostics"]["output_allocations_per_invocation"] == 1
     assert svd_case["memory_pool"]["mode"] == "pooled"
     assert svd_case["memory_pool"]["pool_hits"] > 0
     assert torch.get_num_threads() == previous_threads
     assert os.environ.get("OMP_NUM_THREADS") == previous_omp_threads
     assert "Primary comparison" in render_table(report)
+    assert (
+        "nested within and overlap" in report["measurement_boundaries"]["diagnostics"]
+    )

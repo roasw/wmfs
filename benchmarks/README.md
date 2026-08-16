@@ -15,11 +15,15 @@ and C++ worker were built in Release mode by their Nix packages. The worker
 contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
 glibc 2.42.
 Torch was limited to one CPU thread. Each operation was warmed up twice, then
-measured ten times. Result destruction and safe-pool retirement/reset are
-included in isolated end-to-end samples. Known outputs are preallocated from
-schema metadata and each operation uses one Cap'n Proto RPC between the C++
-client and C++ worker. The table reports medians; the JSON reports also contain
-p95, standard deviation, allocation statistics, and transport diagnostics.
+measured ten times. The checked-in numeric reports use the earlier schema 5
+boundary, which included result destruction and safe-pool retirement/reset in
+isolated end-to-end samples. They are retained rather than rerunning the
+expensive reference cases. Current schema 6 reports stop local and isolated
+primary samples at backend return and measure post-return cleanup separately.
+Known outputs are preallocated from schema metadata and each operation uses one
+Cap'n Proto RPC between the C++ client and C++ worker. The table reports
+medians; the JSON reports also contain p95, standard deviation, allocation
+statistics, and transport diagnostics.
 
 | Mode   | Operation  | Size             | Local (ms) | Isolated (ms) | Overhead (ms) | Overhead |
 | ------ | ---------- | ---------------- | ---------: | ------------: | ------------: | -------: |
@@ -46,11 +50,12 @@ still incurs acknowledged worker retirement and a new FD mapping. The arena
 reached 97.1% suballocation hit rates with one memfd.
 
 RPC-only median latency was 0.082 ms pooled and 0.081 ms in the arena. The
-1,000-call high-frequency `add_scalar` run measured 0.337 ms median and 2,502
-calls/s pooled, versus 0.226 ms and 4,107 calls/s in the arena. Reusing a managed
-`out=` tensor reduced these to 0.262 ms and 3,186 calls/s pooled, and 0.183 ms
-and 4,675 calls/s in the arena. These are sequential synchronous calls, not
-batched operations.
+schema 5 1,000-call high-frequency `add_scalar` run measured 0.337 ms median and
+2,502 calls/s pooled, versus 0.226 ms and 4,107 calls/s in the arena. Reusing a
+managed `out=` tensor reduced these to 0.262 ms and 3,186 calls/s pooled, and
+0.183 ms and 4,675 calls/s in the arena. Current reports label backend-return
+call latency separately from cleanup-inclusive whole-loop throughput. These are
+sequential synchronous calls, not batched operations.
 
 The profile identified repeated worker tensor-view construction as the largest
 avoidable cheap-operation cost. Caching validated views per worker mapping

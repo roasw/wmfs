@@ -343,9 +343,16 @@ just benchmark
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
 the deliberately cheap `add_scalar` operation. It reports median and standard
-deviation for local kernel execution and isolated end-to-end execution, plus
-absolute and percentage overhead. JSON output also records nearest-rank p95 and
-a 1,000-call sequential high-frequency `add_scalar` latency/throughput run.
+deviation for local calls and isolated end-to-end calls, plus absolute and
+percentage overhead. Both primary timers stop when the backend returns; result
+destruction, collection, buffer retirement, and allocator reset are excluded
+and reported as post-return cleanup. JSON output also records nearest-rank p95
+and a 1,000-call sequential high-frequency `add_scalar` run.
+
+High-frequency call latency has the same backend-return boundary. Its
+cleanup-inclusive throughput times the complete sequential loop, including
+per-call result destruction and reclamation when outputs are not reused. These
+are deliberately distinct boundaries and neither measurement is batched.
 
 Separate diagnostics report worker startup, RPC-only round trips, shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
@@ -354,6 +361,12 @@ includes memfd allocation, the runtime mapping and Torch view, and the ingress
 copy. Ensure-mapped timings include native dispatch, FD transfer, worker
 mapping, and acknowledgement. Numerical-library warmup and worker startup are
 excluded from steady-state operation timings.
+
+Every per-case diagnostic summary uses the configured diagnostic iteration
+count. Uncached and cached invocation diagnostics are separate, equally sized
+sample populations. Component timings are nested within and overlap their
+associated invocation, so adding components does not reconstruct end-to-end
+time.
 
 Profiled invocations additionally separate output-plan evaluation, C++ queue
 wait, RPC, worker input/output view construction, worker dispatch, and kernel

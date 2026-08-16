@@ -1,5 +1,11 @@
 {
     "schema_version": 5,
+    "measurement_boundaries": {
+        "status": "Historical schema 5 report retained without regenerating numeric samples.",
+        "primary_calls": "Result destruction and isolated reclamation are included in these legacy samples.",
+        "high_frequency": "Legacy latency and throughput both include per-call cleanup when outputs are not reused.",
+        "diagnostics": "Component metrics are nested and overlapping; legacy buffer_reclamation_ms combines equal uncached and cached populations."
+    },
     "generated_at_utc": "2026-08-15T12:29:44.227544+00:00",
     "environment": {
         "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.42",

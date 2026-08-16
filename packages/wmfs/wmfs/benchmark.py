@@ -153,7 +153,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -196,6 +196,29 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         },
         "worker_startup_ms": summarize(startup),
         "rpc_round_trip_ms": summarize(rpc),
+        "measurement_boundaries": {
+            "primary_calls": (
+                "Backend invocation through backend return; excludes result destruction, "
+                "collection, buffer retirement, and allocator reset."
+            ),
+            "primary_cleanup": (
+                "Result destruction followed by collection, buffer retirement, and "
+                "allocator reset made necessary by that invocation."
+            ),
+            "high_frequency_call_latency": (
+                "Each backend invocation through backend return; excludes per-call cleanup."
+            ),
+            "high_frequency_cleanup_inclusive_throughput": (
+                "Whole sequential loop, including per-call result destruction and "
+                "reclamation when outputs are not reused."
+            ),
+            "diagnostics": (
+                "Each summary uses diagnostic_iterations samples. Component metrics are "
+                "nested within and overlap their associated invocation; they must not be "
+                "added to derive end-to-end time. Uncached and cached invocation metrics "
+                "come from separate, equally sized sample populations."
+            ),
+        },
         "high_frequency_add_scalar": high_frequency,
         "high_frequency_add_scalar_out": high_frequency_out,
         "operations": cases,
@@ -225,7 +248,7 @@ def render_table(report: dict[str, Any]) -> str:
     ]
     primary_rows = []
     for case in report["operations"]:
-        local = case["local_kernel_ms"]
+        local = case["local_call_ms"]
         isolated = case["isolated_end_to_end_ms"]
         primary_rows.append(
             (
@@ -255,6 +278,26 @@ def render_table(report: dict[str, Any]) -> str:
             ),
             primary_rows,
         )
+    )
+    lines.extend(
+        [
+            "",
+            "Post-return cleanup (median milliseconds; excluded from primary calls)",
+            *_table(
+                ("operation", "tier", "local result", "isolated result+reclaim"),
+                tuple(
+                    (
+                        case["operation"],
+                        case["tier"],
+                        _number(case["local_result_cleanup_ms"]["median_ms"]),
+                        _number(
+                            case["isolated_result_cleanup_reclamation_ms"]["median_ms"]
+                        ),
+                    )
+                    for case in report["operations"]
+                ),
+            ),
+        ]
     )
 
     startup = report["worker_startup_ms"]
@@ -291,17 +334,19 @@ def render_table(report: dict[str, Any]) -> str:
             [
                 "",
                 (
-                    "High-frequency add_scalar: "
-                    f"{_number(high_frequency['latency_ms']['median_ms'])} ms median; "
-                    f"{high_frequency['calls_per_second']:.0f} calls/s"
+                    "High-frequency add_scalar call latency: "
+                    f"{_number(high_frequency['call_latency_ms']['median_ms'])} ms median; "
+                    "cleanup-inclusive throughput: "
+                    f"{high_frequency['cleanup_inclusive_calls_per_second']:.0f} calls/s"
                 ),
             ]
         )
     if high_frequency_out is not None:
         lines.append(
-            "High-frequency add_scalar with out: "
-            f"{_number(high_frequency_out['latency_ms']['median_ms'])} ms median; "
-            f"{high_frequency_out['calls_per_second']:.0f} calls/s"
+            "High-frequency add_scalar with out call latency: "
+            f"{_number(high_frequency_out['call_latency_ms']['median_ms'])} ms median; "
+            "cleanup-inclusive throughput: "
+            f"{high_frequency_out['cleanup_inclusive_calls_per_second']:.0f} calls/s"
         )
     diagnostic_rows = []
     for case in report["operations"]:
@@ -310,13 +355,14 @@ def render_table(report: dict[str, Any]) -> str:
             (
                 case["operation"],
                 case["tier"],
-                _median(diagnostics, "isolated_uncached_end_to_end_ms"),
+                _median(diagnostics, "isolated_uncached_call_ms"),
                 _median(diagnostics, "input_shared_preparation_ms"),
                 _median(diagnostics, "first_use_fd_transfer_mmap_ms"),
                 _median(diagnostics, "cached_ensure_mapped_ms"),
                 _median(diagnostics, "shared_memory_allocation_ms"),
                 _median(diagnostics, "pooled_shared_memory_allocation_ms"),
-                _median(diagnostics, "buffer_reclamation_ms"),
+                _median(diagnostics, "uncached_buffer_reclamation_ms"),
+                _median(diagnostics, "cached_buffer_reclamation_ms"),
                 _median(diagnostics, "output_preallocation_service_ms"),
                 _median(diagnostics, "output_shared_allocation_ms"),
                 _median(diagnostics, "output_ensure_mapped_ms"),
@@ -329,13 +375,14 @@ def render_table(report: dict[str, Any]) -> str:
             (
                 "operation",
                 "tier",
-                "uncached e2e",
+                "uncached call",
                 "input prep",
                 "first FD+mmap",
                 "cached ensure",
                 "cold alloc",
                 "pool alloc",
-                "reclaim",
+                "uncached reclaim",
+                "cached reclaim",
                 "output prealloc",
                 "output alloc",
                 "output ensure",
@@ -440,29 +487,33 @@ def _benchmark_case(
             buffers.collect()
 
         local_samples: list[int] = []
+        local_cleanup_samples: list[int] = []
         isolated_samples: list[int] = []
+        isolated_cleanup_samples: list[int] = []
         for iteration in range(config.iterations):
-            calls: tuple[tuple[list[int], Callable[[], object], bool], ...] = (
+            calls: tuple[
+                tuple[list[int], list[int], Callable[[], object], Callable[[], None]],
+                ...,
+            ] = (
                 (
                     local_samples,
+                    local_cleanup_samples,
                     lambda: local.invoke(operation, *managed_args, **kwargs),
-                    False,
+                    lambda: None,
                 ),
                 (
                     isolated_samples,
+                    isolated_cleanup_samples,
                     lambda: session.invoke(operation, *managed_args, **kwargs),
-                    True,
+                    buffers.collect,
                 ),
             )
             if iteration % 2:
                 calls = tuple(reversed(calls))
-            for samples, call, isolated_call in calls:
-                start = perf_counter_ns()
-                result = call()
-                del result
-                if isolated_call:
-                    buffers.collect()
-                samples.append(perf_counter_ns() - start)
+            for samples, cleanup_samples, call, cleanup in calls:
+                call_elapsed, cleanup_elapsed = _sample_invocation(call, cleanup)
+                samples.append(call_elapsed)
+                cleanup_samples.append(cleanup_elapsed)
 
         diagnostics = _benchmark_diagnostics(
             manifest,
@@ -488,8 +539,10 @@ def _benchmark_case(
         "operation": operation,
         "tier": tier,
         "shape": _shape_label(operation, size),
-        "local_kernel_ms": local_summary,
+        "local_call_ms": local_summary,
         "isolated_end_to_end_ms": isolated_summary,
+        "local_result_cleanup_ms": summarize(local_cleanup_samples),
+        "isolated_result_cleanup_reclamation_ms": summarize(isolated_cleanup_samples),
         "absolute_overhead_ms": absolute_overhead_ms,
         "percentage_overhead": (
             absolute_overhead_ms / float(local_summary["median_ms"]) * 100
@@ -519,7 +572,8 @@ def _benchmark_diagnostics(
     output_allocation = []
     output_mapping = []
     output_counts = []
-    reclamation = []
+    uncached_reclamation = []
+    cached_reclamation = []
     scalar_binding = []
     output_plan = []
     native_call = []
@@ -553,7 +607,7 @@ def _benchmark_diagnostics(
         del _result, profiled
         start = perf_counter_ns()
         buffers.collect()
-        reclamation.append(perf_counter_ns() - start)
+        uncached_reclamation.append(perf_counter_ns() - start)
 
         _result, metrics = session.invoke_profiled(operation, *managed_args, **kwargs)
         if any(item.fd_transferred for item in metrics.inputs):
@@ -577,7 +631,7 @@ def _benchmark_diagnostics(
         del _result
         start = perf_counter_ns()
         buffers.collect()
-        reclamation.append(perf_counter_ns() - start)
+        cached_reclamation.append(perf_counter_ns() - start)
 
     pooled_allocation_samples = []
     for _ in range(config.diagnostic_iterations):
@@ -608,13 +662,14 @@ def _benchmark_diagnostics(
     if len(set(output_counts)) != 1:
         raise RuntimeError("Worker output allocation count changed between invocations")
     return {
-        "isolated_uncached_end_to_end_ms": summarize(uncached_elapsed),
+        "isolated_uncached_call_ms": summarize(uncached_elapsed),
         "input_shared_preparation_ms": summarize(input_copy),
         "first_use_fd_transfer_mmap_ms": summarize(first_mapping),
         "cached_ensure_mapped_ms": summarize(cached_mapping),
         "shared_memory_allocation_ms": summarize(cold_allocation_samples),
         "pooled_shared_memory_allocation_ms": summarize(pooled_allocation_samples),
-        "buffer_reclamation_ms": summarize(reclamation),
+        "uncached_buffer_reclamation_ms": summarize(uncached_reclamation),
+        "cached_buffer_reclamation_ms": summarize(cached_reclamation),
         "output_preallocation_service_ms": summarize(output_service),
         "output_shared_allocation_ms": summarize(output_allocation),
         "output_ensure_mapped_ms": summarize(output_mapping),
@@ -678,26 +733,30 @@ def _benchmark_high_frequency(
                 del result
                 buffers.collect()
         samples = []
+        cleanup_samples = []
         batch_start = perf_counter_ns()
         for _ in range(config.high_frequency_iterations):
-            start = perf_counter_ns()
-            result = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
-            if not reuse_output:
-                del result
-                buffers.collect()
-            samples.append(perf_counter_ns() - start)
+            elapsed, cleanup_elapsed = _sample_invocation(
+                lambda: session.invoke(
+                    "add_scalar", *managed_args, out=reusable, **kwargs
+                ),
+                buffers.collect if not reuse_output else lambda: None,
+            )
+            samples.append(elapsed)
+            cleanup_samples.append(cleanup_elapsed)
         batch_elapsed = perf_counter_ns() - batch_start
         validation = session.invoke("add_scalar", *managed_args, out=reusable, **kwargs)
         torch.testing.assert_close(validation, managed_args[0] + managed_args[1])
         del validation
         if reuse_output:
-            del result, reusable
+            del reusable
             buffers.collect()
     latency = summarize(samples)
     return {
         "iterations": config.high_frequency_iterations,
-        "latency_ms": latency,
-        "calls_per_second": (
+        "call_latency_ms": latency,
+        "result_cleanup_reclamation_ms": summarize(cleanup_samples),
+        "cleanup_inclusive_calls_per_second": (
             config.high_frequency_iterations * 1_000_000_000 / batch_elapsed
         ),
     }
@@ -794,6 +853,16 @@ def _time_call(call: Callable[[], Any]) -> tuple[int, Any]:
     start = perf_counter_ns()
     result = call()
     return perf_counter_ns() - start, result
+
+
+def _sample_invocation(
+    call: Callable[[], Any], cleanup: Callable[[], None]
+) -> tuple[int, int]:
+    call_elapsed, result = _time_call(call)
+    cleanup_start = perf_counter_ns()
+    del result
+    cleanup()
+    return call_elapsed, perf_counter_ns() - cleanup_start
 
 
 def _configure_threads(threads: int) -> tuple[dict[str, str | None], int]:
