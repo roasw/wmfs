@@ -40,7 +40,7 @@ test-release:
 
 # Build all packaged Release artifacts without creating result symlinks.
 package:
-    nix build .#default .#bundled .#wmfs-plugin .#reference-worker .#reference-python-worker --no-link
+    nix build .#default .#bundled .#benchmark .#wmfs-plugin .#reference-worker .#reference-python-worker --no-link
 
 # Benchmark packaged Release artifacts in pooled or arena mode.
 benchmark mode="pooled":
@@ -52,13 +52,12 @@ benchmark-json output mode="pooled":
 
 # Show all underlying benchmark configuration options.
 benchmark-help:
-    nix shell .#bundled .#reference-worker -c wmfs-benchmark --help
+    nix run .#benchmark -- --help
 
 [private]
 _benchmark mode format output:
     #!/usr/bin/env bash
     arguments=(
-      --plugin-directory plugins
       --control-mode native
       --memory-mode "{{ mode }}"
       --format "{{ format }}"
@@ -72,7 +71,7 @@ _benchmark mode format output:
       printf 'Memory mode must be pooled or arena\n' >&2
       exit 2
     fi
-    nix shell .#bundled .#reference-worker -c wmfs-benchmark "${arguments[@]}"
+    nix run .#benchmark -- "${arguments[@]}"
 
 # Run formatting and lint hooks.
 format:

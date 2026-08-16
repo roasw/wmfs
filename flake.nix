@@ -41,6 +41,9 @@
           pkgs = pkgsFactory system nixpkgs;
           runtime = self.packages.${system}.default;
           runtimePython = runtime.pythonModule.withPackages (_: [ runtime ]);
+          benchmark = self.packages.${system}.benchmark;
+          bundledRuntime = self.packages.${system}.bundled;
+          referenceWorker = self.packages.${system}.reference-worker;
           pythonWorker = self.packages.${system}.reference-python-worker;
         in
         {
@@ -77,6 +80,7 @@
 
           package = self.packages.${system}.default;
           bundled-package = self.packages.${system}.bundled;
+          benchmark-package = benchmark;
           plugin-package = self.packages.${system}.wmfs-plugin;
           python-worker-package = self.packages.${system}.reference-python-worker;
 
@@ -127,6 +131,51 @@
                 touch $out
               '';
 
+          benchmark-smoke =
+            pkgs.runCommand "wmfs-benchmark-smoke-check" { nativeBuildInputs = [ benchmark ]; }
+              ''
+                mkdir -p "$TMPDIR/work" "$TMPDIR/hostile/wmfs"
+                printf 'raise RuntimeError("hostile wmfs import")\n' \
+                  > "$TMPDIR/hostile/wmfs/__init__.py"
+                cd "$TMPDIR/work"
+                PYTHONPATH="$TMPDIR/hostile" \
+                PYTHONHOME="$TMPDIR/hostile" \
+                LD_LIBRARY_PATH="$TMPDIR/hostile" \
+                LD_PRELOAD="$TMPDIR/hostile/libhostile.so" \
+                  wmfs-benchmark \
+                    --operations add_scalar \
+                    --tiers small \
+                    --add-scalar-sizes 1 1 1 \
+                    --iterations 1 \
+                    --warmups 0 \
+                    --startup-iterations 1 \
+                    --rpc-iterations 1 \
+                    --diagnostic-iterations 1 \
+                    --high-frequency-iterations 1 \
+                    --format json \
+                    --output report.json
+                env -u PYTHONPATH -u PYTHONHOME -u LD_LIBRARY_PATH -u LD_PRELOAD \
+                  ${pkgs.python3}/bin/python3 - <<'PY'
+                import json
+                from pathlib import Path
+
+                report = json.loads(Path("report.json").read_text())
+                runtime_module = Path(report["environment"]["wmfs_module"])
+                plugin_directory = Path(report["configuration"]["plugin_directory"])
+                worker = Path(report["environment"]["worker"]["executable"])
+
+                assert runtime_module.is_relative_to(Path("${bundledRuntime}"))
+                assert plugin_directory == Path(
+                    "${referenceWorker}/share/wmfs/plugins/reference"
+                )
+                assert worker == Path(
+                    "${referenceWorker}/bin/wmfs-reference-worker"
+                )
+                assert report["operations"][0]["operation"] == "add_scalar"
+                PY
+                touch $out
+              '';
+
           schemas = pkgs.runCommand "wmfs-schema-check" { nativeBuildInputs = [ pkgs.capnproto ]; } ''
             capnp compile -o- \
               --src-prefix=${./packages/wmfs-plugin/wmfs_plugin/schemas} \
@@ -156,6 +205,14 @@
               '';
         }
       );
+
+      apps = forSystems (system: {
+        benchmark = {
+          type = "app";
+          program = "${self.packages.${system}.benchmark}/bin/wmfs-benchmark";
+          meta.description = "Run the packaged hermetic WMFS benchmark";
+        };
+      });
 
       devShells = forSystems (
         system:

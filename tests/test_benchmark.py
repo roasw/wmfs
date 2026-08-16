@@ -9,7 +9,6 @@ import wmfs.benchmark as benchmark
 from wmfs.backends.local import LocalBackend
 from wmfs.benchmark import (
     BenchmarkConfig,
-    _project_home,
     _rotated_backend_names,
     _sample_invocation,
     render_table,
@@ -20,13 +19,9 @@ from wmfs.benchmark import (
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
 
-def test_project_home_is_stable_inside_runtime_package(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repository = Path(__file__).parents[1]
-    monkeypatch.chdir(repository / "packages" / "wmfs")
-
-    assert _project_home() == repository
+def test_raw_benchmark_cli_requires_plugin_directory() -> None:
+    with pytest.raises(SystemExit):
+        benchmark._parser().parse_args([])
 
 
 def test_summarize_reports_median_and_nearest_rank_p95() -> None:
@@ -139,7 +134,9 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
 
     svd_case, add_scalar_case = report["operations"]
     assert report["schema_version"] == 8
-    assert report["configuration"]["plugin_directory"] == "plugins"
+    assert report["configuration"]["plugin_directory"] == str(
+        PLUGIN_DIRECTORY.resolve()
+    )
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
     assert report["configuration"]["control_mode"] == "python"

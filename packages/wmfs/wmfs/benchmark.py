@@ -175,6 +175,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "platform": platform.platform(),
             "machine": platform.machine(),
             "cpu_count": os.cpu_count(),
+            "wmfs_module": str(Path(__file__).resolve()),
             "python_version": platform.python_version(),
             "torch_version": torch.__version__,
             "glibc_version": _glibc_version(),
@@ -191,9 +192,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             },
         },
         "configuration": {
-            "plugin_directory": os.path.relpath(
-                config.plugin_directory.resolve(), _project_home()
-            ),
+            "plugin_directory": str(config.plugin_directory.resolve()),
             "operations": config.operations,
             "tiers": config.tiers,
             "iterations": config.iterations,
@@ -999,30 +998,6 @@ def _restore_threads(state: tuple[dict[str, str | None], int]) -> None:
             os.environ[variable] = value
 
 
-def _project_home() -> Path:
-    working_directory = Path.cwd().resolve()
-    directories = (working_directory, *working_directory.parents)
-    repository = next(
-        (
-            directory
-            for directory in directories
-            if (directory / "CMakeLists.txt").is_file()
-            and (directory / "packages" / "wmfs" / "pyproject.toml").is_file()
-        ),
-        None,
-    )
-    if repository is not None:
-        return repository
-    return next(
-        (
-            directory
-            for directory in directories
-            if (directory / "pyproject.toml").is_file()
-        ),
-        working_directory,
-    )
-
-
 def _glibc_version() -> str:
     libc = ctypes.CDLL(None)
     libc.gnu_get_libc_version.restype = ctypes.c_char_p
@@ -1075,7 +1050,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--plugin-directory",
         type=Path,
-        default=Path("plugins"),
+        required=True,
         help="directory containing exactly one plugin manifest",
     )
     parser.add_argument(

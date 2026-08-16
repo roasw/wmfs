@@ -337,11 +337,19 @@ nix develop ./environments/nixos-25.05
 ## Benchmarking
 
 Run the local, bundled, and isolated benchmark with the packaged Release
-runtime, bundled reference plugin, and worker:
+runtime, bundled reference plugin, and worker. The recipe uses the packaged
+benchmark app, so it can be invoked from outside the checkout and does not use
+source files from the current directory:
 
 ```console
 just benchmark
 ```
+
+Equivalently, run `nix run path:/path/to/wmfs#benchmark`. The app fixes the
+plugin directory to the packaged reference worker and clears `PYTHONPATH`,
+`PYTHONHOME`, `LD_PRELOAD`, and `LD_LIBRARY_PATH` before starting the packaged
+bundled runtime. The raw installed `wmfs-benchmark` executable intentionally
+requires an explicit `--plugin-directory`; it never defaults to `./plugins`.
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
 the deliberately cheap `add_scalar` operation. It instantiates and warms all

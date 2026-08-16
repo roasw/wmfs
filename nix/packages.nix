@@ -55,9 +55,19 @@ let
       ];
       pythonImportsCheck = [ "wmfs" ];
     };
+  bundledRuntime = buildRuntime { bundled = true; };
+  benchmark = pkgs.writeShellApplication {
+    name = "wmfs-benchmark";
+    text = ''
+      unset PYTHONPATH PYTHONHOME LD_PRELOAD LD_LIBRARY_PATH
+      exec ${bundledRuntime}/bin/wmfs-benchmark "$@" \
+        --plugin-directory ${workers.reference-worker}/share/wmfs/plugins/reference
+    '';
+  };
 in
 workers
 // {
   default = buildRuntime { };
-  bundled = buildRuntime { bundled = true; };
+  bundled = bundledRuntime;
+  inherit benchmark;
 }
