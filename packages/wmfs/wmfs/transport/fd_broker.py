@@ -100,6 +100,7 @@ class FdSender:
             if self._closed:
                 return
             self._closed = True
+            self._mapped_buffers.clear()
             try:
                 self._socket.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -113,8 +114,6 @@ class FdSender:
         if self._worker_exited:
             self._mapped_buffers.pop(key, None)
             return
-        if self._closed:
-            raise RuntimeError("Cannot retire a buffer from a closing worker")
         message = self._schema.BufferTransfer.new_message(
             transferId=secrets.randbits(64),
             invocationId=0,

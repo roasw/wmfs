@@ -19,6 +19,25 @@ _DTYPES: dict[str, torch.dtype] = {
 }
 _ITEM_SIZES = {"float32": 4, "float64": 8, "int64": 8, "uint8": 1}
 _MAX_CACHED_VIEWS = 64
+_MAX_RANK = 16
+
+
+class _MappingOwner:
+    def __init__(self, mapping: mmap.mmap) -> None:
+        self.mapping: mmap.mmap | None = mapping
+
+    def close(self) -> None:
+        mapping = self.mapping
+        if mapping is None:
+            return
+        self.mapping = None
+        mapping.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except BufferError:
+            pass
 
 
 @dataclass
@@ -29,18 +48,16 @@ class MappedBuffer:
     writable: bool
     arena: bool
     invocation_id: int
-    fd: int
-    mapping: mmap.mmap
+    owner: _MappingOwner | None
     base_tensors: dict[str, torch.Tensor] = field(default_factory=dict)
     views: OrderedDict[tuple[object, ...], torch.Tensor] = field(
         default_factory=OrderedDict
     )
 
-    def close(self) -> None:
+    def release(self) -> None:
         self.views.clear()
         self.base_tensors.clear()
-        self.mapping.close()
-        os.close(self.fd)
+        self.owner = None
 
 
 class MappedBufferCache:
@@ -65,9 +82,8 @@ class MappedBufferCache:
                 raise ValueError("Transferred FD size does not match its descriptor")
             access = mmap.ACCESS_WRITE if writable else mmap.ACCESS_READ
             mapping = mmap.mmap(fd, byte_length, access=access)
-        except Exception:
+        finally:
             os.close(fd)
-            raise
         candidate = MappedBuffer(
             generation,
             allocation_id,
@@ -75,18 +91,19 @@ class MappedBufferCache:
             writable,
             arena,
             invocation_id,
-            fd,
-            mapping,
+            _MappingOwner(mapping),
         )
         with self._lock:
             existing = self._buffers.get(buffer_id)
             if existing is not None:
-                candidate.close()
+                candidate.release()
                 if (
                     existing.generation == generation
-                    and (existing.writable or not writable)
+                    and existing.allocation_id == allocation_id
+                    and existing.byte_length == byte_length
+                    and existing.writable == writable
                     and existing.arena == arena
-                    and (arena or existing.allocation_id == allocation_id)
+                    and existing.invocation_id == invocation_id
                 ):
                     return
                 raise ValueError("Existing buffer mapping must be retired before remap")
@@ -105,7 +122,7 @@ class MappedBufferCache:
             if existing.arena:
                 raise ValueError("Cannot retire the shared arena mapping")
             self._buffers.pop(buffer_id)
-        existing.close()
+        existing.release()
 
     def finish_invocation(self, invocation_id: int) -> None:
         with self._lock:
@@ -118,7 +135,7 @@ class MappedBufferCache:
             ]
             buffers = [self._buffers.pop(buffer_id) for buffer_id in expired]
         for buffer in buffers:
-            buffer.close()
+            buffer.release()
 
     def tensor(
         self,
@@ -129,73 +146,86 @@ class MappedBufferCache:
     ) -> torch.Tensor:
         with self._lock:
             buffer = self._buffers.get(int(descriptor.bufferId))
-        if buffer is None:
-            raise ValueError("Tensor references an unmapped buffer")
-        if buffer.generation != int(descriptor.generation):
-            raise ValueError("Tensor references a stale buffer generation")
-        if not buffer.arena and buffer.allocation_id != int(descriptor.allocationId):
-            raise ValueError("Tensor references a stale logical allocation")
-        if require_writable and not buffer.writable:
-            raise ValueError("Tensor output is not mapped writable")
-        if (
-            require_writable
-            and not buffer.arena
-            and buffer.invocation_id != invocation_id
-        ):
-            raise ValueError("Tensor output is outside this invocation")
+            if buffer is None:
+                raise ValueError("Tensor references an unmapped buffer")
+            if buffer.generation != int(descriptor.generation):
+                raise ValueError("Tensor references a stale buffer generation")
+            allocation_id = int(descriptor.allocationId)
+            if not buffer.arena and buffer.allocation_id != allocation_id:
+                raise ValueError("Tensor references a stale logical allocation")
+            if require_writable and not buffer.writable:
+                raise ValueError("Tensor output is not mapped writable")
+            if (
+                require_writable
+                and not buffer.arena
+                and buffer.invocation_id != invocation_id
+            ):
+                raise ValueError("Tensor output is outside this invocation")
 
-        dtype_name = str(descriptor.dtype)
-        try:
-            dtype = _DTYPES[dtype_name]
-        except KeyError:
-            raise TypeError(f"Unsupported tensor dtype: {dtype_name}") from None
-        offset = int(descriptor.offset)
-        byte_length = int(descriptor.byteLength)
-        shape = tuple(int(item) for item in descriptor.shape)
-        byte_strides = tuple(int(item) for item in descriptor.strides)
-        view_key = (offset, byte_length, dtype_name, shape, byte_strides)
-        cached = buffer.views.get(view_key)
-        if cached is not None:
-            buffer.views.move_to_end(view_key)
-            return cached
+            dtype_name = str(descriptor.dtype)
+            try:
+                dtype = _DTYPES[dtype_name]
+            except KeyError:
+                raise TypeError(f"Unsupported tensor dtype: {dtype_name}") from None
+            offset = int(descriptor.offset)
+            byte_length = int(descriptor.byteLength)
+            shape = tuple(int(item) for item in descriptor.shape)
+            byte_strides = tuple(int(item) for item in descriptor.strides)
+            view_key = (
+                allocation_id,
+                offset,
+                byte_length,
+                dtype_name,
+                shape,
+                byte_strides,
+            )
+            cached = buffer.views.get(view_key)
+            if cached is not None:
+                buffer.views.move_to_end(view_key)
+                return cached
 
-        item_size = _ITEM_SIZES[dtype_name]
-        _validate_view(
-            buffer.byte_length,
-            offset,
-            byte_length,
-            item_size,
-            shape,
-            byte_strides,
-        )
+            item_size = _ITEM_SIZES[dtype_name]
+            _validate_view(
+                buffer.byte_length,
+                offset,
+                byte_length,
+                item_size,
+                shape,
+                byte_strides,
+            )
 
-        storage = buffer.base_tensors.get(dtype_name)
-        if storage is None:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="The given buffer is not writable",
-                    category=UserWarning,
-                )
-                storage = torch.frombuffer(buffer.mapping, dtype=dtype)
-            buffer.base_tensors[dtype_name] = storage
-        view = torch.as_strided(
-            storage,
-            shape,
-            tuple(stride // item_size for stride in byte_strides),
-            storage_offset=offset // item_size,
-        )
-        buffer.views[view_key] = view
-        if len(buffer.views) > _MAX_CACHED_VIEWS:
-            buffer.views.popitem(last=False)
-        return view
+            owner = buffer.owner
+            if owner is None or owner.mapping is None:
+                raise RuntimeError("Buffer mapping was retired during tensor creation")
+            storage = buffer.base_tensors.get(dtype_name)
+            if storage is None:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="The given buffer is not writable",
+                        category=UserWarning,
+                    )
+                    storage = torch.frombuffer(owner.mapping, dtype=dtype)
+                storage.untyped_storage()._wmfs_mapping_owner = owner
+                buffer.base_tensors[dtype_name] = storage
+            view = torch.as_strided(
+                storage,
+                shape,
+                tuple(stride // item_size for stride in byte_strides),
+                storage_offset=offset // item_size,
+            )
+            view.untyped_storage()._wmfs_mapping_owner = owner
+            buffer.views[view_key] = view
+            if len(buffer.views) > _MAX_CACHED_VIEWS:
+                buffer.views.popitem(last=False)
+            return view
 
     def close(self) -> None:
         with self._lock:
             buffers = tuple(self._buffers.values())
             self._buffers.clear()
         for buffer in buffers:
-            buffer.close()
+            buffer.release()
 
 
 class FdReceiver:
@@ -229,7 +259,9 @@ class FdReceiver:
         while True:
             try:
                 message, ancillary, flags, _address = self._socket.recvmsg(
-                    _MAX_CONTROL_MESSAGE_BYTES, ancillary_size
+                    _MAX_CONTROL_MESSAGE_BYTES,
+                    ancillary_size,
+                    socket.MSG_CMSG_CLOEXEC,
                 )
             except OSError:
                 return
@@ -302,7 +334,11 @@ def _validate_view(
     shape: tuple[int, ...],
     byte_strides: tuple[int, ...],
 ) -> None:
-    if not shape or any(dimension <= 0 for dimension in shape):
+    if (
+        not shape
+        or len(shape) > _MAX_RANK
+        or any(dimension <= 0 for dimension in shape)
+    ):
         raise ValueError("Tensor shape must be non-empty and positive")
     if len(shape) != len(byte_strides):
         raise ValueError("Tensor shape and strides have different ranks")
