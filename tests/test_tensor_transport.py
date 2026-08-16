@@ -8,23 +8,30 @@ import torch
 
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
-from wmfs.transport.worker_process import WorkerSession, probe_shared_tensor
+from wmfs.transport.worker_process import WorkerSession
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
 
-def test_worker_reads_torch_tensor_from_transferred_memfd() -> None:
+def test_invoke_known_reads_cached_transferred_input() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
-
     with BufferManager() as manager:
-        managed = manager.from_tensor(
-            torch.arange(12, dtype=torch.float64).reshape(3, 4)
-        )
+        source = manager.from_tensor(torch.arange(12, dtype=torch.float64))
+        session = WorkerSession(manifest, manager)
+        try:
+            first, first_metrics = session.invoke_profiled(
+                "add_scalar", source.tensor, 1.0
+            )
+            second, second_metrics = session.invoke_profiled(
+                "add_scalar", source.tensor, 2.0
+            )
 
-        probe = probe_shared_tensor(manifest, managed)
-
-        assert probe.checksum == 66.0
-        assert probe.fd_transfers == 1
+            torch.testing.assert_close(first, source.tensor + 1.0)
+            torch.testing.assert_close(second, source.tensor + 2.0)
+            assert first_metrics.inputs[0].fd_transferred
+            assert not second_metrics.inputs[0].fd_transferred
+        finally:
+            session.close()
 
 
 def test_safe_pool_reuses_memfd_but_transfers_each_generation() -> None:

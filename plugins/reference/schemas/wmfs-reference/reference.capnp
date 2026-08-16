@@ -1,13 +1,12 @@
 @0x8b425a52f499e38a;
 
 using Runtime = import "/wmfs/runtime.capnp";
-using Tensor = import "/wmfs/tensor.capnp";
 
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
   protocolVersion = 8,
-  fingerprint = 0xe7ba5a83d19c4261,
+  fingerprint = 0xaa78411d1a8057f0,
   operations = [
     (
       name = "matmul",
@@ -179,31 +178,4 @@ const pluginMetadata :Runtime.PluginMetadata = (
   ],
 );
 
-interface ReferencePlugin extends(Runtime.Plugin) {
-  tensorChecksum @0 (
-    invocationId :UInt64,
-    tensor :Tensor.TensorDescriptor,
-  ) -> (checksum :Float64);
-  matmul @1 (
-    invocationId :UInt64,
-    a :Tensor.TensorDescriptor,
-    b :Tensor.TensorDescriptor,
-    allocator :Runtime.OutputAllocator,
-  ) -> (result :Tensor.TensorDescriptor);
-  svd @2 (
-    invocationId :UInt64,
-    a :Tensor.TensorDescriptor,
-    fullMatrices :Bool = true,
-    allocator :Runtime.OutputAllocator,
-  ) -> (
-    u :Tensor.TensorDescriptor,
-    s :Tensor.TensorDescriptor,
-    vh :Tensor.TensorDescriptor,
-  );
-  addScalar @3 (
-    invocationId :UInt64,
-    a :Tensor.TensorDescriptor,
-    value :Float64,
-    allocator :Runtime.OutputAllocator,
-  ) -> (result :Tensor.TensorDescriptor);
-}
+interface ReferencePlugin extends(Runtime.Plugin) {}

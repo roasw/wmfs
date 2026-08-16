@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import ctypes
-import inspect
 import socket
 import sys
 from collections.abc import Callable, Mapping
@@ -20,7 +19,6 @@ from wmfs_plugin.metadata import OperationMetadata, metadata_from_reader
 from wmfs_plugin.schema import PROTOCOL_VERSION, load_tensor_schema, schema_root
 
 OperationHandler: TypeAlias = Callable[[InvocationContext], None]
-ExtraServerMethod: TypeAlias = Callable[..., object]
 
 
 @dataclass(frozen=True)
@@ -31,11 +29,7 @@ class _Operation:
     scalar_kinds: tuple[str, ...]
 
 
-def worker_main(
-    operations: Mapping[str, OperationHandler],
-    *,
-    extra_server_methods: Mapping[str, ExtraServerMethod] | None = None,
-) -> None:
+def worker_main(operations: Mapping[str, OperationHandler]) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rpc-fd", type=int, required=True)
     parser.add_argument("--fd-socket-fd", type=int, required=True)
@@ -54,7 +48,6 @@ def worker_main(
                 arguments.schema_import,
                 arguments.interface,
                 operations,
-                extra_server_methods or {},
             )
         )
     )
@@ -67,7 +60,6 @@ async def _serve(
     schema_import_paths: list[Path],
     interface_name: str,
     operations: Mapping[str, OperationHandler],
-    extra_server_methods: Mapping[str, ExtraServerMethod],
 ) -> None:
     imports = [schema_root(), *schema_import_paths]
     plugin_schema = capnp.load(
@@ -87,7 +79,6 @@ async def _serve(
             interface_name,
             mapped_buffers,
             operations,
-            extra_server_methods,
         ),
     )
     try:
@@ -104,7 +95,6 @@ def _make_server(
     interface_name: str,
     mapped_buffers: MappedBufferCache,
     handlers: Mapping[str, OperationHandler],
-    extra_server_methods: Mapping[str, ExtraServerMethod],
 ) -> object:
     metadata = plugin_schema.pluginMetadata
     if int(metadata.protocolVersion) != PROTOCOL_VERSION:
@@ -159,8 +149,6 @@ def _make_server(
             assert metrics is not None
             return (metrics,)
 
-    for name, handler in extra_server_methods.items():
-        setattr(PluginServer, name, _server_method(handler, mapped_buffers))
     return PluginServer()
 
 
@@ -282,16 +270,6 @@ def _decode_scalars(arguments: object, kinds: tuple[str, ...]) -> tuple[object, 
     if any(value is missing for value in values):
         raise ValueError("Invocation is missing a scalar argument")
     return tuple(values)
-
-
-def _server_method(
-    handler: ExtraServerMethod, mapped_buffers: MappedBufferCache
-) -> ExtraServerMethod:
-    async def method(_server: object, *args: object, **kwargs: object) -> object:
-        result = handler(mapped_buffers, *args, **kwargs)
-        return await result if inspect.isawaitable(result) else result
-
-    return method
 
 
 def _glibc_version() -> str:

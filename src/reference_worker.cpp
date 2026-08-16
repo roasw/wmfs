@@ -196,16 +196,6 @@ class ReferenceServer final : public ReferencePlugin::Server {
         return kj::READY_NOW;
     }
 
-    kj::Promise<void> tensorChecksum(TensorChecksumContext context) override {
-        return translate_errors([&] {
-            auto parameters = context.getParams();
-            auto tensor = buffers_.tensor(parameters.getTensor(),
-                                          parameters.getInvocationId());
-            context.getResults().setChecksum(
-                tensor.tensor().sum().item<double>());
-        });
-    }
-
     kj::Promise<void> invokeKnown(InvokeKnownContext context) override {
         return translate_errors(
             [&] { run_known(context.getParams().getInvocation(), false); });

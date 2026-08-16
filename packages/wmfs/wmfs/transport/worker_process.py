@@ -7,7 +7,6 @@ import subprocess
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from time import perf_counter_ns
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -42,12 +41,6 @@ if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
 
 _RPC_TIMEOUT_SECONDS = 30.0
-
-
-@dataclass(frozen=True)
-class TensorProbe:
-    checksum: float
-    fd_transfers: int
 
 
 def _load_runtime_schema() -> ModuleType:
@@ -381,12 +374,6 @@ def inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
     return asyncio.run(capnp.run(_inspect_plugin(manifest)))
 
 
-def probe_shared_tensor(
-    manifest: "PluginManifest", managed_tensor: ManagedTensor
-) -> TensorProbe:
-    return asyncio.run(capnp.run(_probe_shared_tensor(manifest, managed_tensor)))
-
-
 def inspect_worker_environment(
     manifest: "PluginManifest",
 ) -> EnvironmentMetadata:
@@ -440,24 +427,6 @@ async def _validate_worker(plugin: object) -> PluginMetadata:
             f"{runtime_schema.protocolVersion}"
         )
     return metadata
-
-
-async def _probe_shared_tensor(
-    manifest: "PluginManifest", managed_tensor: ManagedTensor
-) -> TensorProbe:
-    async with _worker_connection(manifest) as (plugin, fd_sender):
-        fd_sender.ensure_mapped(managed_tensor.buffer, invocation_id=1, writable=False)
-        fd_sender.ensure_mapped(managed_tensor.buffer, invocation_id=1, writable=False)
-        response = await asyncio.wait_for(
-            plugin.tensorChecksum(
-                invocationId=1, tensor=managed_tensor.descriptor.as_capnp()
-            ),
-            _RPC_TIMEOUT_SECONDS,
-        )
-        return TensorProbe(
-            checksum=float(response.checksum),
-            fd_transfers=fd_sender.transfer_count,
-        )
 
 
 @asynccontextmanager

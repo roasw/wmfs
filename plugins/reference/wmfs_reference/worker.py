@@ -1,7 +1,6 @@
 import torch
 
 from wmfs_plugin import InvocationContext, worker_main
-from wmfs_plugin.fd_transport import MappedBufferCache
 from wmfs_reference import kernels
 
 
@@ -63,17 +62,6 @@ def _add_scalar_vjp(context: InvocationContext) -> None:
     kernels.add_scalar_vjp(result_cotangent, out=a_gradient)
 
 
-def _tensor_checksum(
-    mapped_buffers: MappedBufferCache,
-    invocationId: int,
-    tensor: object,
-    _context: object,
-    **_kwargs: object,
-) -> tuple[float]:
-    value = mapped_buffers.tensor(tensor, invocation_id=invocationId).sum().item()
-    return (float(value),)
-
-
 def _validate_output(
     output: torch.Tensor, shape: tuple[int, ...], dtype: torch.dtype
 ) -> None:
@@ -89,8 +77,7 @@ def main() -> None:
             "add_scalar": _add_scalar,
             "matmul_vjp": _matmul_vjp,
             "add_scalar_vjp": _add_scalar_vjp,
-        },
-        extra_server_methods={"tensorChecksum": _tensor_checksum},
+        }
     )
 
 
