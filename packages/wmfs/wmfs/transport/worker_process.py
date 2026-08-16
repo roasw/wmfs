@@ -134,7 +134,7 @@ class WorkerSession:
         self._buffers = buffers
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
-        self._submit_lock = threading.Lock()
+        self._submit_lock = threading.RLock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._plugin: object | None = None
         self._operations: dict[str, OperationMetadata] = {}
@@ -179,22 +179,24 @@ class WorkerSession:
         return result, metrics
 
     def ping(self) -> None:
-        if self._closed or self._loop is None:
-            raise RuntimeError("Worker session is closed")
-        if threading.current_thread() is self._thread:
-            raise RuntimeError("Worker session cannot synchronously call itself")
-        future = asyncio.run_coroutine_threadsafe(self._ping(), self._loop)
-        future.result(timeout=_RPC_TIMEOUT_SECONDS)
+        with self._submit_lock:
+            if self._closed or self._loop is None:
+                raise RuntimeError("Worker session is closed")
+            if threading.current_thread() is self._thread:
+                raise RuntimeError("Worker session cannot synchronously call itself")
+            future = asyncio.run_coroutine_threadsafe(self._ping(), self._loop)
+            future.result(timeout=_RPC_TIMEOUT_SECONDS)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        if self._loop is not None and self._shutdown is not None:
-            self._loop.call_soon_threadsafe(self._shutdown.set)
-        self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
-        if self._thread.is_alive():
-            raise RuntimeError("Worker session did not stop")
+        with self._submit_lock:
+            if self._closed:
+                return
+            self._closed = True
+            if self._loop is not None and self._shutdown is not None:
+                self._loop.call_soon_threadsafe(self._shutdown.set)
+            self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+            if self._thread.is_alive():
+                raise RuntimeError("Worker session did not stop")
 
     def _run(self) -> None:
         try:

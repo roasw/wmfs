@@ -1,3 +1,5 @@
+import threading
+
 from wmfs.memory import BufferManager
 from wmfs.plugins import PluginManifest
 from wmfs.registry import OperationRegistry
@@ -22,6 +24,10 @@ class IsolatedBackend:
         self._manifests = {manifest.name: manifest for manifest in manifests}
         self._control_mode = control_mode
         self._sessions: dict[str, WorkerSession | NativeWorkerSession] = {}
+        self._condition = threading.Condition()
+        self._creating: set[str] = set()
+        self._inflight = 0
+        self._state = "open"
 
     def invoke(
         self,
@@ -32,24 +38,80 @@ class IsolatedBackend:
         **kwargs: object,
     ) -> object:
         plugin_name = self._registry.plugin_for_operation(operation)
-        session = self._sessions.get(plugin_name)
-        if session is None:
-            use_native = self._control_mode == "native" or (
-                self._control_mode == "auto" and native_available()
-            )
-            if use_native:
-                session = NativeWorkerSession(
-                    self._manifests[plugin_name],
-                    self._buffers,
-                    self._registry.plugin(plugin_name),
-                )
-            else:
-                session = WorkerSession(self._manifests[plugin_name], self._buffers)
-            self._sessions[plugin_name] = session
-        return session.invoke(operation, *args, out=out, **kwargs)
+        session = self._acquire_session(plugin_name)
+        try:
+            return session.invoke(operation, *args, out=out, **kwargs)
+        finally:
+            with self._condition:
+                self._inflight -= 1
+                self._condition.notify_all()
 
     def close(self) -> None:
-        for session in self._sessions.values():
+        with self._condition:
+            if self._state == "closed":
+                return
+            if self._state == "closing":
+                self._condition.wait_for(lambda: self._state == "closed")
+                return
+            self._state = "closing"
+            self._condition.wait_for(lambda: self._inflight == 0 and not self._creating)
+            sessions = tuple(self._sessions.values())
+            self._sessions.clear()
+        try:
+            for session in sessions:
+                session.close()
+            self._buffers.close()
+        finally:
+            with self._condition:
+                self._state = "closed"
+                self._condition.notify_all()
+
+    def _acquire_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+        with self._condition:
+            while True:
+                if self._state != "open":
+                    raise RuntimeError("Isolated backend is closed")
+                session = self._sessions.get(plugin_name)
+                if session is not None:
+                    self._inflight += 1
+                    return session
+                if plugin_name not in self._creating:
+                    self._creating.add(plugin_name)
+                    break
+                self._condition.wait()
+
+        try:
+            session = self._new_session(plugin_name)
+        except BaseException:
+            with self._condition:
+                self._creating.remove(plugin_name)
+                self._condition.notify_all()
+            raise
+
+        with self._condition:
+            if self._state == "open":
+                self._sessions[plugin_name] = session
+                self._creating.remove(plugin_name)
+                self._inflight += 1
+                self._condition.notify_all()
+                return session
+
+        try:
             session.close()
-        self._sessions.clear()
-        self._buffers.close()
+        finally:
+            with self._condition:
+                self._creating.remove(plugin_name)
+                self._condition.notify_all()
+        raise RuntimeError("Isolated backend is closed")
+
+    def _new_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+        use_native = self._control_mode == "native" or (
+            self._control_mode == "auto" and native_available()
+        )
+        if use_native:
+            return NativeWorkerSession(
+                self._manifests[plugin_name],
+                self._buffers,
+                self._registry.plugin(plugin_name),
+            )
+        return WorkerSession(self._manifests[plugin_name], self._buffers)

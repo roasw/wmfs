@@ -1,4 +1,5 @@
 import gc
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -109,6 +110,32 @@ def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
                 assert invocation.result(timeout=2) is output
             torch.testing.assert_close(output, source.tensor + 2.0)
         finally:
+            session.close()
+
+
+def test_python_session_close_waits_for_active_submission() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    with BufferManager() as manager:
+        session = WorkerSession(manifest, manager)
+        session._submit_lock.acquire()
+        submit_lock_held = True
+        started = threading.Event()
+
+        def close() -> None:
+            started.set()
+            session.close()
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                closing = executor.submit(close)
+                assert started.wait(2)
+                assert not closing.done()
+                session._submit_lock.release()
+                submit_lock_held = False
+                closing.result(timeout=2)
+        finally:
+            if submit_lock_held:
+                session._submit_lock.release()
             session.close()
 
 
