@@ -1,4 +1,5 @@
 #include "wmfs/native/session.hpp"
+#include "wmfs/unique_fd.hpp"
 
 #include <capnp/message.h>
 #include <capnp/rpc-twoparty.h>
@@ -52,32 +53,6 @@ struct MappingKeyHash {
     }
 };
 
-class OwnedFd {
-  public:
-    explicit OwnedFd(int fd = -1) : fd_(fd) {}
-    ~OwnedFd() {
-        if (fd_ >= 0) {
-            ::close(fd_);
-        }
-    }
-    OwnedFd(const OwnedFd &) = delete;
-    OwnedFd &operator=(const OwnedFd &) = delete;
-    OwnedFd(OwnedFd &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-    int get() const { return fd_; }
-    int release() { return std::exchange(fd_, -1); }
-
-  private:
-    int fd_;
-};
-
-int duplicate_fd(int fd) {
-    const int duplicate = ::dup(fd);
-    if (duplicate < 0) {
-        throw std::runtime_error("Failed to duplicate native session socket");
-    }
-    return duplicate;
-}
-
 void set_socket_timeout(int fd) {
     constexpr timeval timeout{30, 0};
     if (::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) <
@@ -128,7 +103,7 @@ std::runtime_error kj_error(const kj::Exception &error) {
 
 struct Session::Impl {
     struct Worker {
-        explicit Worker(OwnedFd rpc_fd, OwnedFd control_fd,
+        explicit Worker(UniqueFd rpc_fd, UniqueFd control_fd,
                         std::uint64_t expected_fingerprint)
             : control_fd(std::move(control_fd)), io(kj::setupAsyncIo()),
               stream(io.lowLevelProvider->wrapSocketFd(
@@ -340,7 +315,7 @@ struct Session::Impl {
             }
         }
 
-        OwnedFd control_fd;
+        UniqueFd control_fd;
         kj::AsyncIoContext io;
         kj::Own<kj::AsyncIoStream> stream;
         capnp::TwoPartyClient client;
@@ -359,8 +334,8 @@ struct Session::Impl {
 
     Impl(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint)
         : rpc_fd(rpc_fd), control_fd(control_fd),
-          interrupt_rpc_fd(duplicate_fd(rpc_fd)),
-          interrupt_control_fd(duplicate_fd(control_fd)),
+          interrupt_rpc_fd(this->rpc_fd.duplicate_cloexec()),
+          interrupt_control_fd(this->control_fd.duplicate_cloexec()),
           expected_fingerprint(expected_fingerprint),
           thread([this] { run(); }) {
         startup_complete.acquire();
@@ -479,10 +454,10 @@ struct Session::Impl {
         }
     }
 
-    OwnedFd rpc_fd;
-    OwnedFd control_fd;
-    OwnedFd interrupt_rpc_fd;
-    OwnedFd interrupt_control_fd;
+    UniqueFd rpc_fd;
+    UniqueFd control_fd;
+    UniqueFd interrupt_rpc_fd;
+    UniqueFd interrupt_control_fd;
     std::uint64_t expected_fingerprint;
     std::binary_semaphore startup_complete{0};
     std::binary_semaphore command_ready{0};
@@ -537,7 +512,7 @@ void Session::map_buffer(const Mapping &mapping, int fd) {
 
 std::vector<bool>
 Session::map_buffers(std::vector<std::pair<Mapping, int>> requested) {
-    std::vector<OwnedFd> owned_fds;
+    std::vector<UniqueFd> owned_fds;
     owned_fds.reserve(requested.size());
     for (const auto &item : requested)
         owned_fds.emplace_back(item.second);

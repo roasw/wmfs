@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.26)
 
 project(wmfs LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -17,6 +19,15 @@ set(
   CACHE STRING
   "Semicolon-separated plugins to compile into the in-process backend"
 )
+
+if(BUILD_TESTING)
+  add_executable(wmfs-unique-fd-test tests/unique_fd_test.cpp)
+  target_include_directories(
+    wmfs-unique-fd-test
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+  )
+  add_test(NAME wmfs-unique-fd COMMAND wmfs-unique-fd-test)
+endif()
 
 set(WMFS_BUNDLE_REFERENCE OFF)
 foreach(plugin IN LISTS WMFS_BUNDLED_PLUGINS)

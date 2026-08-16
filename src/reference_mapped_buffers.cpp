@@ -1,4 +1,5 @@
 #include "wmfs/reference/mapped_buffers.hpp"
+#include "wmfs/unique_fd.hpp"
 
 #include <ATen/ops/from_blob.h>
 #include <capnp/message.h>
@@ -28,27 +29,6 @@ namespace {
 
 constexpr std::size_t MAX_CONTROL_MESSAGE_BYTES = 64 * 1024;
 constexpr std::size_t MAX_CACHED_VIEWS = 64;
-
-class OwnedFd {
-  public:
-    explicit OwnedFd(int fd = -1) : fd_(fd) {}
-    ~OwnedFd() {
-        if (fd_ >= 0) {
-            ::close(fd_);
-        }
-    }
-
-    OwnedFd(const OwnedFd &) = delete;
-    OwnedFd &operator=(const OwnedFd &) = delete;
-
-    OwnedFd(OwnedFd &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-
-    [[nodiscard]] int get() const noexcept { return fd_; }
-    [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
-
-  private:
-    int fd_;
-};
 
 [[noreturn]] void fail(const std::string &message) {
     throw std::runtime_error(message);
@@ -133,8 +113,8 @@ void send_acknowledgement(int socket_fd, std::uint64_t transfer_id,
     }
 }
 
-std::vector<OwnedFd> extract_descriptors(msghdr &message) {
-    std::vector<OwnedFd> descriptors;
+std::vector<UniqueFd> extract_descriptors(msghdr &message) {
+    std::vector<UniqueFd> descriptors;
     for (auto *item = CMSG_FIRSTHDR(&message); item != nullptr;
          item = CMSG_NXTHDR(&message, item)) {
         if (item->cmsg_level != SOL_SOCKET || item->cmsg_type != SCM_RIGHTS)
@@ -172,7 +152,7 @@ MappedBufferCache::MappedBufferCache() : impl_(std::make_unique<Impl>()) {}
 MappedBufferCache::~MappedBufferCache() { close(); }
 
 void MappedBufferCache::map(MappingSpec spec, int raw_fd) {
-    OwnedFd fd(raw_fd);
+    UniqueFd fd(raw_fd);
     if (spec.byte_length == 0 ||
         spec.byte_length > std::numeric_limits<std::size_t>::max()) {
         fail("Transferred buffer has an invalid byte length");
