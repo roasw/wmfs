@@ -6,7 +6,7 @@ build-backend = "scikit_build_core.build"
 name = "wmfs"
 version = "0.1.0"
 description = "Process-isolated scientific computing runtime prototype"
-readme = "../../README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["numpy", "pycapnp", "torch>=2.1", "wmfs-plugin==0.1.0"]
 
@@ -14,7 +14,20 @@ dependencies = ["numpy", "pycapnp", "torch>=2.1", "wmfs-plugin==0.1.0"]
 wmfs-benchmark = "wmfs.benchmark:main"
 
 [tool.scikit-build]
-wheel.packages = ["wmfs"]
+wheel.packages = ["packages/wmfs/wmfs"]
 cmake.build-type = "Release"
-cmake.source-dir = "../.."
 install.components = ["runtime"]
+
+[tool.scikit-build.sdist]
+include = [
+    "/CMakeLists.txt",
+    "/README.md",
+    "/inc/**",
+    "/packages/wmfs/wmfs/**",
+    "/packages/wmfs-plugin/wmfs_plugin/schemas/**",
+    "/plugins/reference/generated/**",
+    "/plugins/reference/schemas/**",
+    "/src/**",
+    "/tests/**",
+]
+exclude = ["**/__pycache__/**"]

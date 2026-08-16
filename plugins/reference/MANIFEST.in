@@ -1,0 +1,3 @@
+include README.md
+include plugin.toml
+recursive-include schemas *.capnp

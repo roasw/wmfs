@@ -4,6 +4,7 @@
 }:
 let
   workers = import ./reference-workers.nix { inherit pkgs source; };
+  failureWorker = ../tests/fixtures/failure_worker.py;
   buildRuntime =
     {
       bundled ? false,
@@ -13,9 +14,6 @@ let
       version = "0.1.0";
       pyproject = true;
       src = source;
-      postUnpack = ''
-        sourceRoot="$sourceRoot/packages/wmfs"
-      '';
 
       build-system = [
         pkgs.python3Packages.nanobind
@@ -53,8 +51,13 @@ let
       '';
       checkPhase = ''
         runHook preCheck
+        cd "$NIX_BUILD_TOP/$sourceRoot"
+        mkdir -p tests/fixtures
+        cp ${failureWorker} tests/fixtures/failure_worker.py
+        chmod u+wx tests/fixtures/failure_worker.py
+        patchShebangs tests/fixtures/failure_worker.py
         for layer in ${if bundled then "contract package" else "unit contract integration native"}; do
-          pytest -c ../../pytest.ini -m "$layer" ../../tests
+          pytest -c pytest.ini -m "$layer" tests
         done
         runHook postCheck
       '';

@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "wmfs-reference"
 version = "0.1.0"
 description = "Reference numerical plugin for wmfs"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["torch>=2.1", "wmfs-plugin==0.1.0"]
 

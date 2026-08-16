@@ -83,6 +83,10 @@
           benchmark-package = benchmark;
           plugin-package = self.packages.${system}.wmfs-plugin;
           python-worker-package = self.packages.${system}.reference-python-worker;
+          python-artifacts = import ./nix/artifacts-check.nix {
+            inherit pkgs;
+            source = ./.;
+          };
 
           python-worker =
             pkgs.runCommand "wmfs-python-worker-check" { nativeBuildInputs = [ pythonWorker ]; }
