@@ -1,10 +1,11 @@
 {
   pkgs,
   source ? ../.,
+  versions,
 }:
 let
-  releaseVersion = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
-  workers = import ./reference-workers.nix { inherit pkgs source; };
+  version = versions.python;
+  workers = import ./reference-workers.nix { inherit pkgs source versions; };
   failureWorker = ../tests/fixtures/failure_worker.py;
   buildRuntime =
     {
@@ -12,13 +13,16 @@ let
     }:
     pkgs.python3Packages.buildPythonPackage {
       pname = "wmfs";
-      version = releaseVersion;
+      inherit version;
       pyproject = true;
       src = source;
+      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS = version;
+      WMFS_GIT_VERSION = versions.git;
 
       build-system = [
         pkgs.python3Packages.nanobind
         pkgs.python3Packages.scikit-build-core
+        pkgs.python3Packages.setuptools-scm
       ];
       nativeBuildInputs = [
         pkgs.capnproto
@@ -32,7 +36,10 @@ let
         pkgs.python3Packages.torch.dev
         pkgs.python3Packages.torch.lib
       ];
-      cmakeFlags = pkgs.lib.optionals bundled [
+      cmakeFlags = [
+        "-DWMFS_VERSION=${versions.git}"
+      ]
+      ++ pkgs.lib.optionals bundled [
         "-DWMFS_BUNDLED_PLUGINS=reference"
       ];
       dontUseCmakeConfigure = true;
@@ -63,6 +70,7 @@ let
         runHook postCheck
       '';
       pythonImportsCheck = [ "wmfs" ];
+      passthru.gitVersion = versions.git;
     };
   bundledRuntime = buildRuntime { bundled = true; };
   bundledTestPython = pkgs.python3.withPackages (ps: [

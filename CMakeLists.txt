@@ -1,8 +1,37 @@
 cmake_minimum_required(VERSION 3.26)
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.json" WMFS_RELEASE_METADATA)
-string(JSON WMFS_RELEASE_VERSION GET "${WMFS_RELEASE_METADATA}" version)
-project(wmfs VERSION "${WMFS_RELEASE_VERSION}" LANGUAGES CXX)
+if(NOT WMFS_VERSION)
+  if(DEFINED ENV{WMFS_GIT_VERSION})
+    set(WMFS_VERSION "$ENV{WMFS_GIT_VERSION}")
+  else()
+    find_package(Git QUIET)
+    if(Git_FOUND)
+      execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE WMFS_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      execute_process(
+        COMMAND "${GIT_EXECUTABLE}" status --porcelain
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE WMFS_GIT_STATUS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      if(WMFS_VERSION AND WMFS_GIT_STATUS)
+        string(APPEND WMFS_VERSION "-dirty")
+      endif()
+    endif()
+  endif()
+endif()
+if(NOT WMFS_VERSION)
+  set(WMFS_VERSION "unknown")
+endif()
+
+project(wmfs LANGUAGES CXX)
+message(STATUS "WMFS version: ${WMFS_VERSION}")
 
 include(CTest)
 
@@ -33,6 +62,7 @@ if(WMFS_BUILD_DOCUMENTATION)
       "${CMAKE_COMMAND}" -E env
       "WMFS_CMAKE_COMMAND=${CMAKE_COMMAND}"
       "WMFS_DOXYGEN_EXECUTABLE=${DOXYGEN_EXECUTABLE}"
+      "WMFS_GIT_VERSION=${WMFS_VERSION}"
       "WMFS_SPHINX_EXECUTABLE=${WMFS_SPHINX_EXECUTABLE}"
       "${WMFS_BASH_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/docs/build.sh"

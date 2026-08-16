@@ -1,14 +1,19 @@
 {
   pkgs,
   source ? ../.,
+  version,
 }:
 pkgs.python3Packages.buildPythonPackage {
   pname = "wmfs-plugin";
-  version = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
+  inherit version;
   pyproject = true;
   src = source + "/packages/wmfs-plugin";
+  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_PLUGIN = version;
 
-  build-system = [ pkgs.python3Packages.setuptools ];
+  build-system = [
+    pkgs.python3Packages.setuptools
+    pkgs.python3Packages.setuptools-scm
+  ];
   dependencies = with pkgs.python3Packages; [
     numpy
     pycapnp

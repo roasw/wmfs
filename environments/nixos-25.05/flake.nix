@@ -22,8 +22,12 @@
         path = wmfs.outPath;
         name = "wmfs-source";
       };
+      versions = {
+        git = wmfs.packages.${system}.default.gitVersion;
+        python = wmfs.packages.${system}.default.version;
+      };
       workers = import (source + "/nix/reference-workers.nix") {
-        inherit pkgs source;
+        inherit pkgs source versions;
       };
       inherit (workers) reference-python-worker reference-worker wmfs-plugin;
 

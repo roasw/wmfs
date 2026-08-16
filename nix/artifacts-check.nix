@@ -1,9 +1,10 @@
 {
   pkgs,
   source ? ../.,
+  versions,
 }:
 let
-  releaseVersion = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
+  releaseVersion = versions.python;
   python = pkgs.python3.withPackages (
     ps: with ps; [
       build
@@ -13,6 +14,7 @@ let
       pip
       scikit-build-core
       setuptools
+      setuptools-scm
       torch
       virtualenv
     ]
@@ -20,6 +22,10 @@ let
 in
 pkgs.runCommand "wmfs-python-artifacts-check"
   {
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS = releaseVersion;
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_PLUGIN = releaseVersion;
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_REFERENCE = releaseVersion;
+    WMFS_GIT_VERSION = versions.git;
     nativeBuildInputs = [
       python
       pkgs.capnproto
@@ -61,7 +67,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "CMakeLists.txt",
             "README.md",
             "pyproject.toml",
-            "version.json",
             "inc/wmfs/unique_fd.hpp",
             "packages/wmfs/wmfs/__init__.py",
             "packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp",
@@ -97,8 +102,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         missing = required - members
         assert not missing, f"{archive.name} is missing {sorted(missing)}"
         assert "Version: ${releaseVersion}\n" in pkg_info
-        if distribution in {"runtime", "reference"}:
-            assert "Requires-Dist: wmfs-plugin==${releaseVersion}\n" in pkg_info
     PY
 
     for distribution in runtime plugin reference; do
@@ -111,9 +114,10 @@ pkgs.runCommand "wmfs-python-artifacts-check"
       --outdir "$work/wheel/plugin" "$work/extracted/plugin"
     python -m build --no-isolation --wheel \
       --outdir "$work/wheel/reference" "$work/extracted/reference"
-    python -m build --no-isolation --wheel \
+    CMAKE_ARGS=-DWMFS_VERSION=${versions.git} \
+      python -m build --no-isolation --wheel \
       --outdir "$work/wheel/runtime" "$work/extracted/runtime"
-    CMAKE_ARGS=-DWMFS_BUNDLED_PLUGINS=reference \
+    CMAKE_ARGS="-DWMFS_VERSION=${versions.git} -DWMFS_BUNDLED_PLUGINS=reference" \
       python -m build --no-isolation --wheel \
         --outdir "$work/wheel/bundled" "$work/extracted/runtime"
 
@@ -144,8 +148,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             metadata_name = next(name for name in members if name.endswith(".dist-info/METADATA"))
             metadata = package.read(metadata_name).decode()
         assert "Version: ${releaseVersion}\n" in metadata
-        if distribution in {"runtime", "reference", "bundled"}:
-            assert "Requires-Dist: wmfs-plugin==${releaseVersion}\n" in metadata
         for fragment in fragments:
             assert any(fragment in member for member in members), (
                 f"{archive.name} is missing {fragment}"
@@ -188,7 +190,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     ):
         assert importlib.metadata.version(distribution) == expected_version
         assert module.__version__ == expected_version
-    assert PLUGIN_VERSION == expected_version
     assert (schema_root() / "wmfs" / "tensor.capnp").is_file()
     assert int(load_runtime_schema().protocolVersion) > 0
     scripts = {
@@ -202,12 +203,12 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     assert scripts["wmfs-reference-worker"] == "wmfs_reference.worker:main"
     plugin_root = Path(sys.prefix) / "share/wmfs/plugins/reference"
     manifest = find_manifests([plugin_root])[0]
-    assert manifest.version == expected_version
+    assert PLUGIN_VERSION == manifest.version
     assert manifest.schema_path.is_file()
     reference_schema = capnp.load(
         str(manifest.schema_path), imports=[str(schema_root()), str(manifest.schema_path.parent.parent)]
     )
-    assert str(reference_schema.pluginMetadata.version) == expected_version
+    assert str(reference_schema.pluginMetadata.version) == manifest.version
     assert (Path(sys.prefix) / "bin/wmfs-reference-worker").is_file()
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     runtime.use_backend("local")

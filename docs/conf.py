@@ -1,5 +1,5 @@
-import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -9,7 +9,33 @@ sys.path.insert(0, str(ROOT / "packages" / "wmfs-plugin"))
 
 project = "WMFS"
 author = "WMFS contributors"
-version = json.loads((ROOT / "version.json").read_text())["version"]
+
+
+def git_version() -> str:
+    configured = os.environ.get("WMFS_GIT_VERSION")
+    if configured:
+        return configured
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return revision + ("-dirty" if dirty else "")
+
+
+version = git_version()
 release = version
 
 extensions = [

@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "wmfs-reference"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Reference numerical plugin for wmfs"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["torch>=2.1", "wmfs-plugin==0.1.0"]
+dependencies = ["torch>=2.1", "wmfs-plugin"]
 
 [project.scripts]
 wmfs-reference-worker = "wmfs_reference.worker:main"
@@ -21,3 +21,6 @@ include = ["wmfs_reference*"]
 "share/wmfs/plugins/reference/schemas/wmfs-reference" = [
     "schemas/wmfs-reference/reference.capnp",
 ]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0+gunknown"

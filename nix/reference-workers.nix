@@ -1,22 +1,27 @@
 {
   pkgs,
   source ? ../.,
+  versions,
 }:
 let
-  releaseVersion = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
+  version = versions.python;
   pluginSrc = source + "/plugins/reference";
-  wmfsPlugin = import ./wmfs-plugin.nix { inherit pkgs source; };
+  wmfsPlugin = import ./wmfs-plugin.nix { inherit pkgs source version; };
 in
 {
   wmfs-plugin = wmfsPlugin;
 
   reference-python-worker = pkgs.python3Packages.buildPythonApplication {
     pname = "wmfs-reference";
-    version = releaseVersion;
+    inherit version;
     pyproject = true;
     src = pluginSrc;
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_REFERENCE = version;
 
-    build-system = [ pkgs.python3Packages.setuptools ];
+    build-system = [
+      pkgs.python3Packages.setuptools
+      pkgs.python3Packages.setuptools-scm
+    ];
     dependencies = [
       pkgs.python3Packages.torch
       wmfsPlugin
@@ -34,8 +39,9 @@ in
 
   reference-worker = pkgs.stdenv.mkDerivation {
     pname = "wmfs-reference-worker";
-    version = releaseVersion;
+    inherit version;
     src = source;
+    WMFS_GIT_VERSION = versions.git;
 
     nativeBuildInputs = with pkgs; [
       capnproto
@@ -48,6 +54,7 @@ in
       pkgs.python3Packages.torch.lib
     ];
     cmakeFlags = [
+      "-DWMFS_VERSION=${versions.git}"
       "-DWMFS_BUILD_PYTHON_RUNTIME=OFF"
       "-DWMFS_BUILD_REFERENCE_WORKER=ON"
       "-DWMFS_BUNDLED_PLUGINS="

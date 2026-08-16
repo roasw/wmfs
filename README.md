@@ -52,6 +52,13 @@ just test
 just test-release
 ```
 
+Build versions come from the current Git revision. CMake and documentation use
+the short revision directly, for example `50c505e17aac-dirty`. Python package
+metadata uses the equivalent PEP 440 form, such as
+`0.0.0+g50c505e17aac.dirty`. Nix obtains the revision from `self.rev` or
+`self.dirtyRev`; the development shell exports the same values for local
+builds.
+
 `just test` and `just test-all` build once and run every test layer. Use
 `just test-unit`, `just test-contract`, `just test-integration`, `just test-sdk`,
 `just test-native`, or `just test-package` to run one layer independently.
@@ -63,7 +70,7 @@ descriptors; `--help` only verifies the executable outside an invocation.
 
 The unified Sphinx site renders Python docstrings with autodoc, C++ Doxygen XML
 with Breathe, and architecture guides written in MyST Markdown. Build it with
-the reproducible documentation shell:
+the reproducible default development shell:
 
 ```console
 nix develop -c just doc
