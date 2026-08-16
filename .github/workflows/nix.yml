@@ -1,0 +1,64 @@
+name: Nix CI and documentation
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nix-pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check root flake
+        run: nix flake check -L
+      - name: Check pinned worker environment
+        run: nix flake check ./environments/nixos-25.05 -L
+      - name: Build documentation site
+        run: |
+          nix build .#checks.x86_64-linux.documentation --out-link docs-result
+          mkdir site
+          cp -RL docs-result/. site/
+      - name: Upload documentation site
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: site
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    name: Publish documentation
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Download documentation site
+        uses: actions/download-artifact@v4
+        with:
+          name: documentation-site
+          path: site
+      - name: Publish documentation
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./site
+          force_orphan: true

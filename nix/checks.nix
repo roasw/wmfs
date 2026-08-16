@@ -27,6 +27,18 @@ in
     hooks = {
       nixfmt.enable = true;
 
+      actionlint = {
+        enable = true;
+        entry = "${pkgs.actionlint}/bin/actionlint";
+        files = "^\\.github/workflows/.*\\.ya?ml$";
+      };
+
+      yamlfmt = {
+        enable = true;
+        entry = "${pkgs.yamlfmt}/bin/yamlfmt";
+        files = "\\.ya?ml$";
+      };
+
       just-fmt = {
         enable = true;
         entry = "${pkgs.just}/bin/just --fmt --check";

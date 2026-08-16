@@ -1,5 +1,7 @@
 # wmfs
 
+Documentation: <https://roasw.github.io/wmfs/>
+
 `wmfs` is a prototype scientific-computing runtime for transparently running
 selected Python function calls in isolated worker processes. Its low-latency
 path uses a C++20 runtime bound with nanobind, Cap'n Proto C++ RPC, shared CPU
