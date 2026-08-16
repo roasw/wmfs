@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from wmfs import add_scalar, matmul, runtime, svd
+from wmfs import add_scalar, empty, matmul, ones, randn, runtime, svd, zeros
 from wmfs.runtime import Runtime
 
 
@@ -35,6 +35,35 @@ def test_add_scalar_matches_torch() -> None:
     a = torch.tensor([-1.0, 0.0, 2.0])
 
     torch.testing.assert_close(add_scalar(a, 1.5), torch.add(a, 1.5))
+
+
+def test_local_tensor_constructors_return_native_torch_tensors() -> None:
+    runtime.use_backend("local")
+
+    uninitialized = empty(2, 3, dtype=torch.float64)
+    zeroed = zeros((2, 3), dtype=torch.float64)
+    filled = ones(torch.Size((2, 3)), requires_grad=True)
+    generator = torch.Generator().manual_seed(7)
+    random = randn(2, 3, generator=generator)
+    expected_random = torch.randn(2, 3, generator=torch.Generator().manual_seed(7))
+
+    assert uninitialized.shape == (2, 3)
+    assert uninitialized.dtype == torch.float64
+    torch.testing.assert_close(zeroed, torch.zeros((2, 3), dtype=torch.float64))
+    torch.testing.assert_close(filled, torch.ones((2, 3)))
+    torch.testing.assert_close(random, expected_random)
+    assert filled.requires_grad
+    assert not hasattr(uninitialized.untyped_storage(), "_wmfs_allocation")
+
+
+def test_tensor_constructors_support_scalar_shapes() -> None:
+    runtime.use_backend("local")
+    scalar = ones(())
+
+    assert scalar.shape == ()
+    assert scalar.item() == 1
+    with pytest.raises(TypeError, match="required size"):
+        ones()
 
 
 def test_local_operations_support_reusable_outputs() -> None:

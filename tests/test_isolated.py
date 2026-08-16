@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from wmfs import add_scalar, matmul, runtime, svd
+from wmfs import add_scalar, matmul, randn, runtime, svd
 from wmfs.runtime import Runtime
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
@@ -38,6 +38,59 @@ def test_isolated_add_scalar_reuses_managed_input(isolated_runtime: None) -> Non
     torch.testing.assert_close(second, source + 3.0)
     assert hasattr(first, "_wmfs_allocation")
     assert hasattr(second, "_wmfs_allocation")
+
+
+def test_isolated_constructor_allocates_directly_in_shared_memory(
+    isolated_runtime: None,
+) -> None:
+    generator = torch.Generator().manual_seed(7)
+    source = randn(2, 3, requires_grad=True, generator=generator)
+    expected = torch.randn(2, 3, generator=torch.Generator().manual_seed(7))
+
+    torch.testing.assert_close(source, expected)
+    assert source.requires_grad
+    assert hasattr(source.untyped_storage(), "_wmfs_allocation")
+
+    add_scalar(source, 1.0).sum().backward()
+    torch.testing.assert_close(source.grad, torch.ones_like(source))
+
+
+@pytest.mark.parametrize("control_mode", ["native", "python"])
+def test_isolated_constructors_avoid_invocation_ingress_copy(
+    monkeypatch: pytest.MonkeyPatch, control_mode: str
+) -> None:
+    candidate = Runtime()
+    candidate.configure_control(control_mode)
+    candidate.discover_plugins(PLUGIN_DIRECTORY)
+    candidate.use_backend("isolated")
+    try:
+        source = candidate.ones(2, 3, dtype=torch.float64)
+        output = candidate.empty(2, 3, dtype=torch.float64)
+        backend = candidate._backends["isolated"]
+        buffers = backend._buffers
+        assert buffers.managed(source) is not None
+        assert buffers.managed(output) is not None
+        before = buffers.stats()
+
+        def reject_copy(_tensor: torch.Tensor) -> None:
+            raise AssertionError("managed input unexpectedly used the copy path")
+
+        monkeypatch.setattr(buffers, "from_tensor", reject_copy)
+        assert candidate.invoke("add_scalar", source, 1.5, out=output) is output
+
+        after = buffers.stats()
+        torch.testing.assert_close(output, torch.full((2, 3), 2.5, dtype=torch.float64))
+        assert after["allocation_requests"] == before["allocation_requests"]
+        assert after["memfds_created"] == before["memfds_created"]
+    finally:
+        candidate.close()
+
+
+def test_isolated_constructor_rejects_non_cpu_device(isolated_runtime: None) -> None:
+    with pytest.raises(ValueError, match="CPU"):
+        runtime.zeros(2, device="cuda")
+    with pytest.raises(ValueError, match="non-empty"):
+        runtime.zeros(())
 
 
 def test_isolated_add_scalar_matches_dtype_promotion(isolated_runtime: None) -> None:

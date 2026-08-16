@@ -4,11 +4,14 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Protocol
 
+import torch
+
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
+from wmfs.tensors import Size, TensorFactory, normalize_shape
 from wmfs.transport.deadlines import (
     DEFAULT_TRANSPORT_DEADLINES,
     TransportDeadlines,
@@ -25,6 +28,18 @@ class Backend(Protocol):
         **kwargs: object,
     ) -> object:
         """Invoke a registered operation."""
+
+    def construct_tensor(
+        self,
+        factory: TensorFactory,
+        shape: tuple[int, ...],
+        *,
+        dtype: torch.dtype,
+        device: torch.device | str | None,
+        requires_grad: bool,
+        generator: torch.Generator | None,
+    ) -> torch.Tensor:
+        """Construct a tensor using backend-appropriate storage."""
 
 
 class Runtime:
@@ -191,6 +206,72 @@ class Runtime:
                 )
             self._backend_name = name
 
+    def empty(
+        self,
+        *size: Size,
+        dtype: torch.dtype | None = None,
+        device: torch.device | str | None = None,
+        requires_grad: bool = False,
+    ) -> torch.Tensor:
+        """Create an uninitialized tensor using backend-appropriate storage."""
+        return self._construct_tensor(
+            "empty",
+            size,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+
+    def zeros(
+        self,
+        *size: Size,
+        dtype: torch.dtype | None = None,
+        device: torch.device | str | None = None,
+        requires_grad: bool = False,
+    ) -> torch.Tensor:
+        """Create a zero-filled tensor using backend-appropriate storage."""
+        return self._construct_tensor(
+            "zeros",
+            size,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+
+    def ones(
+        self,
+        *size: Size,
+        dtype: torch.dtype | None = None,
+        device: torch.device | str | None = None,
+        requires_grad: bool = False,
+    ) -> torch.Tensor:
+        """Create a one-filled tensor using backend-appropriate storage."""
+        return self._construct_tensor(
+            "ones",
+            size,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+
+    def randn(
+        self,
+        *size: Size,
+        dtype: torch.dtype | None = None,
+        device: torch.device | str | None = None,
+        requires_grad: bool = False,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """Create a normal random tensor using backend-appropriate storage."""
+        return self._construct_tensor(
+            "randn",
+            size,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            generator=generator,
+        )
+
     def invoke(
         self,
         operation: str,
@@ -215,6 +296,35 @@ class Runtime:
             backend = self._backends[self._backend_name]
         try:
             return backend.invoke(operation, *args, out=out, **kwargs)
+        finally:
+            self._finish_work()
+
+    def _construct_tensor(
+        self,
+        factory: TensorFactory,
+        size: tuple[Size, ...],
+        *,
+        dtype: torch.dtype | None,
+        device: torch.device | str | None,
+        requires_grad: bool,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        shape = normalize_shape(size)
+        effective_dtype = torch.get_default_dtype() if dtype is None else dtype
+        if not isinstance(effective_dtype, torch.dtype):
+            raise TypeError("dtype must be a torch.dtype")
+        with self._condition:
+            self._accept_work()
+            backend = self._backends[self._backend_name]
+        try:
+            return backend.construct_tensor(
+                factory,
+                shape,
+                dtype=effective_dtype,
+                device=device,
+                requires_grad=requires_grad,
+                generator=generator,
+            )
         finally:
             self._finish_work()
 

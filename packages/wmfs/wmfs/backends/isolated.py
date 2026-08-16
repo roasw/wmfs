@@ -6,6 +6,7 @@ from wmfs.autograd import invoke_with_vjp
 from wmfs.memory import BufferManager
 from wmfs.plugins import PluginManifest
 from wmfs.registry import EnvironmentMetadata, OperationRegistry
+from wmfs.tensors import TensorFactory
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.native_worker import NativeWorkerSession, native_available
 from wmfs.transport.worker_process import WorkerSession
@@ -124,6 +125,39 @@ class IsolatedBackend:
                 kwargs,
             )
         return self._invoke_plugin(plugin_name, operation, *args, out=out, **kwargs)
+
+    def construct_tensor(
+        self,
+        factory: TensorFactory,
+        shape: tuple[int, ...],
+        *,
+        dtype: torch.dtype,
+        device: torch.device | str | None,
+        requires_grad: bool,
+        generator: torch.Generator | None,
+    ) -> torch.Tensor:
+        """Construct a tensor directly over runtime-owned shared memory."""
+        target_device = torch.device("cpu" if device is None else device)
+        if target_device.type != "cpu":
+            raise ValueError("Isolated tensors must use the CPU device")
+        with self._condition:
+            if self._state != "open":
+                raise RuntimeError("Isolated backend is closed")
+            self._inflight += 1
+        try:
+            tensor = self._buffers.empty(shape, dtype=dtype).tensor
+            with torch.no_grad():
+                if factory == "zeros":
+                    tensor.zero_()
+                elif factory == "ones":
+                    tensor.fill_(1)
+                elif factory == "randn":
+                    tensor.normal_(generator=generator)
+            return tensor.requires_grad_(requires_grad)
+        finally:
+            with self._condition:
+                self._inflight -= 1
+                self._condition.notify_all()
 
     def _invoke_plugin(
         self,

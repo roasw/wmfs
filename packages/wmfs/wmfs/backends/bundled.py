@@ -3,6 +3,8 @@ from importlib import import_module
 
 import torch
 
+from wmfs.tensors import TensorFactory, native_tensor
+
 
 class BundledBackend:
     """Execute build-selected plugin operations in the application process."""
@@ -35,6 +37,26 @@ class BundledBackend:
         else:
             out_function(*args, **kwargs, out=out)
         return out
+
+    def construct_tensor(
+        self,
+        factory: TensorFactory,
+        shape: tuple[int, ...],
+        *,
+        dtype: torch.dtype,
+        device: torch.device | str | None,
+        requires_grad: bool,
+        generator: torch.Generator | None,
+    ) -> torch.Tensor:
+        """Construct an ordinary tensor without loading the bundled plugin."""
+        return native_tensor(
+            factory,
+            shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            generator=generator,
+        )
 
     def _load_operations(
         self,

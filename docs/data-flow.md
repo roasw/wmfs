@@ -85,10 +85,10 @@ Read next:
 
 ### 4. Runtime-Owned Shared Memory
 
-Unmanaged CPU tensors are copied once into runtime-owned contiguous storage.
-`BufferManager.empty` allocates either a pooled `memfd` region or an arena
-subrange, then creates a Torch view. Known outputs are allocated before
-dispatch.
+WMFS tensor constructors and known outputs call `BufferManager.empty` to
+allocate either a pooled `memfd` region or an arena subrange, then create a Torch
+view directly over that storage. Unmanaged CPU tensors from ordinary Torch
+constructors are copied once into the same runtime-owned contiguous storage.
 
 ```{literalinclude} ../packages/wmfs/wmfs/memory/buffers.py
 ---

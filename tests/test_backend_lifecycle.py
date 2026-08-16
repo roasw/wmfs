@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+import torch
 
 import wmfs.backends.isolated as isolated_module
 from wmfs.backends.isolated import IsolatedBackend
@@ -139,6 +140,40 @@ def test_backend_close_waits_for_inflight_invocation(
         assert invocation.result(timeout=2) == 1
         closing.result(timeout=2)
         assert session_closed.is_set()
+
+
+def test_backend_close_waits_for_shared_tensor_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    backend = _backend(monkeypatch, object)
+    original_empty = backend._buffers.empty
+
+    def blocking_empty(*args: object, **kwargs: object) -> object:
+        entered.set()
+        assert release.wait(2)
+        return original_empty(*args, **kwargs)
+
+    monkeypatch.setattr(backend._buffers, "empty", blocking_empty)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        construction = executor.submit(
+            backend.construct_tensor,
+            "zeros",
+            (2, 2),
+            dtype=torch.float32,
+            device=None,
+            requires_grad=False,
+            generator=None,
+        )
+        assert entered.wait(2)
+        closing = executor.submit(backend.close)
+        time.sleep(0.02)
+        assert not closing.done()
+
+        release.set()
+        torch.testing.assert_close(construction.result(timeout=2), torch.zeros(2, 2))
+        closing.result(timeout=2)
 
 
 def test_backend_close_attempts_all_sessions_and_buffers(

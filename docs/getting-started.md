@@ -6,15 +6,13 @@ The same functions are used for every backend.
 ```python
 from pathlib import Path
 
-import torch
-
-from wmfs import add_scalar, matmul, runtime
+from wmfs import add_scalar, matmul, randn, runtime
 
 runtime.discover_plugins(Path("plugins"))
 runtime.use_backend("isolated")
 
-a = torch.randn(4, 3, requires_grad=True)
-b = torch.randn(3, 2, requires_grad=True)
+a = randn(4, 3, requires_grad=True)
+b = randn(3, 2, requires_grad=True)
 c = add_scalar(matmul(a, b), 1.0)
 c.square().sum().backward()
 
@@ -27,6 +25,11 @@ Use `local` for direct PyTorch execution, `bundled` for the in-process reference
 plugin when it was compiled, and `isolated` for process isolation. Plugin
 discovery starts and validates persistent workers eagerly, so the first
 operation does not start a second process.
+
+`empty`, `zeros`, `ones`, and `randn` return ordinary Torch tensors. With the
+isolated backend selected, their storage is allocated directly in shared memory
+and avoids an ingress copy on the first worker invocation. With `local` or
+`bundled`, they delegate to the corresponding native Torch constructors.
 
 Isolated autograd uses plugin-advertised first-order VJPs. The main process
 retains PyTorch graph scheduling; the plugin implements the mathematical VJP.

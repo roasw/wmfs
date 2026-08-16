@@ -137,14 +137,11 @@ packages, checks, and development shells together.
 ## Usage
 
 ```python
-import torch
-
-from wmfs import add_scalar, matmul, runtime, svd
-
-a = torch.randn(4, 4)
-b = torch.randn(4, 4)
+from wmfs import add_scalar, matmul, randn, runtime, svd
 
 runtime.use_backend("local")
+a = randn(4, 4)
+b = randn(4, 4)
 c = matmul(a, b)
 u, s, vh = svd(c)
 d = add_scalar(c, 1.0)
@@ -253,9 +250,18 @@ Workers receive a read-only descriptor through `SCM_RIGHTS`, map it once, and
 construct a Torch view from the mapped memory. Cap'n Proto carries only tensor
 metadata; numerical payload bytes never enter the RPC message.
 
-Ordinary Torch allocations require one ingress copy into managed storage.
-Managed results can be reused across worker calls without copying or repeatedly
-passing the same FD.
+Use `wmfs.empty`, `wmfs.zeros`, `wmfs.ones`, or `wmfs.randn` after selecting the
+isolated backend to allocate and initialize inputs directly in shared storage.
+They return ordinary Torch tensors whose storage carries a WMFS allocation
+lease, so Torch operations and autograd continue to work normally. Local and
+bundled modes delegate these constructors to Torch and do not allocate shared
+memory or load the bundled extension.
+
+Ordinary Torch allocations still require one ingress copy into managed storage.
+WMFS-created tensors and managed results can be reused across worker calls
+without copying. Shared constructors support CPU tensors with `float32`,
+`float64`, `int64`, or `uint8` storage and require a non-empty shape with
+positive dimensions.
 
 The default memory mode pools whole memfds by exact size. A buffer returns to
 the pool only after its last Torch storage alias is gone, all worker mappings
@@ -293,10 +299,12 @@ by the runtime:
 ```python
 from pathlib import Path
 
-from wmfs import matmul, runtime
+from wmfs import matmul, randn, runtime
 
 runtime.discover_plugins(Path("plugins"))
 runtime.use_backend("isolated")
+a = randn(4, 4)
+b = randn(4, 4)
 result = matmul(a, b)
 runtime.close()
 ```

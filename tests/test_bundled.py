@@ -44,7 +44,9 @@ assert find_spec("wmfs._bundled") is not None
 assert "wmfs._bundled" not in sys.modules
 wmfs.runtime.use_backend("bundled")
 assert "wmfs._bundled" not in sys.modules
-value = torch.ones(1)
+value = wmfs.ones(1)
+assert "wmfs._bundled" not in sys.modules
+assert not hasattr(value.untyped_storage(), "_wmfs_allocation")
 torch.testing.assert_close(wmfs.add_scalar(value, 1.0), value + 1.0)
 assert "wmfs._bundled" in sys.modules
 assert "reference" in sys.modules["wmfs._bundled"].plugins

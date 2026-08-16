@@ -51,6 +51,41 @@ def test_close_waits_for_accepted_call_and_rejects_calls_while_closing() -> None
     )
 
 
+def test_close_waits_for_accepted_tensor_construction() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Backend:
+        def construct_tensor(self, *_args: object, **_kwargs: object) -> torch.Tensor:
+            entered.set()
+            assert release.wait(2)
+            return torch.ones(1)
+
+        def close(self) -> None:
+            pass
+
+    candidate = Runtime()
+    candidate._backends = {"blocking": Backend()}
+    candidate._backend_name = "blocking"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        construction = executor.submit(candidate.ones, 1)
+        assert entered.wait(2)
+        closing = executor.submit(candidate.close)
+        with candidate._condition:
+            assert candidate._condition.wait_for(
+                lambda: candidate._state == "closing", timeout=2
+            )
+
+        with pytest.raises(RuntimeError, match="Runtime is closing"):
+            candidate.ones(1)
+        assert not closing.done()
+
+        release.set()
+        torch.testing.assert_close(construction.result(timeout=2), torch.ones(1))
+        closing.result(timeout=2)
+
+
 def test_close_resets_registry_and_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
