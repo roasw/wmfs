@@ -30,7 +30,10 @@ class FdSender:
         self._socket.settimeout(5.0)
         self._closed = False
         self._worker_exited = False
+        self._failed = False
+        self.mapping_batch_count = 0
         self.transfer_count = 0
+        self.retirement_batch_count = 0
         self.retirement_count = 0
 
     def ensure_mapped(
@@ -40,55 +43,96 @@ class FdSender:
         invocation_id: int,
         writable: bool = False,
     ) -> bool:
-        with self._lock:
-            key = (buffer.id, buffer.generation)
-            actual_writable = writable or buffer.arena
-            existing = self._mapped_buffers.get(key)
-            if existing is not None:
-                if existing.writable or not actual_writable:
-                    return False
-                self._retire_buffer_locked(existing.buffer)
+        return self.ensure_mapped_many(
+            ((buffer, writable),), invocation_id=invocation_id
+        )[0]
 
-            message = self._schema.BufferTransfer.new_message(
-                transferId=secrets.randbits(64),
-                invocationId=invocation_id,
-                bufferId=buffer.id,
-                generation=buffer.generation,
-                allocationId=buffer.allocation_id,
-                byteLength=buffer.mapping_byte_length,
-                writable=actual_writable,
-                arena=buffer.arena,
-            )
-            message.map = None
-            transferred_fd = buffer.duplicate_fd(writable=actual_writable)
-            mapping = _RemoteMapping(
-                buffer=buffer,
-                writable=actual_writable,
-                arena=buffer.arena,
-                invocation_id=(
-                    None if buffer.arena or not actual_writable else invocation_id
-                ),
-            )
-            self._send(message, transferred_fd)
-            self._mapped_buffers[key] = mapping
-            if not buffer.arena:
-                buffer.register_recipient(self)
-            self.transfer_count += 1
-            return True
+    def ensure_mapped_many(
+        self,
+        buffers: tuple[tuple[SharedBuffer, bool], ...],
+        *,
+        invocation_id: int,
+    ) -> tuple[bool, ...]:
+        with self._lock:
+            self._ensure_usable()
+            entries: list[dict[str, object]] = []
+            descriptors: list[int] = []
+            pending: list[tuple[tuple[int, int], _RemoteMapping]] = []
+            results: list[bool] = []
+            planned = dict(self._mapped_buffers)
+            sending = False
+            try:
+                for buffer, writable in buffers:
+                    key = (buffer.id, buffer.generation)
+                    actual_writable = writable or buffer.arena
+                    existing = planned.get(key)
+                    if existing is not None and (
+                        existing.writable or not actual_writable
+                    ):
+                        results.append(False)
+                        continue
+                    if existing is not None:
+                        entries.append(self._entry(existing.buffer, map_buffer=False))
+                        planned.pop(key)
+                    mapping = _RemoteMapping(
+                        buffer=buffer,
+                        writable=actual_writable,
+                        arena=buffer.arena,
+                        invocation_id=(
+                            None
+                            if buffer.arena or not actual_writable
+                            else invocation_id
+                        ),
+                    )
+                    entries.append(
+                        self._entry(
+                            buffer,
+                            map_buffer=True,
+                            invocation_id=invocation_id,
+                            writable=actual_writable,
+                        )
+                    )
+                    descriptors.append(buffer.duplicate_fd(writable=actual_writable))
+                    planned[key] = mapping
+                    pending.append((key, mapping))
+                    results.append(True)
+                if not descriptors:
+                    return tuple(results)
+                sending = True
+                self._send(entries, descriptors)
+            except BaseException:
+                if not sending:
+                    for descriptor in descriptors:
+                        os.close(descriptor)
+                self._invalidate_locked()
+                raise
+
+            self._mapped_buffers = planned
+            for _key, mapping in pending:
+                if not mapping.arena:
+                    mapping.buffer.register_recipient(self)
+            self.mapping_batch_count += 1
+            self.transfer_count += len(descriptors)
+            self.retirement_count += len(entries) - len(descriptors)
+            if len(entries) != len(descriptors):
+                self.retirement_batch_count += 1
+            return tuple(results)
 
     def finish_invocation(self, invocation_id: int) -> None:
         with self._lock:
-            expired = [
+            expired = tuple(
                 mapping.buffer
                 for mapping in self._mapped_buffers.values()
                 if mapping.invocation_id == invocation_id and not mapping.arena
-            ]
-            for buffer in expired:
-                self._retire_buffer_locked(buffer)
+            )
+            self._retire_buffers_locked(expired)
 
     def retire_buffer(self, buffer: SharedBuffer) -> None:
+        self.retire_buffers((buffer,))
+
+    def retire_buffers(self, buffers: tuple[SharedBuffer, ...]) -> None:
         with self._lock:
-            self._retire_buffer_locked(buffer)
+            self._retire_buffers_locked(buffers)
 
     def worker_exited(self) -> None:
         with self._lock:
@@ -107,52 +151,104 @@ class FdSender:
                 pass
             self._socket.close()
 
-    def _retire_buffer_locked(self, buffer: SharedBuffer) -> None:
-        key = (buffer.id, buffer.generation)
-        if key not in self._mapped_buffers:
+    def _retire_buffers_locked(self, buffers: tuple[SharedBuffer, ...]) -> None:
+        mappings = []
+        seen = set()
+        for buffer in buffers:
+            key = (buffer.id, buffer.generation)
+            if key in seen:
+                continue
+            seen.add(key)
+            mapping = self._mapped_buffers.get(key)
+            if mapping is not None:
+                mappings.append(mapping)
+        if not mappings:
             return
-        if self._worker_exited:
-            self._mapped_buffers.pop(key, None)
-            return
-        message = self._schema.BufferTransfer.new_message(
-            transferId=secrets.randbits(64),
-            invocationId=0,
-            bufferId=buffer.id,
-            generation=buffer.generation,
-            allocationId=buffer.allocation_id,
-            byteLength=buffer.mapping_byte_length,
-            writable=False,
-            arena=False,
-        )
-        message.retire = None
-        self._send(message, None)
-        self._mapped_buffers.pop(key, None)
-        self.retirement_count += 1
-
-    def _send(self, message: object, transferred_fd: int | None) -> None:
-        payload = message.to_bytes()
-        try:
-            if transferred_fd is None:
-                sent = self._socket.send(payload)
-            else:
-                descriptors = array.array("i", [transferred_fd])
-                sent = self._socket.sendmsg(
-                    [payload],
-                    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)],
+        if self._failed:
+            for mapping in mappings:
+                self._mapped_buffers.pop(
+                    (mapping.buffer.id, mapping.buffer.generation), None
                 )
+            return
+        if self._worker_exited or self._closed:
+            for mapping in mappings:
+                self._mapped_buffers.pop(
+                    (mapping.buffer.id, mapping.buffer.generation), None
+                )
+            return
+        self._ensure_usable()
+        try:
+            self._send(
+                [self._entry(mapping.buffer, map_buffer=False) for mapping in mappings],
+                [],
+            )
+        except BaseException:
+            self._invalidate_locked()
+            raise
+        for mapping in mappings:
+            self._mapped_buffers.pop(
+                (mapping.buffer.id, mapping.buffer.generation), None
+            )
+        self.retirement_batch_count += 1
+        self.retirement_count += len(mappings)
+
+    def _entry(
+        self,
+        buffer: SharedBuffer,
+        *,
+        map_buffer: bool,
+        invocation_id: int = 0,
+        writable: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "invocationId": invocation_id,
+            "bufferId": buffer.id,
+            "generation": buffer.generation,
+            "allocationId": buffer.allocation_id,
+            "byteLength": buffer.mapping_byte_length,
+            "writable": writable,
+            "arena": buffer.arena if map_buffer else False,
+            "map" if map_buffer else "retire": None,
+        }
+
+    def _send(self, entries: list[dict[str, object]], descriptors: list[int]) -> None:
+        try:
+            message = self._schema.BufferTransfer.new_message(
+                transferId=secrets.randbits(64), entries=entries
+            )
+            payload = message.to_bytes()
+            if descriptors:
+                rights = array.array("i", descriptors)
+                sent = self._socket.sendmsg(
+                    [payload], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
+                )
+            else:
+                sent = self._socket.send(payload)
             if sent != len(payload):
                 raise RuntimeError("Buffer control message was not sent atomically")
-        finally:
-            if transferred_fd is not None:
-                os.close(transferred_fd)
 
-        response = self._socket.recv(_MAX_CONTROL_MESSAGE_BYTES)
-        if not response:
-            raise RuntimeError("FD transfer socket closed before acknowledgement")
-        with self._schema.BufferTransferAck.from_bytes(response) as acknowledgement:
-            if acknowledgement.transferId != message.transferId:
-                raise RuntimeError("Worker acknowledged an unexpected buffer request")
-            if acknowledgement.which() == "error":
-                raise RuntimeError(
-                    f"Worker rejected buffer request: {acknowledgement.error}"
-                )
+            response = self._socket.recv(_MAX_CONTROL_MESSAGE_BYTES)
+            if not response:
+                raise RuntimeError("FD transfer socket closed before acknowledgement")
+            with self._schema.BufferTransferAck.from_bytes(response) as acknowledgement:
+                if acknowledgement.transferId != message.transferId:
+                    raise RuntimeError(
+                        "Worker acknowledged an unexpected buffer request"
+                    )
+                if acknowledgement.which() == "error":
+                    raise RuntimeError(
+                        f"Worker rejected buffer request: {acknowledgement.error}"
+                    )
+        finally:
+            for descriptor in descriptors:
+                os.close(descriptor)
+
+    def _ensure_usable(self) -> None:
+        if self._failed:
+            raise RuntimeError("FD sender is invalid after a failed batch")
+        if self._closed:
+            raise RuntimeError("FD sender is closed")
+
+    def _invalidate_locked(self) -> None:
+        self._failed = True
+        self._mapped_buffers.clear()

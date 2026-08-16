@@ -181,35 +181,30 @@ struct Session::Impl {
 
         std::vector<std::uint8_t> metadata_bytes;
 
-        void map_buffer(const Mapping &mapping, int fd,
-                        std::uint64_t transfer_id) {
+        void transfer_buffers(const std::vector<Mapping> &entries,
+                              const std::vector<bool> &maps,
+                              const std::vector<int> &fds,
+                              std::uint64_t transfer_id) {
             capnp::MallocMessageBuilder message;
             auto transfer = message.initRoot<::BufferTransfer>();
             transfer.setTransferId(transfer_id);
-            transfer.setInvocationId(mapping.invocation_id);
-            transfer.setBufferId(mapping.buffer_id);
-            transfer.setGeneration(mapping.generation);
-            transfer.setAllocationId(mapping.allocation_id);
-            transfer.setByteLength(mapping.byte_length);
-            transfer.setWritable(mapping.writable);
-            transfer.setArena(mapping.arena);
-            transfer.setMap();
-            send_control(message, transfer_id, fd);
-        }
-
-        void retire_buffer(const Mapping &mapping, std::uint64_t transfer_id) {
-            capnp::MallocMessageBuilder message;
-            auto transfer = message.initRoot<::BufferTransfer>();
-            transfer.setTransferId(transfer_id);
-            transfer.setInvocationId(0);
-            transfer.setBufferId(mapping.buffer_id);
-            transfer.setGeneration(mapping.generation);
-            transfer.setAllocationId(mapping.allocation_id);
-            transfer.setByteLength(mapping.byte_length);
-            transfer.setWritable(false);
-            transfer.setArena(false);
-            transfer.setRetire();
-            send_control(message, transfer_id, -1);
+            auto builders = transfer.initEntries(entries.size());
+            for (std::size_t index = 0; index < entries.size(); ++index) {
+                const auto &mapping = entries[index];
+                auto entry = builders[index];
+                entry.setInvocationId(maps[index] ? mapping.invocation_id : 0);
+                entry.setBufferId(mapping.buffer_id);
+                entry.setGeneration(mapping.generation);
+                entry.setAllocationId(mapping.allocation_id);
+                entry.setByteLength(mapping.byte_length);
+                entry.setWritable(maps[index] && mapping.writable);
+                entry.setArena(maps[index] && mapping.arena);
+                if (maps[index])
+                    entry.setMap();
+                else
+                    entry.setRetire();
+            }
+            send_control(message, transfer_id, fds);
         }
 
         void write_invocation(::KnownInvocation::Builder invocation,
@@ -289,7 +284,8 @@ struct Session::Impl {
         }
 
         void send_control(capnp::MessageBuilder &message,
-                          std::uint64_t transfer_id, int fd) {
+                          std::uint64_t transfer_id,
+                          const std::vector<int> &fds) {
             auto words = capnp::messageToFlatArray(message);
             auto bytes = words.asBytes();
             iovec io_vector{const_cast<kj::byte *>(bytes.begin()),
@@ -297,15 +293,17 @@ struct Session::Impl {
             msghdr header{};
             header.msg_iov = &io_vector;
             header.msg_iovlen = 1;
-            std::array<char, CMSG_SPACE(sizeof(int))> ancillary{};
-            if (fd >= 0) {
+            std::vector<char> ancillary;
+            if (!fds.empty()) {
+                ancillary.resize(CMSG_SPACE(sizeof(int) * fds.size()));
                 header.msg_control = ancillary.data();
                 header.msg_controllen = ancillary.size();
                 auto *control = CMSG_FIRSTHDR(&header);
                 control->cmsg_level = SOL_SOCKET;
                 control->cmsg_type = SCM_RIGHTS;
-                control->cmsg_len = CMSG_LEN(sizeof(int));
-                std::memcpy(CMSG_DATA(control), &fd, sizeof(fd));
+                control->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+                std::memcpy(CMSG_DATA(control), fds.data(),
+                            sizeof(int) * fds.size());
             }
             ssize_t sent;
             do {
@@ -455,19 +453,29 @@ struct Session::Impl {
 
     void abort_invocation(std::uint64_t invocation_id) {
         std::lock_guard lock(mapping_mutex);
-        for (auto item = mappings.begin(); item != mappings.end();) {
-            const auto &mapping = item->second;
+        std::vector<Mapping> expired;
+        for (const auto &item : mappings) {
+            const auto &mapping = item.second;
             if (!mapping.arena && mapping.writable &&
-                mapping.invocation_id == invocation_id) {
-                const auto transfer_id = next_transfer_id++;
-                submit([mapping, transfer_id](Worker &worker) {
-                    worker.retire_buffer(mapping, transfer_id);
+                mapping.invocation_id == invocation_id)
+                expired.push_back(mapping);
+        }
+        if (!expired.empty()) {
+            const auto transfer_id = next_transfer_id++;
+            std::vector<bool> maps(expired.size(), false);
+            try {
+                submit([&](Worker &worker) {
+                    worker.transfer_buffers(expired, maps, {}, transfer_id);
                 });
-                item = mappings.erase(item);
-                ++retirements;
-            } else {
-                ++item;
+            } catch (...) {
+                mappings.clear();
+                throw;
             }
+            for (const auto &mapping : expired)
+                mappings.erase(
+                    MappingKey{mapping.buffer_id, mapping.generation});
+            retirements += expired.size();
+            ++retirement_batches;
         }
     }
 
@@ -487,7 +495,9 @@ struct Session::Impl {
     std::unordered_map<MappingKey, Mapping, MappingKeyHash> mappings;
     std::uint64_t next_transfer_id = 1;
     std::uint64_t transfers = 0;
+    std::uint64_t mapping_batches = 0;
     std::uint64_t retirements = 0;
+    std::uint64_t retirement_batches = 0;
     std::thread thread;
 };
 
@@ -522,41 +532,97 @@ bool Session::mapping_required(const Mapping &mapping) const {
 }
 
 void Session::map_buffer(const Mapping &mapping, int fd) {
-    OwnedFd owned_fd(fd);
+    map_buffers({std::pair{mapping, fd}});
+}
+
+std::vector<bool>
+Session::map_buffers(std::vector<std::pair<Mapping, int>> requested) {
+    std::vector<OwnedFd> owned_fds;
+    owned_fds.reserve(requested.size());
+    for (const auto &item : requested)
+        owned_fds.emplace_back(item.second);
     std::lock_guard lock(impl_->mapping_mutex);
-    const MappingKey key{mapping.buffer_id, mapping.generation};
-    const auto existing = impl_->mappings.find(key);
-    if (existing != impl_->mappings.end()) {
-        if (existing->second.writable || !mapping.writable)
-            return;
-        const auto transfer_id = impl_->next_transfer_id++;
-        const auto previous = existing->second;
-        impl_->submit([previous, transfer_id](Impl::Worker &worker) {
-            worker.retire_buffer(previous, transfer_id);
-        });
-        impl_->mappings.erase(existing);
-        ++impl_->retirements;
+    auto planned = impl_->mappings;
+    std::vector<Mapping> entries;
+    std::vector<bool> maps;
+    std::vector<int> fds;
+    std::vector<bool> results;
+    std::uint64_t retired = 0;
+    for (std::size_t index = 0; index < requested.size(); ++index) {
+        const auto &mapping = requested[index].first;
+        const MappingKey key{mapping.buffer_id, mapping.generation};
+        const auto existing = planned.find(key);
+        if (existing != planned.end() &&
+            (existing->second.writable || !mapping.writable)) {
+            results.push_back(false);
+            continue;
+        }
+        if (existing != planned.end()) {
+            entries.push_back(existing->second);
+            maps.push_back(false);
+            planned.erase(existing);
+            ++retired;
+        }
+        entries.push_back(mapping);
+        maps.push_back(true);
+        fds.push_back(owned_fds[index].get());
+        planned.emplace(key, mapping);
+        results.push_back(true);
     }
+    if (fds.empty())
+        return results;
     const auto transfer_id = impl_->next_transfer_id++;
-    const auto raw_fd = owned_fd.get();
-    impl_->submit([mapping, raw_fd, transfer_id](Impl::Worker &worker) {
-        worker.map_buffer(mapping, raw_fd, transfer_id);
-    });
-    impl_->mappings.emplace(key, mapping);
-    ++impl_->transfers;
+    try {
+        impl_->submit([&](Impl::Worker &worker) {
+            worker.transfer_buffers(entries, maps, fds, transfer_id);
+        });
+    } catch (...) {
+        impl_->mappings.clear();
+        throw;
+    }
+    impl_->mappings = std::move(planned);
+    impl_->transfers += fds.size();
+    ++impl_->mapping_batches;
+    impl_->retirements += retired;
+    impl_->retirement_batches += retired != 0;
+    return results;
 }
 
 void Session::retire_buffer(const Mapping &mapping) {
+    retire_buffers({mapping});
+}
+
+void Session::retire_buffers(const std::vector<Mapping> &requested) {
     std::lock_guard lock(impl_->mapping_mutex);
-    const MappingKey key{mapping.buffer_id, mapping.generation};
-    if (impl_->mappings.find(key) == impl_->mappings.end())
+    std::vector<Mapping> mappings;
+    std::unordered_map<MappingKey, bool, MappingKeyHash> seen;
+    for (const auto &mapping : requested) {
+        const MappingKey key{mapping.buffer_id, mapping.generation};
+        if (!seen.emplace(key, true).second)
+            continue;
+        auto existing = impl_->mappings.find(key);
+        if (existing == impl_->mappings.end())
+            continue;
+        mappings.push_back(existing->second);
+    }
+    if (mappings.empty())
         return;
     const auto transfer_id = impl_->next_transfer_id++;
-    impl_->submit([mapping, transfer_id](Impl::Worker &worker) {
-        worker.retire_buffer(mapping, transfer_id);
-    });
-    impl_->mappings.erase(key);
-    ++impl_->retirements;
+    std::vector<bool> maps(mappings.size(), false);
+    try {
+        impl_->submit([&](Impl::Worker &worker) {
+            worker.transfer_buffers(mappings, maps, {}, transfer_id);
+        });
+    } catch (...) {
+        impl_->mappings.clear();
+        throw;
+    }
+    for (const auto &mapping : mappings) {
+        impl_->mappings.erase(
+            MappingKey{mapping.buffer_id, mapping.generation});
+    }
+    impl_->retirements += mappings.size();
+    ++impl_->retirement_batches;
 }
 
 void Session::abort_invocation(std::uint64_t invocation_id) {
@@ -620,9 +686,19 @@ std::uint64_t Session::transfer_count() const {
     return impl_->transfers;
 }
 
+std::uint64_t Session::mapping_batch_count() const {
+    std::lock_guard lock(impl_->mapping_mutex);
+    return impl_->mapping_batches;
+}
+
 std::uint64_t Session::retirement_count() const {
     std::lock_guard lock(impl_->mapping_mutex);
     return impl_->retirements;
+}
+
+std::uint64_t Session::retirement_batch_count() const {
+    std::lock_guard lock(impl_->mapping_mutex);
+    return impl_->retirement_batches;
 }
 
 } // namespace wmfs::native

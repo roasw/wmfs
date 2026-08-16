@@ -5,8 +5,8 @@ using Runtime = import "/wmfs/runtime.capnp";
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
-  protocolVersion = 8,
-  fingerprint = 0x76eb7777a147ed5d,
+  protocolVersion = 9,
+  fingerprint = 0xab286d9434562d42,
   operations = [
     (
       name = "matmul",

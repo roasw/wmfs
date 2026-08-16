@@ -124,6 +124,9 @@ class MappedBufferCache:
             self._buffers.pop(buffer_id)
         existing.release()
 
+    def invalidate(self) -> None:
+        self.close()
+
     def finish_invocation(self, invocation_id: int) -> None:
         with self._lock:
             expired = [
@@ -255,7 +258,7 @@ class FdReceiver:
 
     def _serve(self) -> None:
         descriptor_size = array.array("i").itemsize
-        ancillary_size = socket.CMSG_SPACE(descriptor_size)
+        ancillary_size = socket.CMSG_SPACE(descriptor_size * 256)
         while True:
             try:
                 message, ancillary, flags, _address = self._socket.recvmsg(
@@ -269,35 +272,38 @@ class FdReceiver:
                 return
 
             transfer_id = 0
-            received_fds = _extract_fds(ancillary)
+            received_fds: list[int] = []
             try:
+                received_fds = _extract_fds(ancillary)
                 if flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC):
                     raise ValueError("FD transfer message was truncated")
                 with self._schema.BufferTransfer.from_bytes(message) as transfer:
                     transfer_id = int(transfer.transferId)
-                    if transfer.which() == "map":
-                        if len(received_fds) != 1:
-                            raise ValueError(
-                                "Buffer map must contain exactly one descriptor"
+                    entries = tuple(transfer.entries)
+                    map_count = sum(entry.which() == "map" for entry in entries)
+                    if len(received_fds) != map_count:
+                        raise ValueError(
+                            "Buffer batch descriptor count does not match map entries"
+                        )
+                    for entry in entries:
+                        if entry.which() == "map":
+                            fd = received_fds.pop(0)
+                            self._cache.add(
+                                buffer_id=int(entry.bufferId),
+                                generation=int(entry.generation),
+                                allocation_id=int(entry.allocationId),
+                                byte_length=int(entry.byteLength),
+                                writable=bool(entry.writable),
+                                arena=bool(entry.arena),
+                                invocation_id=int(entry.invocationId),
+                                fd=fd,
                             )
-                        self._cache.add(
-                            buffer_id=int(transfer.bufferId),
-                            generation=int(transfer.generation),
-                            allocation_id=int(transfer.allocationId),
-                            byte_length=int(transfer.byteLength),
-                            writable=bool(transfer.writable),
-                            arena=bool(transfer.arena),
-                            invocation_id=int(transfer.invocationId),
-                            fd=received_fds.pop(),
-                        )
-                    else:
-                        if received_fds:
-                            raise ValueError("Buffer retirement must not contain an FD")
-                        self._cache.retire(
-                            buffer_id=int(transfer.bufferId),
-                            generation=int(transfer.generation),
-                            allocation_id=int(transfer.allocationId),
-                        )
+                        else:
+                            self._cache.retire(
+                                buffer_id=int(entry.bufferId),
+                                generation=int(entry.generation),
+                                allocation_id=int(entry.allocationId),
+                            )
                 acknowledgement = self._schema.BufferTransferAck.new_message(
                     transferId=transfer_id
                 )
@@ -305,6 +311,7 @@ class FdReceiver:
             except Exception as error:
                 for fd in received_fds:
                     os.close(fd)
+                self._cache.invalidate()
                 acknowledgement = self._schema.BufferTransferAck.new_message(
                     transferId=transfer_id
                 )
@@ -315,14 +322,23 @@ class FdReceiver:
                     return
             except OSError:
                 return
+            if acknowledgement.which() == "error":
+                return
 
 
 def _extract_fds(ancillary: list[tuple[int, int, bytes]]) -> list[int]:
     descriptors = array.array("i")
-    for level, kind, data in ancillary:
-        if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
-            usable_length = len(data) - (len(data) % descriptors.itemsize)
-            descriptors.frombytes(data[:usable_length])
+    try:
+        for level, kind, data in ancillary:
+            if level != socket.SOL_SOCKET or kind != socket.SCM_RIGHTS:
+                raise ValueError("FD transfer contains unsupported ancillary data")
+            if len(data) % descriptors.itemsize:
+                raise ValueError("FD transfer contains a malformed descriptor array")
+            descriptors.frombytes(data)
+    except BaseException:
+        for fd in descriptors:
+            os.close(fd)
+        raise
     return descriptors.tolist()
 
 

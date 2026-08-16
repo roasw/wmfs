@@ -55,6 +55,21 @@ just test-release
 The worker is normally launched by the runtime with private RPC and FD-passing
 descriptors; `--help` only verifies the executable outside an invocation.
 
+## Buffer Transport Protocol
+
+Protocol v9 sends an ordered list of buffer map and retirement entries in one
+`SOCK_SEQPACKET` control message. Map entries correspond positionally to one
+`SCM_RIGHTS` descriptor array and the worker acknowledges the complete batch
+once. Descriptor counts must match map entries exactly; received descriptors
+are close-on-exec and every descriptor is closed if validation or mapping
+fails. A read-only mapping upgrade is represented by an ordered retirement
+followed by its writable map, preserving per-buffer and per-generation
+capabilities.
+
+Any rejected or malformed batch invalidates the transport mapping cache on
+both sides. Metrics count mapping and retirement batches separately from the
+number of mapped and retired buffers.
+
 ## Release Build
 
 Release artifacts are produced by the Nix packages. They configure CMake in

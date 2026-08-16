@@ -88,6 +88,31 @@ def test_trusted_arena_maps_once_for_inputs_and_outputs() -> None:
             session.close()
 
 
+def test_svd_outputs_are_transferred_in_one_mapping_batch() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    with BufferManager() as manager:
+        source = manager.from_tensor(
+            torch.arange(12, dtype=torch.float64).reshape(4, 3)
+        )
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
+        try:
+            result, metrics = session.invoke_profiled(
+                "svd", source.tensor, full_matrices=False
+            )
+
+            u, singular_values, vh = result
+            torch.testing.assert_close(
+                u @ torch.diag(singular_values) @ vh, source.tensor
+            )
+            assert metrics.mapping_batches == 2
+            assert metrics.mapped_buffers == 4
+            assert session._fd_sender is not None
+            assert session._fd_sender.mapping_batch_count == 2
+            assert session._fd_sender.transfer_count == 4
+        finally:
+            session.close()
+
+
 def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:

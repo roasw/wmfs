@@ -38,6 +38,8 @@ class InvocationMetrics:
     worker_output_views_ns: int = 0
     worker_dispatch_ns: int = 0
     worker_kernel_ns: int = 0
+    mapping_batches: int = 0
+    mapped_buffers: int = 0
 
 
 @dataclass(frozen=True)

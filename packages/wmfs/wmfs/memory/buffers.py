@@ -32,7 +32,7 @@ _ARENA_ALIGNMENT = 64
 
 
 class BufferRecipient(Protocol):
-    def retire_buffer(self, buffer: "SharedBuffer") -> None: ...
+    def retire_buffers(self, buffers: tuple["SharedBuffer", ...]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -239,6 +239,7 @@ class PoolStats:
     stats_collection_calls: int = 0
     allocations_drained: int = 0
     recipient_notifications: int = 0
+    recipient_notification_batches: int = 0
     recipient_retirement_ns: int = 0
     buffers_reset: int = 0
     buffer_reset_ns: int = 0
@@ -258,6 +259,7 @@ class ReclamationStats:
     allocations_drained: int = 0
     buffers_reclaimed: int = 0
     recipient_notifications: int = 0
+    recipient_notification_batches: int = 0
     recipient_retirement_ns: int = 0
     buffers_reset: int = 0
     buffer_reset_ns: int = 0
@@ -491,9 +493,8 @@ class BufferManager:
                             reclaimed += 1
                         else:
                             pooled.append(allocation.buffer)
-                for buffer in pooled:
-                    self._release_pooled(buffer)
-                    reclaimed += 1
+                self._release_pooled_many(pooled)
+                reclaimed += len(pooled)
         finally:
             with self._lock:
                 self._stats.collection_calls += 1
@@ -579,30 +580,41 @@ class BufferManager:
             byte_length,
         )
 
-    def _release_pooled(self, buffer: SharedBuffer) -> None:
-        region = buffer._region
+    def _release_pooled_many(self, buffers: list[SharedBuffer]) -> None:
+        by_recipient: dict[BufferRecipient, list[SharedBuffer]] = {}
+        for buffer in buffers:
+            for recipient in buffer._region.recipients:
+                by_recipient.setdefault(recipient, []).append(buffer)
+        failed_regions: set[_MemoryRegion] = set()
         notifications = 0
+        notification_batches = 0
         retirement_ns = 0
-        try:
-            for recipient in tuple(region.recipients):
-                started = perf_counter_ns()
-                try:
-                    recipient.retire_buffer(buffer)
-                finally:
-                    retirement_ns += perf_counter_ns() - started
-                    notifications += 1
-        except Exception:
+        for recipient, recipient_buffers in by_recipient.items():
             started = perf_counter_ns()
-            region.close()
-            with self._lock:
-                self._stats.recipient_notifications += notifications
-                self._stats.recipient_retirement_ns += retirement_ns
-                self._stats.buffers_quarantined += 1
-                self._stats.buffer_quarantine_ns += perf_counter_ns() - started
-            return
+            try:
+                recipient.retire_buffers(tuple(recipient_buffers))
+            except Exception:
+                failed_regions.update(buffer._region for buffer in recipient_buffers)
+            finally:
+                retirement_ns += perf_counter_ns() - started
+                notifications += len(recipient_buffers)
+                notification_batches += 1
         with self._lock:
             self._stats.recipient_notifications += notifications
+            self._stats.recipient_notification_batches += notification_batches
             self._stats.recipient_retirement_ns += retirement_ns
+        for buffer in buffers:
+            region = buffer._region
+            if region in failed_regions:
+                started = perf_counter_ns()
+                region.close()
+                with self._lock:
+                    self._stats.buffers_quarantined += 1
+                    self._stats.buffer_quarantine_ns += perf_counter_ns() - started
+                continue
+            self._reset_or_release_region(region)
+
+    def _reset_or_release_region(self, region: _MemoryRegion) -> None:
         with self._lock:
             close_region = self._closed or region.generation == 0xFFFFFFFF
         if close_region:

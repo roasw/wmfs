@@ -132,7 +132,7 @@ def test_pooled_retirement_does_not_hold_the_manager_lock() -> None:
     retirement_started = threading.Event()
 
     class Recipient:
-        def retire_buffer(self, _buffer: object) -> None:
+        def retire_buffers(self, _buffers: object) -> None:
             retirement_started.set()
             with lifecycle_lock:
                 pass
@@ -195,7 +195,7 @@ def test_reclamation_stats_time_delayed_recipient(
     now = 0
 
     class Recipient:
-        def retire_buffer(self, _buffer: object) -> None:
+        def retire_buffers(self, _buffers: object) -> None:
             nonlocal now
             now += 25
 
@@ -213,6 +213,32 @@ def test_reclamation_stats_time_delayed_recipient(
         assert delta.recipient_notifications == 1
         assert delta.recipient_retirement_ns == 25
         assert delta.collection_ns == 25
+
+
+def test_reclamation_groups_buffers_by_recipient() -> None:
+    retired: list[tuple[object, ...]] = []
+
+    class Recipient:
+        def retire_buffers(self, buffers: tuple[object, ...]) -> None:
+            retired.append(buffers)
+
+    with BufferManager() as manager:
+        recipient = Recipient()
+        first = manager.empty((8,))
+        second = manager.empty((16,))
+        first.buffer.register_recipient(recipient)
+        second.buffer.register_recipient(recipient)
+        del first, second
+        gc.collect()
+        before = manager.reclamation_stats()
+
+        manager.collect()
+
+        delta = manager.reclamation_stats().delta(before)
+        assert len(retired) == 1
+        assert len(retired[0]) == 2
+        assert delta.recipient_notification_batches == 1
+        assert delta.recipient_notifications == 2
 
 
 def test_reclamation_stats_include_implicit_collections() -> None:
@@ -250,7 +276,7 @@ def test_reclamation_stats_record_eviction_and_quarantine() -> None:
         assert eviction.buffers_cached == 0
 
     class FailingRecipient:
-        def retire_buffer(self, _buffer: object) -> None:
+        def retire_buffers(self, _buffers: object) -> None:
             raise RuntimeError("retirement failed")
 
     with BufferManager() as manager:

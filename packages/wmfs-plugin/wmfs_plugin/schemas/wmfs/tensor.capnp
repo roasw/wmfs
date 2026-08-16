@@ -18,19 +18,23 @@ struct TensorDescriptor {
   allocationId @7 :UInt64;
 }
 
+struct BufferTransferEntry {
+  invocationId @0 :UInt64;
+  bufferId @1 :UInt64;
+  generation @2 :UInt32;
+  byteLength @3 :UInt64;
+  writable @4 :Bool = false;
+  union {
+    map @5 :Void;
+    retire @6 :Void;
+  }
+  arena @7 :Bool = false;
+  allocationId @8 :UInt64;
+}
+
 struct BufferTransfer {
   transferId @0 :UInt64;
-  invocationId @1 :UInt64;
-  bufferId @2 :UInt64;
-  generation @3 :UInt32;
-  byteLength @4 :UInt64;
-  writable @5 :Bool = false;
-  union {
-    map @6 :Void;
-    retire @7 :Void;
-  }
-  arena @8 :Bool = false;
-  allocationId @9 :UInt64;
+  entries @1 :List(BufferTransferEntry);
 }
 
 struct BufferTransferAck {

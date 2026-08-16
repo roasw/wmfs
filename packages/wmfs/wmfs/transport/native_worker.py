@@ -9,7 +9,6 @@ from types import ModuleType
 
 from wmfs.invocation import (
     BoundInvocation,
-    BoundTensorInput,
     InputPreparationMetrics,
     InvocationMetrics,
     OutputAllocationMetrics,
@@ -161,10 +160,13 @@ class NativeWorkerSession:
             self._stop_process()
 
     def retire_buffer(self, buffer: object) -> None:
+        self.retire_buffers((buffer,))
+
+    def retire_buffers(self, buffers: tuple[object, ...]) -> None:
         with self._lifecycle_lock:
             if self._session is not None:
                 try:
-                    self._session.retire_buffer(buffer)
+                    self._session.retire_buffers(list(buffers))
                 except Exception:
                     self.close()
                     raise
@@ -178,15 +180,36 @@ class NativeWorkerSession:
         invocation_id = secrets.randbits(64)
         input_metrics: list[InputPreparationMetrics] = []
         output_metrics: list[OutputAllocationMetrics] = []
-        inputs = [
-            self._prepare_input(
-                item,
-                invocation_id,
-                input_metrics,
-                collect_metrics,
+        shared_inputs = [
+            share_input(
+                self._buffers,
+                item.tensor,
+                collect_metrics=collect_metrics,
             )
             for item in invocation.tensor_inputs
         ]
+        inputs = [item[0] for item in shared_inputs]
+        mapping_start = perf_counter_ns() if collect_metrics else 0
+        input_transfers = self._ensure_mapped_many(
+            tuple(
+                (managed, bound.writable)
+                for managed, bound in zip(inputs, invocation.tensor_inputs, strict=True)
+            ),
+            invocation_id,
+        )
+        input_mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
+        if collect_metrics:
+            for index, ((managed, copy_ns), transferred) in enumerate(
+                zip(shared_inputs, input_transfers, strict=True)
+            ):
+                input_metrics.append(
+                    InputPreparationMetrics(
+                        byte_length=managed.buffer.byte_length,
+                        shared_copy_ns=copy_ns,
+                        mapping_ns=input_mapping_ns if index == 0 else 0,
+                        fd_transferred=transferred,
+                    )
+                )
         outputs: list[ManagedTensor] = []
         dispatched = False
         try:
@@ -196,6 +219,7 @@ class NativeWorkerSession:
                 tuple(inputs),
                 collect_metrics=collect_metrics,
             )
+            allocation_metrics: list[tuple[int, int]] = []
             for index in range(len(output_plan.specs)):
                 service_start = perf_counter_ns() if collect_metrics else 0
                 output, allocation_ns = materialize_output(
@@ -204,16 +228,30 @@ class NativeWorkerSession:
                     index,
                     collect_metrics=collect_metrics,
                 )
-                mapping_start = perf_counter_ns() if collect_metrics else 0
-                transferred = self._ensure_mapped(output, invocation_id, writable=True)
-                mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
                 outputs.append(output)
-                if collect_metrics:
+                allocation_metrics.append((allocation_ns, service_start))
+            mapping_start = perf_counter_ns() if collect_metrics else 0
+            output_transfers = self._ensure_mapped_many(
+                tuple((output, True) for output in outputs), invocation_id
+            )
+            output_mapping_ns = (
+                perf_counter_ns() - mapping_start if collect_metrics else 0
+            )
+            if collect_metrics:
+                for index, (output, transferred, allocation_metric) in enumerate(
+                    zip(
+                        outputs,
+                        output_transfers,
+                        allocation_metrics,
+                        strict=True,
+                    )
+                ):
+                    allocation_ns, service_start = allocation_metric
                     output_metrics.append(
                         OutputAllocationMetrics(
                             byte_length=output.buffer.byte_length,
                             shared_allocation_ns=allocation_ns,
-                            mapping_ns=mapping_ns,
+                            mapping_ns=output_mapping_ns if index == 0 else 0,
                             service_ns=perf_counter_ns() - service_start,
                             fd_transferred=transferred,
                         )
@@ -268,51 +306,32 @@ class NativeWorkerSession:
                 ),
                 worker_dispatch_ns=int(native_profile.get("worker_dispatch_ns", 0)),
                 worker_kernel_ns=int(native_profile.get("worker_kernel_ns", 0)),
+                mapping_batches=int(any(input_transfers)) + int(any(output_transfers)),
+                mapped_buffers=sum(input_transfers) + sum(output_transfers),
             )
         finally:
             if not dispatched and self._session is not None:
                 self._session.abort_invocation(invocation_id)
 
-    def _prepare_input(
+    def _ensure_mapped_many(
         self,
-        item: BoundTensorInput,
+        managed: tuple[tuple[ManagedTensor, bool], ...],
         invocation_id: int,
-        metrics: list[InputPreparationMetrics],
-        collect_metrics: bool,
-    ) -> ManagedTensor:
-        managed, shared_copy_ns = share_input(
-            self._buffers, item.tensor, collect_metrics=collect_metrics
-        )
-        mapping_start = perf_counter_ns() if collect_metrics else 0
-        transferred = self._ensure_mapped(
-            managed, invocation_id, writable=item.writable
-        )
-        mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
-        if collect_metrics:
-            metrics.append(
-                InputPreparationMetrics(
-                    byte_length=managed.buffer.byte_length,
-                    shared_copy_ns=shared_copy_ns,
-                    mapping_ns=mapping_ns,
-                    fd_transferred=transferred,
-                )
-            )
-        return managed
-
-    def _ensure_mapped(
-        self, managed: ManagedTensor, invocation_id: int, *, writable: bool
-    ) -> bool:
+    ) -> tuple[bool, ...]:
         try:
-            transferred = bool(
-                self._ensure_open().ensure_mapped(
-                    managed.buffer, invocation_id, writable
+            transferred = tuple(
+                bool(value)
+                for value in self._ensure_open().ensure_mapped_many(
+                    [(item.buffer, writable) for item, writable in managed],
+                    invocation_id,
                 )
             )
         except Exception:
             self.close()
             raise
-        if transferred and not managed.buffer.arena:
-            managed.buffer.register_recipient(self)
+        for (item, _writable), mapped in zip(managed, transferred, strict=True):
+            if mapped and not item.buffer.arena:
+                item.buffer.register_recipient(self)
         return transferred
 
     def _ensure_open(self) -> object:

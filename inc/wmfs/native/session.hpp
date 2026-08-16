@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wmfs::native {
@@ -62,7 +63,10 @@ class Session {
 
     bool mapping_required(const Mapping &mapping) const;
     void map_buffer(const Mapping &mapping, int fd);
+    std::vector<bool>
+    map_buffers(std::vector<std::pair<Mapping, int>> mappings);
     void retire_buffer(const Mapping &mapping);
+    void retire_buffers(const std::vector<Mapping> &mappings);
     void abort_invocation(std::uint64_t invocation_id);
     void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
                 const TensorDescriptors &inputs,
@@ -79,7 +83,9 @@ class Session {
     void close();
 
     std::uint64_t transfer_count() const;
+    std::uint64_t mapping_batch_count() const;
     std::uint64_t retirement_count() const;
+    std::uint64_t retirement_batch_count() const;
 
   private:
     struct Impl;

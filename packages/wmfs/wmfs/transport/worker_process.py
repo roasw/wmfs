@@ -15,7 +15,6 @@ import capnp
 
 from wmfs.invocation import (
     BoundInvocation,
-    BoundTensorInput,
     InputPreparationMetrics,
     InvocationMetrics,
     OutputAllocationMetrics,
@@ -204,14 +203,45 @@ class WorkerSession:
             output_metrics: list[OutputAllocationMetrics] | None = (
                 [] if collect_metrics else None
             )
-            inputs = [
-                await self._prepare_input(
-                    item,
-                    invocation_id,
-                    input_metrics,
+            shared_inputs = [
+                share_input(
+                    self._buffers,
+                    item.tensor,
+                    collect_metrics=collect_metrics,
                 )
                 for item in invocation.tensor_inputs
             ]
+            inputs = [item[0] for item in shared_inputs]
+            mapping_start = perf_counter_ns() if collect_metrics else 0
+            try:
+                input_transfers = await asyncio.to_thread(
+                    self._fd_sender.ensure_mapped_many,
+                    tuple(
+                        (managed.buffer, bound.writable)
+                        for managed, bound in zip(
+                            inputs, invocation.tensor_inputs, strict=True
+                        )
+                    ),
+                    invocation_id=invocation_id,
+                )
+            except Exception:
+                self._invalidated = True
+                if self._shutdown is not None:
+                    self._shutdown.set()
+                raise
+            mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
+            if input_metrics is not None:
+                for index, ((managed, copy_ns), transferred) in enumerate(
+                    zip(shared_inputs, input_transfers, strict=True)
+                ):
+                    input_metrics.append(
+                        InputPreparationMetrics(
+                            byte_length=managed.buffer.byte_length,
+                            shared_copy_ns=copy_ns,
+                            mapping_ns=mapping_ns if index == 0 else 0,
+                            fd_transferred=transferred,
+                        )
+                    )
             return await self._invoke_known(
                 invocation,
                 inputs,
@@ -242,6 +272,7 @@ class WorkerSession:
                 tuple(inputs),
                 collect_metrics=collect_metrics,
             )
+            allocation_metrics: list[tuple[int, int]] = []
             for index in range(len(output_plan.specs)):
                 service_start = perf_counter_ns() if collect_metrics else 0
                 managed, allocation_ns = materialize_output(
@@ -250,21 +281,38 @@ class WorkerSession:
                     index,
                     collect_metrics=collect_metrics,
                 )
-                mapping_start = perf_counter_ns() if collect_metrics else 0
-                transferred = await asyncio.to_thread(
-                    self._fd_sender.ensure_mapped,
-                    managed.buffer,
-                    invocation_id=invocation_id,
-                    writable=True,
-                )
-                mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
                 outputs.append(managed)
-                if output_metrics is not None:
+                allocation_metrics.append((allocation_ns, service_start))
+            mapping_start = perf_counter_ns() if collect_metrics else 0
+            try:
+                output_transfers = await asyncio.to_thread(
+                    self._fd_sender.ensure_mapped_many,
+                    tuple((managed.buffer, True) for managed in outputs),
+                    invocation_id=invocation_id,
+                )
+            except Exception:
+                self._invalidated = True
+                if self._shutdown is not None:
+                    self._shutdown.set()
+                raise
+            output_mapping_ns = (
+                perf_counter_ns() - mapping_start if collect_metrics else 0
+            )
+            if output_metrics is not None:
+                for index, (managed, transferred, allocation_metric) in enumerate(
+                    zip(
+                        outputs,
+                        output_transfers,
+                        allocation_metrics,
+                        strict=True,
+                    )
+                ):
+                    allocation_ns, service_start = allocation_metric
                     output_metrics.append(
                         OutputAllocationMetrics(
                             byte_length=managed.buffer.byte_length,
                             shared_allocation_ns=allocation_ns,
-                            mapping_ns=mapping_ns,
+                            mapping_ns=output_mapping_ns if index == 0 else 0,
                             service_ns=perf_counter_ns() - service_start,
                             fd_transferred=transferred,
                         )
@@ -310,6 +358,12 @@ class WorkerSession:
                     int(worker.dispatchNs) if worker is not None else 0
                 ),
                 worker_kernel_ns=(int(worker.kernelNs) if worker is not None else 0),
+                mapping_batches=int(
+                    any(item.fd_transferred for item in input_metrics or ())
+                )
+                + int(any(output_transfers)),
+                mapped_buffers=sum(item.fd_transferred for item in input_metrics or ())
+                + sum(output_transfers),
             )
         finally:
             if not dispatched:
@@ -318,34 +372,6 @@ class WorkerSession:
                 self._invalidated = True
                 if self._shutdown is not None:
                     self._shutdown.set()
-
-    async def _prepare_input(
-        self,
-        item: BoundTensorInput,
-        invocation_id: int,
-        metrics: list[InputPreparationMetrics] | None,
-    ) -> ManagedTensor:
-        managed, shared_copy_ns = share_input(
-            self._buffers, item.tensor, collect_metrics=metrics is not None
-        )
-        mapping_start = perf_counter_ns() if metrics is not None else 0
-        transferred = await asyncio.to_thread(
-            self._fd_sender.ensure_mapped,
-            managed.buffer,
-            invocation_id=invocation_id,
-            writable=item.writable,
-        )
-        mapping_ns = perf_counter_ns() - mapping_start if metrics is not None else 0
-        if metrics is not None:
-            metrics.append(
-                InputPreparationMetrics(
-                    byte_length=managed.buffer.byte_length,
-                    shared_copy_ns=shared_copy_ns,
-                    mapping_ns=mapping_ns,
-                    fd_transferred=transferred,
-                )
-            )
-        return managed
 
     async def _ping(self) -> None:
         if self._invoke_lock is None or self._plugin is None:

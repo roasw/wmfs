@@ -140,21 +140,28 @@ def test_fd_receiver_sets_close_on_exec() -> None:
         def retire(self, **_values: object) -> None:
             raise AssertionError("Unexpected retirement")
 
+        def invalidate(self) -> None:
+            raise AssertionError("Unexpected invalidation")
+
     schema = load_tensor_schema()
     receiver = FdReceiver(receiver_socket, schema, Cache())
     receiver.start()
     fd = _memfd()
     message = schema.BufferTransfer.new_message(
         transferId=1,
-        invocationId=1,
-        bufferId=1,
-        generation=1,
-        allocationId=1,
-        byteLength=16,
-        writable=False,
-        arena=False,
+        entries=[
+            {
+                "invocationId": 1,
+                "bufferId": 1,
+                "generation": 1,
+                "allocationId": 1,
+                "byteLength": 16,
+                "writable": False,
+                "arena": False,
+                "map": None,
+            }
+        ],
     )
-    message.map = None
     descriptors = array.array("i", [fd])
     try:
         sender.sendmsg(
@@ -166,6 +173,60 @@ def test_fd_receiver_sets_close_on_exec() -> None:
         assert observed_flags[0] & fcntl.FD_CLOEXEC
     finally:
         os.close(fd)
+        sender.close()
+        receiver.close()
+
+
+def test_fd_receiver_rejects_batch_descriptor_count_and_invalidates() -> None:
+    sender, receiver_socket = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    invalidated = threading.Event()
+
+    class Cache:
+        def add(self, **_values: object) -> None:
+            raise AssertionError("Malformed batch must be rejected before mapping")
+
+        def retire(self, **_values: object) -> None:
+            raise AssertionError("Unexpected retirement")
+
+        def invalidate(self) -> None:
+            invalidated.set()
+
+    schema = load_tensor_schema()
+    receiver = FdReceiver(receiver_socket, schema, Cache())
+    receiver.start()
+    first = _memfd()
+    second = _memfd()
+    message = schema.BufferTransfer.new_message(
+        transferId=2,
+        entries=[
+            {
+                "invocationId": 1,
+                "bufferId": 1,
+                "generation": 1,
+                "allocationId": 1,
+                "byteLength": 16,
+                "map": None,
+            }
+        ],
+    )
+    try:
+        sender.sendmsg(
+            [message.to_bytes()],
+            [
+                (
+                    socket.SOL_SOCKET,
+                    socket.SCM_RIGHTS,
+                    array.array("i", [first, second]),
+                )
+            ],
+        )
+        with schema.BufferTransferAck.from_bytes(sender.recv(4096)) as ack:
+            assert ack.which() == "error"
+            assert "descriptor count" in ack.error
+        assert invalidated.wait(2)
+    finally:
+        os.close(first)
+        os.close(second)
         sender.close()
         receiver.close()
 

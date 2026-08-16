@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 namespace nb = nanobind;
@@ -125,10 +126,57 @@ bool ensure_mapped(Session &session, nb::object buffer,
     return true;
 }
 
+nb::list ensure_mapped_many(Session &session, const nb::list &buffers,
+                            std::uint64_t invocation_id) {
+    std::vector<std::pair<Mapping, int>> pending;
+    std::vector<std::size_t> pending_indices;
+    std::vector<bool> results(buffers.size(), false);
+    try {
+        for (std::size_t index = 0; index < buffers.size(); ++index) {
+            auto item = nb::cast<nb::tuple>(buffers[index]);
+            auto buffer = nb::borrow<nb::object>(item[0]);
+            auto mapping = mapping_from_buffer(buffer, invocation_id,
+                                               nb::cast<bool>(item[1]));
+            if (!session.mapping_required(mapping))
+                continue;
+            int fd =
+                nb::cast<int>(buffer.attr("duplicate_fd")(mapping.writable));
+            pending.emplace_back(mapping, fd);
+            pending_indices.push_back(index);
+        }
+    } catch (...) {
+        for (const auto &item : pending)
+            ::close(item.second);
+        throw;
+    }
+    if (!pending.empty()) {
+        std::vector<bool> mapped;
+        {
+            nb::gil_scoped_release release;
+            mapped = session.map_buffers(std::move(pending));
+        }
+        for (std::size_t index = 0; index < mapped.size(); ++index)
+            results[pending_indices[index]] = mapped[index];
+    }
+    nb::list result;
+    for (bool mapped : results)
+        result.append(mapped);
+    return result;
+}
+
 void retire_buffer(Session &session, nb::object buffer) {
     const auto mapping = mapping_from_buffer(buffer, 0, false);
     nb::gil_scoped_release release;
     session.retire_buffer(mapping);
+}
+
+void retire_buffers(Session &session, const nb::list &buffers) {
+    std::vector<Mapping> mappings;
+    mappings.reserve(buffers.size());
+    for (nb::handle buffer : buffers)
+        mappings.push_back(mapping_from_buffer(buffer, 0, false));
+    nb::gil_scoped_release release;
+    session.retire_buffers(mappings);
 }
 
 void invoke(Session &session, std::uint64_t invocation_id,
@@ -188,7 +236,10 @@ NB_MODULE(_native, module) {
              "expected_fingerprint"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("ensure_mapped", &ensure_mapped, "buffer"_a, "invocation_id"_a,
              "writable"_a = false)
+        .def("ensure_mapped_many", &ensure_mapped_many, "buffers"_a,
+             "invocation_id"_a)
         .def("retire_buffer", &retire_buffer, "buffer"_a)
+        .def("retire_buffers", &retire_buffers, "buffers"_a)
         .def("abort_invocation", &Session::abort_invocation, "invocation_id"_a,
              nb::call_guard<nb::gil_scoped_release>())
         .def("invoke", &invoke, "invocation_id"_a, "operation_id"_a, "inputs"_a,
@@ -201,5 +252,8 @@ NB_MODULE(_native, module) {
         .def("environment", &environment)
         .def("close", &Session::close, nb::call_guard<nb::gil_scoped_release>())
         .def_prop_ro("transfer_count", &Session::transfer_count)
-        .def_prop_ro("retirement_count", &Session::retirement_count);
+        .def_prop_ro("mapping_batch_count", &Session::mapping_batch_count)
+        .def_prop_ro("retirement_count", &Session::retirement_count)
+        .def_prop_ro("retirement_batch_count",
+                     &Session::retirement_batch_count);
 }

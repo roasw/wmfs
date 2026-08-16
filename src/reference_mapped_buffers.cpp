@@ -137,10 +137,13 @@ std::vector<OwnedFd> extract_descriptors(msghdr &message) {
     std::vector<OwnedFd> descriptors;
     for (auto *item = CMSG_FIRSTHDR(&message); item != nullptr;
          item = CMSG_NXTHDR(&message, item)) {
-        if (item->cmsg_level != SOL_SOCKET || item->cmsg_type != SCM_RIGHTS) {
-            continue;
-        }
+        if (item->cmsg_level != SOL_SOCKET || item->cmsg_type != SCM_RIGHTS)
+            fail("FD transfer contains unsupported ancillary data");
+        if (item->cmsg_len < CMSG_LEN(0))
+            fail("FD transfer contains malformed ancillary data");
         auto data_length = item->cmsg_len - CMSG_LEN(0);
+        if (data_length % sizeof(int) != 0)
+            fail("FD transfer contains a malformed descriptor array");
         auto count = data_length / sizeof(int);
         auto *values = reinterpret_cast<int *>(CMSG_DATA(item));
         for (std::size_t index = 0; index < count; ++index) {
@@ -360,7 +363,7 @@ void MappedBufferCache::close() {
 void receive_buffer_transfers(int control_fd, MappedBufferCache &cache) {
     alignas(capnp::word) std::array<std::byte, MAX_CONTROL_MESSAGE_BYTES>
         payload{};
-    std::array<std::byte, CMSG_SPACE(sizeof(int) * 8)> ancillary{};
+    std::array<std::byte, CMSG_SPACE(sizeof(int) * 256)> ancillary{};
 
     while (true) {
         iovec vector{payload.data(), payload.size()};
@@ -399,30 +402,38 @@ void receive_buffer_transfers(int control_fd, MappedBufferCache &cache) {
             capnp::FlatArrayMessageReader reader(words);
             auto transfer = reader.getRoot<BufferTransfer>();
             transfer_id = transfer.getTransferId();
-            if (transfer.which() == BufferTransfer::MAP) {
-                if (descriptors.size() != 1) {
-                    fail("Buffer map must contain exactly one descriptor");
+            auto entries = transfer.getEntries();
+            std::size_t map_count = 0;
+            for (auto entry : entries)
+                map_count += entry.which() == BufferTransferEntry::MAP;
+            if (descriptors.size() != map_count)
+                fail(
+                    "Buffer batch descriptor count does not match map entries");
+            std::size_t descriptor_index = 0;
+            for (auto entry : entries) {
+                if (entry.which() == BufferTransferEntry::MAP) {
+                    MappingSpec spec{
+                        entry.getBufferId(),     entry.getGeneration(),
+                        entry.getAllocationId(), entry.getByteLength(),
+                        entry.getInvocationId(), entry.getWritable(),
+                        entry.getArena(),
+                    };
+                    cache.map(spec, descriptors[descriptor_index++].release());
+                } else {
+                    cache.retire(entry.getBufferId(), entry.getGeneration(),
+                                 entry.getAllocationId());
                 }
-                MappingSpec spec{
-                    transfer.getBufferId(),     transfer.getGeneration(),
-                    transfer.getAllocationId(), transfer.getByteLength(),
-                    transfer.getInvocationId(), transfer.getWritable(),
-                    transfer.getArena(),
-                };
-                cache.map(spec, descriptors.front().release());
-            } else {
-                if (!descriptors.empty()) {
-                    fail("Buffer retirement must not contain an FD");
-                }
-                cache.retire(transfer.getBufferId(), transfer.getGeneration(),
-                             transfer.getAllocationId());
             }
             send_acknowledgement(control_fd, transfer_id, nullptr);
         } catch (const std::exception &error) {
+            cache.close();
             send_acknowledgement(control_fd, transfer_id, error.what());
+            throw;
         } catch (const kj::Exception &error) {
+            cache.close();
             auto description = error.getDescription();
             send_acknowledgement(control_fd, transfer_id, description.cStr());
+            throw;
         }
     }
 }

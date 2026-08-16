@@ -1,4 +1,5 @@
 import gc
+import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -8,7 +9,8 @@ import torch
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.transport.native_worker import NativeWorkerSession
-from wmfs.transport.worker_process import inspect_plugin
+from wmfs.transport.worker_process import _start_worker, inspect_plugin
+from wmfs_plugin.schema import load_tensor_schema
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
@@ -70,6 +72,32 @@ def test_native_safe_pool_retires_reused_generations() -> None:
             assert second_managed.buffer.generation == identity[1] + 1
             assert session._session.transfer_count == 3
             session.ping()
+        finally:
+            session.close()
+
+
+def test_native_svd_outputs_are_transferred_in_one_mapping_batch() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    metadata = inspect_plugin(manifest)
+    with BufferManager() as buffers:
+        session = NativeWorkerSession(manifest, buffers, metadata)
+        try:
+            source = buffers.from_tensor(
+                torch.arange(12, dtype=torch.float64).reshape(4, 3)
+            )
+
+            result, metrics = session.invoke_profiled(
+                "svd", source.tensor, full_matrices=False
+            )
+
+            u, singular_values, vh = result
+            torch.testing.assert_close(
+                u @ torch.diag(singular_values) @ vh, source.tensor
+            )
+            assert metrics.mapping_batches == 2
+            assert metrics.mapped_buffers == 4
+            assert session._session.mapping_batch_count == 2
+            assert session._session.transfer_count == 4
         finally:
             session.close()
 
@@ -148,6 +176,43 @@ def test_native_session_serializes_concurrent_callers() -> None:
                     future.result()
         finally:
             session.close()
+
+
+def test_native_receiver_rejects_malformed_descriptor_batch() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    rpc_parent, rpc_child = socket.socketpair()
+    fd_parent, fd_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    process = _start_worker(manifest, rpc_child.fileno(), fd_child.fileno())
+    rpc_child.close()
+    fd_child.close()
+    schema = load_tensor_schema()
+    message = schema.BufferTransfer.new_message(
+        transferId=99,
+        entries=[
+            {
+                "invocationId": 1,
+                "bufferId": 1,
+                "generation": 1,
+                "allocationId": 1,
+                "byteLength": 16,
+                "map": None,
+            }
+        ],
+    )
+    try:
+        fd_parent.send(message.to_bytes())
+        with schema.BufferTransferAck.from_bytes(fd_parent.recv(4096)) as ack:
+            assert ack.transferId == 99
+            assert ack.which() == "error"
+            assert "descriptor count" in ack.error
+        process.wait(timeout=5)
+        assert process.returncode != 0
+    finally:
+        rpc_parent.close()
+        fd_parent.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
 
 
 def _wait_for_access_waiter(buffers: BufferManager) -> None:

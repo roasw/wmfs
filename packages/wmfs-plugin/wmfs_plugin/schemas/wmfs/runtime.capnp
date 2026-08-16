@@ -2,7 +2,7 @@
 
 using Tensor = import "/wmfs/tensor.capnp";
 
-const protocolVersion :UInt16 = 8;
+const protocolVersion :UInt16 = 9;
 
 enum TensorAccess {
   readOnly @0;
