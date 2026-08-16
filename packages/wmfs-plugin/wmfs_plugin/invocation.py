@@ -7,7 +7,19 @@ from wmfs_plugin.metadata import OperationMetadata
 
 @dataclass(frozen=True)
 class InvocationContext:
-    """Validated values and metadata for one operation invocation."""
+    """Validated, operation-scoped values passed to a plugin handler.
+
+    The context exposes only tensors and scalar values authorized by the
+    operation metadata. It does not expose FDs, mappings, or the worker's full
+    buffer cache.
+
+    Attributes:
+        operation: Canonical operation metadata.
+        invocation_id: Runtime-generated invocation identifier.
+        inputs: Ordered input tensor views.
+        outputs: Ordered writable, runtime-owned output tensor views.
+        scalars: Ordered decoded scalar arguments.
+    """
 
     operation: OperationMetadata
     invocation_id: int

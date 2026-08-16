@@ -93,6 +93,14 @@ test-release:
 package:
     nix build .#default .#bundled .#benchmark .#wmfs-plugin .#reference-worker .#reference-python-worker --no-link
 
+# Build unified Python and C++ HTML documentation reproducibly.
+doc:
+    nix develop "path:{{ root }}#docs" -c bash "{{ root }}/docs/build.sh" "{{ root }}"
+
+[private]
+_doc:
+    bash "{{ root }}/docs/build.sh" "{{ root }}"
+
 # Benchmark packaged Release artifacts in pooled or arena mode.
 benchmark mode="pooled":
     just _benchmark "{{ mode }}" table ""

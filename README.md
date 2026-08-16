@@ -59,6 +59,21 @@ just test-release
 The worker is normally launched by the runtime with private RPC and FD-passing
 descriptors; `--help` only verifies the executable outside an invocation.
 
+## Documentation
+
+The unified Sphinx site renders Python docstrings with autodoc, C++ Doxygen XML
+with Breathe, and architecture guides written in MyST Markdown. Build it with
+the reproducible documentation shell:
+
+```console
+nix develop -c just doc
+```
+
+From an existing development shell, run `just doc`. The generated site starts
+at `build/docs/html/index.html`. The data-flow guide follows a simple Python
+call through runtime dispatch, shared-memory allocation, batched FD transfer,
+worker view construction, kernel execution, and reclamation.
+
 ## Buffer Transport Protocol
 
 Protocol v9 sends an ordered list of buffer map and retirement entries in one

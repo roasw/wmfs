@@ -28,11 +28,14 @@ class Backend(Protocol):
 
 
 class Runtime:
-    """Select and dispatch operations to an execution backend.
+    """Discover plugins and dispatch operations to an execution backend.
 
     ``close()`` waits for invocations and discovery accepted before closing,
     rejects invocations while closing, and then restores constructor defaults.
     The runtime can be configured and used again after close returns.
+
+    Returned managed tensors remain valid after close until their final Torch
+    storage alias is released.
     """
 
     def __init__(self) -> None:
@@ -67,6 +70,16 @@ class Runtime:
             return self._registry.operation(name)
 
     def discover_plugins(self, *plugin_directories: Path) -> None:
+        """Discover plugins and retain one validated worker session per plugin.
+
+        Args:
+            *plugin_directories: Directories containing plugin manifests or
+                subdirectories with manifests.
+
+        Raises:
+            ValueError: If metadata or a manifest is inconsistent.
+            RuntimeError: If the runtime is closing or a worker cannot start.
+        """
         with self._condition:
             self._accept_work()
         try:
@@ -92,7 +105,13 @@ class Runtime:
     def configure_memory(
         self, mode: str = "pooled", *, arena_bytes: int | None = None
     ) -> None:
-        """Configure isolated shared memory before plugin discovery."""
+        """Configure isolated shared memory before plugin discovery.
+
+        Args:
+            mode: ``"pooled"`` for per-buffer capabilities or ``"arena"`` for
+                one trusted persistent mapping.
+            arena_bytes: Arena capacity. Ignored in pooled mode.
+        """
         with self._condition:
             self._ensure_open()
             if "isolated" in self._backends:
@@ -103,7 +122,11 @@ class Runtime:
             self._arena_bytes = arena_bytes
 
     def configure_control(self, mode: str = "auto") -> None:
-        """Select the isolated control path before plugin discovery."""
+        """Select the isolated control path before plugin discovery.
+
+        Args:
+            mode: ``"native"``, ``"python"``, or ``"auto"``.
+        """
         with self._condition:
             self._ensure_open()
             if "isolated" in self._backends:
@@ -121,7 +144,15 @@ class Runtime:
         shutdown: object = 30.0,
         kill_grace: object = 30.0,
     ) -> None:
-        """Configure isolated transport deadlines before plugin discovery."""
+        """Configure isolated transport deadlines before plugin discovery.
+
+        Args:
+            startup: Worker startup and handshake timeout in seconds.
+            request: Operation RPC timeout in seconds.
+            fd_transfer: Buffer-control acknowledgement timeout in seconds.
+            shutdown: Graceful worker shutdown timeout in seconds.
+            kill_grace: Timeout after termination before forcing a kill.
+        """
         with self._condition:
             self._ensure_open()
             if "isolated" in self._backends:
@@ -135,6 +166,12 @@ class Runtime:
             )
 
     def use_backend(self, name: str) -> None:
+        """Select an available execution backend.
+
+        Args:
+            name: ``"local"``, ``"bundled"``, or ``"isolated"`` when
+                available.
+        """
         with self._condition:
             self._ensure_open()
             if name not in self._backends:
@@ -152,6 +189,17 @@ class Runtime:
         out: object | None = None,
         **kwargs: object,
     ) -> object:
+        """Invoke an operation through the selected backend.
+
+        Args:
+            operation: Registered operation name.
+            *args: Tensor and scalar operation arguments.
+            out: Optional reusable output tensor or tuple.
+            **kwargs: Named scalar operation arguments.
+
+        Returns:
+            A tensor or tuple of tensors declared by the operation metadata.
+        """
         with self._condition:
             self._accept_work()
             backend = self._backends[self._backend_name]
@@ -161,6 +209,11 @@ class Runtime:
             self._finish_work()
 
     def close(self) -> None:
+        """Finish accepted work, release runtime resources, and reset state.
+
+        The method is idempotent. It attempts every backend cleanup and raises
+        the first cleanup failure after restoring constructor-equivalent state.
+        """
         with self._condition:
             if self._state == "closing":
                 generation = self._close_generation

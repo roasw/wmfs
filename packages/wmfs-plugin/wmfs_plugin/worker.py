@@ -30,6 +30,16 @@ class _Operation:
 
 
 def worker_main(operations: Mapping[str, OperationHandler]) -> None:
+    """Run a metadata-driven plugin worker on inherited transport descriptors.
+
+    Args:
+        operations: Mapping from every declared operation name, including
+            internal VJP operations, to an invocation-context handler.
+
+    Note:
+        The worker entry point is launched by WMFS and receives its RPC socket,
+        FD-control socket, schema, and interface through command-line options.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--rpc-fd", type=int, required=True)
     parser.add_argument("--fd-socket-fd", type=int, required=True)

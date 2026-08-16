@@ -45,6 +45,14 @@
           bundledRuntime = self.packages.${system}.bundled;
           referenceWorker = self.packages.${system}.reference-worker;
           pythonWorker = self.packages.${system}.reference-python-worker;
+          documentationPython = pkgs.python3.withPackages (ps: [
+            self.packages.${system}.wmfs-plugin
+            ps.breathe
+            ps.myst-parser
+            ps.pycapnp
+            ps.sphinx
+            ps.torch
+          ]);
         in
         {
           pre-commit-check = git-hooks.lib.${system}.run {
@@ -207,6 +215,26 @@
                   --cpp-output ${./plugins/reference/generated/reference_dispatch.inc}
                 touch $out
               '';
+
+          documentation = pkgs.stdenvNoCC.mkDerivation {
+            name = "wmfs-documentation";
+            src = ./.;
+            nativeBuildInputs = [
+              pkgs.cmake
+              pkgs.doxygen
+              documentationPython
+            ];
+            dontConfigure = true;
+            buildPhase = ''
+              runHook preBuild
+              bash docs/build.sh "$PWD"
+              runHook postBuild
+            '';
+            installPhase = ''
+              mkdir -p "$out"
+              cp -R build/docs/html/. "$out/"
+            '';
+          };
         }
       );
 
@@ -223,6 +251,14 @@
         let
           pkgs = pkgsFactory system nixpkgs;
           pre-commit-check = self.checks.${system}.pre-commit-check;
+          documentationPython = pkgs.python3.withPackages (ps: [
+            self.packages.${system}.wmfs-plugin
+            ps.breathe
+            ps.myst-parser
+            ps.pycapnp
+            ps.sphinx
+            ps.torch
+          ]);
         in
         {
           default = pkgs.mkShell {
@@ -244,6 +280,15 @@
               export PATH="$development_output/bin:$PATH"
               export PYTHONPATH="$development_output:$repo_root/packages/wmfs:$repo_root/packages/wmfs-plugin''${PYTHONPATH:+:$PYTHONPATH}"
             '';
+          };
+
+          docs = pkgs.mkShell {
+            name = "wmfs-docs";
+            packages = [
+              pkgs.cmake
+              pkgs.doxygen
+              documentationPython
+            ];
           };
         }
       );
