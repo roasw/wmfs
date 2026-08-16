@@ -51,6 +51,7 @@ in
       "-DWMFS_BUILD_REFERENCE_WORKER=ON"
       "-DWMFS_BUNDLED_PLUGINS="
     ];
+    buildTargets = [ "wmfs-reference-worker" ];
 
     postInstall = ''
       substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \

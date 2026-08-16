@@ -68,6 +68,14 @@ capnp_generate_cpp(
   packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/tensor.capnp
   packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp
 )
+add_library(wmfs-protocol STATIC ${WMFS_CAPNP_SOURCES})
+add_library(wmfs::protocol ALIAS wmfs-protocol)
+set_target_properties(wmfs-protocol PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(
+  wmfs-protocol
+  PUBLIC "${CMAKE_CURRENT_BINARY_DIR}"
+)
+target_link_libraries(wmfs-protocol PUBLIC CapnProto::capnp-rpc)
 
 if(WMFS_BUILD_PYTHON_RUNTIME)
   find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
@@ -80,34 +88,51 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
   find_package(nanobind CONFIG REQUIRED)
 
   nanobind_add_module(
-    _native
+    wmfs-native-runtime
     NB_STATIC
     src/native_module.cpp
     src/native_session.cpp
-    ${WMFS_CAPNP_SOURCES}
   )
+  add_library(wmfs::native-runtime ALIAS wmfs-native-runtime)
+  set_target_properties(wmfs-native-runtime PROPERTIES OUTPUT_NAME _native)
 
   target_include_directories(
-    _native
+    wmfs-native-runtime
     PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/inc"
-      "${CMAKE_CURRENT_BINARY_DIR}"
   )
-  target_link_libraries(_native PRIVATE CapnProto::capnp-rpc CapnProto::kj-async)
+  target_link_libraries(
+    wmfs-native-runtime
+    PRIVATE wmfs::protocol CapnProto::kj-async
+  )
 
-  install(TARGETS _native LIBRARY DESTINATION wmfs)
+  install(
+    TARGETS wmfs-native-runtime
+    LIBRARY DESTINATION wmfs
+    COMPONENT runtime
+  )
 
   if(WMFS_BUNDLE_REFERENCE)
     nanobind_add_module(
-      _bundled
+      wmfs-bundled-reference
       NB_STATIC
       src/bundled_module.cpp
       src/reference_torch_ops.cpp
     )
-    target_link_libraries(_bundled PRIVATE wmfs-reference-kernels)
-    target_compile_options(_bundled PRIVATE ${TORCH_CXX_FLAGS})
-    set_target_properties(_bundled PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
-    install(TARGETS _bundled LIBRARY DESTINATION wmfs)
+    add_library(wmfs::bundled-reference ALIAS wmfs-bundled-reference)
+    target_link_libraries(wmfs-bundled-reference PRIVATE wmfs-reference-kernels)
+    target_compile_options(wmfs-bundled-reference PRIVATE ${TORCH_CXX_FLAGS})
+    set_target_properties(
+      wmfs-bundled-reference
+      PROPERTIES
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+        OUTPUT_NAME _bundled
+    )
+    install(
+      TARGETS wmfs-bundled-reference
+      LIBRARY DESTINATION wmfs
+      COMPONENT runtime
+    )
   endif()
 endif()
 
@@ -128,7 +153,6 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     wmfs-reference-worker
     src/reference_mapped_buffers.cpp
     src/reference_worker.cpp
-    ${WMFS_CAPNP_SOURCES}
     ${REFERENCE_CAPNP_SOURCES}
   )
   target_include_directories(
@@ -144,6 +168,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       CapnProto::capnp-rpc
       CapnProto::kj-async
       Threads::Threads
+      wmfs::protocol
       wmfs-reference-kernels
   )
   target_compile_options(wmfs-reference-worker PRIVATE ${TORCH_CXX_FLAGS})
@@ -157,7 +182,6 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       wmfs-reference-mapped-buffers-test
       tests/reference_mapped_buffers_test.cpp
       src/reference_mapped_buffers.cpp
-      ${WMFS_CAPNP_SOURCES}
     )
     target_include_directories(
       wmfs-reference-mapped-buffers-test
@@ -167,7 +191,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     )
     target_link_libraries(
       wmfs-reference-mapped-buffers-test
-      PRIVATE CapnProto::capnp-rpc Threads::Threads ${TORCH_LIBRARIES}
+      PRIVATE wmfs::protocol Threads::Threads ${TORCH_LIBRARIES}
     )
     target_compile_options(
       wmfs-reference-mapped-buffers-test
@@ -185,13 +209,19 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     endforeach()
   endif()
 
-  install(TARGETS wmfs-reference-worker RUNTIME DESTINATION bin)
+  install(
+    TARGETS wmfs-reference-worker
+    RUNTIME DESTINATION bin
+    COMPONENT reference-worker
+  )
   install(
     FILES plugins/reference/plugin.toml
     DESTINATION share/wmfs/plugins/reference
+    COMPONENT reference-worker
   )
   install(
     FILES plugins/reference/schemas/wmfs-reference/reference.capnp
     DESTINATION share/wmfs/plugins/reference/schemas/wmfs-reference
+    COMPONENT reference-worker
   )
 endif()

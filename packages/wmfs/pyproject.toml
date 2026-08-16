@@ -17,3 +17,4 @@ wmfs-benchmark = "wmfs.benchmark:main"
 wheel.packages = ["wmfs"]
 cmake.build-type = "Release"
 cmake.source-dir = "../.."
+install.components = ["runtime"]
