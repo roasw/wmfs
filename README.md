@@ -128,8 +128,14 @@ three built-in operations.
 ## Plugin Discovery
 
 Python plugins depend on the standalone `wmfs-plugin` distribution rather than
-the main runtime. The SDK provides the protocol schemas, FD receiver, mapped
-Torch views, and metadata-driven worker bootstrap:
+the main runtime; the SDK source does not import `wmfs`. For v0.1 its invocation,
+shared-memory transport, and worker layers deliberately target Torch CPU
+tensors. The wire schemas and metadata model are Torch-independent and can be
+imported by control-plane tooling without loading Torch. Both layers remain in
+one SDK distribution until a separate package has a concrete use case.
+
+The SDK provides the protocol schemas, FD receiver, mapped Torch views, and
+metadata-driven worker bootstrap:
 
 ```python
 from wmfs_plugin import InvocationContext, worker_main
