@@ -125,10 +125,6 @@ class NativeWorkerSession:
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
         operation = self._operations[operation_name]
-        if any(plan.known is None for plan in operation.output_plans):
-            raise ValueError(
-                f"Native control requires known outputs for {operation_name!r}"
-            )
         invocation_id = secrets.randbits(64)
         input_metrics: list[InputPreparationMetrics] = []
         output_metrics: list[OutputAllocationMetrics] = []

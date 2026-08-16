@@ -160,12 +160,12 @@ Discovery exchanges metadata only. Discovered operations continue to execute
 through the explicitly selected backend until isolated operation dispatch is
 enabled.
 
-Known output plans may reference input axes, minimum dimensions, Boolean scalar
+Output plans may reference input axes, minimum dimensions, Boolean scalar
 selection, input dtypes, and tensor/scalar dtype promotion. The runtime
-validates these plans during discovery, preallocates every known output, and
-passes its writable descriptor in the operation request. This removes the
-reverse output-allocator RPC from high-frequency calls. Dynamic operations may
-still use the allocator capability.
+validates these plans during discovery, preallocates every output, and passes
+its writable descriptor in the operation request. Dynamic output plans are
+reserved by the protocol but rejected until a generic allocator invocation is
+implemented for both control paths.
 
 ## Shared CPU Tensors
 

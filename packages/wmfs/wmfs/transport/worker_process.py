@@ -19,7 +19,6 @@ from wmfs.memory.buffers import (
     BufferAccessLease,
     BufferManager,
     ManagedTensor,
-    TensorDescriptor,
 )
 from wmfs.output_metadata import (
     bind_reusable_outputs,
@@ -127,73 +126,6 @@ def _load_plugin_schema(manifest: "PluginManifest") -> ModuleType:
     return capnp.load(
         str(manifest.schema_path), imports=[str(item) for item in imports]
     )
-
-
-class _OutputAllocator:
-    def __init__(
-        self,
-        schema: ModuleType,
-        buffers: BufferManager,
-        fd_sender: FdSender,
-        invocation_id: int,
-        metrics: list[OutputAllocationMetrics] | None = None,
-    ) -> None:
-        allocator = self
-
-        class Server(schema.OutputAllocator.Server):
-            async def allocate(
-                self,
-                shape: object,
-                dtype: object,
-                _context: object,
-                **_kwargs: object,
-            ) -> tuple[dict[str, object]]:
-                service_start = perf_counter_ns()
-                allocation_start = perf_counter_ns()
-                managed = allocator._allocate(
-                    tuple(int(item) for item in shape), str(dtype)
-                )
-                allocation_ns = perf_counter_ns() - allocation_start
-                mapping_start = perf_counter_ns()
-                transferred = await asyncio.to_thread(
-                    fd_sender.ensure_mapped,
-                    managed.buffer,
-                    invocation_id=invocation_id,
-                    writable=True,
-                )
-                mapping_ns = perf_counter_ns() - mapping_start
-                if metrics is not None:
-                    metrics.append(
-                        OutputAllocationMetrics(
-                            byte_length=managed.buffer.byte_length,
-                            shared_allocation_ns=allocation_ns,
-                            mapping_ns=mapping_ns,
-                            service_ns=perf_counter_ns() - service_start,
-                            fd_transferred=transferred,
-                        )
-                    )
-                return (managed.descriptor.as_capnp(),)
-
-        self.server = Server()
-        self._buffers = buffers
-        self.allocations: dict[TensorDescriptor, ManagedTensor] = {}
-
-    def _allocate(self, shape: tuple[int, ...], dtype: str) -> ManagedTensor:
-        if len(self.allocations) >= 8:
-            raise ValueError("Operation output allocation limit exceeded")
-        managed = self._buffers.empty_named(shape, dtype)
-        self.allocations[managed.descriptor] = managed
-        return managed
-
-    def resolve(self, descriptor: object) -> ManagedTensor:
-        parsed = TensorDescriptor.from_capnp(descriptor)
-        managed = self.allocations.get(parsed)
-        if managed is None:
-            raise ValueError("Worker returned an output it did not allocate")
-        return managed
-
-    def clear(self) -> None:
-        self.allocations.clear()
 
 
 class WorkerSession:
@@ -334,53 +266,16 @@ class WorkerSession:
                 )
             ]
             scalars = _bind_scalars(metadata, args, kwargs)
-            if all(plan.known is not None for plan in metadata.output_plans):
-                return await self._invoke_known(
-                    metadata,
-                    inputs,
-                    scalars,
-                    invocation_id,
-                    input_metrics,
-                    output_metrics,
-                    collect_metrics,
-                    out,
-                )
-            if out is not None:
-                raise ValueError(
-                    f"Operation {operation!r} cannot reuse dynamic outputs"
-                )
-            allocator = _OutputAllocator(
-                _load_runtime_schema(),
-                self._buffers,
-                self._fd_sender,
+            return await self._invoke_known(
+                metadata,
+                inputs,
+                scalars,
                 invocation_id,
+                input_metrics,
                 output_metrics,
+                collect_metrics,
+                out,
             )
-            dispatched = False
-            completed = False
-            try:
-                dispatched = True
-                response = await asyncio.wait_for(
-                    self._call_operation(
-                        operation, inputs, args, kwargs, allocator, invocation_id
-                    ),
-                    _RPC_TIMEOUT_SECONDS,
-                )
-                self._fd_sender.finish_invocation(invocation_id)
-                completed = True
-                result = self._resolve_outputs(operation, response, allocator)
-                allocator.clear()
-                return result, InvocationMetrics(
-                    inputs=tuple(input_metrics or ()),
-                    outputs=tuple(output_metrics or ()),
-                )
-            except Exception:
-                if dispatched and not completed:
-                    self._invalidated = True
-                    if self._shutdown is not None:
-                        self._shutdown.set()
-                allocator.clear()
-                raise
 
     async def _invoke_known(
         self,
@@ -560,50 +455,6 @@ class WorkerSession:
                     if self._invalidated:
                         self.close()
                     raise
-
-    async def _call_operation(
-        self,
-        operation: str,
-        inputs: list[ManagedTensor],
-        args: tuple[object, ...],
-        kwargs: dict[str, object],
-        allocator: _OutputAllocator,
-        invocation_id: int,
-    ) -> object:
-        descriptors = [item.descriptor.as_capnp() for item in inputs]
-        if operation == "matmul":
-            return await self._plugin.matmul(
-                invocationId=invocation_id,
-                a=descriptors[0],
-                b=descriptors[1],
-                allocator=allocator.server,
-            )
-        if operation == "svd":
-            return await self._plugin.svd(
-                invocationId=invocation_id,
-                a=descriptors[0],
-                fullMatrices=bool(kwargs.get("full_matrices", True)),
-                allocator=allocator.server,
-            )
-        if operation == "add_scalar":
-            value = next(item for item in args if not isinstance(item, torch.Tensor))
-            return await self._plugin.addScalar(
-                invocationId=invocation_id,
-                a=descriptors[0],
-                value=float(value),
-                allocator=allocator.server,
-            )
-        raise ValueError(f"Unknown isolated operation {operation!r}")
-
-    def _resolve_outputs(
-        self, operation: str, response: object, allocator: _OutputAllocator
-    ) -> object:
-        if operation == "svd":
-            return tuple(
-                allocator.resolve(item).tensor
-                for item in (response.u, response.s, response.vh)
-            )
-        return allocator.resolve(response.result).tensor
 
 
 def _bind_scalars(

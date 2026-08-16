@@ -25,6 +25,11 @@ def validate_operation_metadata(operation: OperationMetadata) -> None:
         )
     if len(operation.output_plans) > _MAX_OUTPUTS:
         raise ValueError(f"Operation {operation.name!r} declares too many outputs")
+    if any(plan.known is None for plan in operation.output_plans):
+        raise ValueError(
+            f"Operation {operation.name!r} declares dynamic outputs, which are not "
+            "supported"
+        )
     for scalar in operation.scalar_parameters:
         if scalar.name == "out":
             raise ValueError("Scalar parameter name 'out' is reserved")
@@ -46,8 +51,7 @@ def validate_operation_metadata(operation: OperationMetadata) -> None:
                 f"Operation {operation.name!r} output plan {plan.name!r} does not "
                 f"match {parameter.name!r}"
             )
-        if plan.known is not None:
-            _validate_known_output(plan, operation)
+        _validate_known_output(plan, operation)
 
 
 def evaluate_outputs(
