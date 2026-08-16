@@ -29,6 +29,15 @@
 namespace wmfs::native {
 namespace {
 
+template <typename Reader>
+std::vector<std::uint8_t> serialize_reader(Reader reader) {
+    capnp::MallocMessageBuilder message;
+    message.setRoot(reader);
+    auto words = capnp::messageToFlatArray(message);
+    auto bytes = words.asBytes();
+    return {bytes.begin(), bytes.end()};
+}
+
 struct MappingKey {
     std::uint64_t buffer_id;
     std::uint32_t generation;
@@ -140,11 +149,22 @@ struct Session::Impl {
                     .timeoutAfter(30 * kj::SECONDS,
                                   plugin.getMetadataRequest().send())
                     .wait(io.waitScope);
-            if (metadata.getMetadata().getFingerprint() !=
-                expected_fingerprint) {
+            metadata_bytes = serialize_reader(metadata.getMetadata());
+            if (expected_fingerprint != 0 &&
+                metadata.getMetadata().getFingerprint() !=
+                    expected_fingerprint) {
                 throw std::runtime_error(
                     "Worker metadata does not match discovered plugin");
             }
+        }
+
+        std::vector<std::uint8_t> environment() {
+            auto response =
+                io.provider->getTimer()
+                    .timeoutAfter(30 * kj::SECONDS,
+                                  plugin.getEnvironmentRequest().send())
+                    .wait(io.waitScope);
+            return serialize_reader(response.getEnvironment());
         }
 
         void ping(std::uint64_t nonce) {
@@ -158,6 +178,8 @@ struct Session::Impl {
                     "Worker returned an invalid ping response");
             }
         }
+
+        std::vector<std::uint8_t> metadata_bytes;
 
         void map_buffer(const Mapping &mapping, int fd,
                         std::uint64_t transfer_id) {
@@ -473,6 +495,20 @@ Session::Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint)
     : impl_(std::make_unique<Impl>(rpc_fd, control_fd, expected_fingerprint)) {}
 
 Session::~Session() = default;
+
+std::vector<std::uint8_t> Session::metadata() {
+    std::vector<std::uint8_t> result;
+    impl_->submit(
+        [&result](Impl::Worker &worker) { result = worker.metadata_bytes; });
+    return result;
+}
+
+std::vector<std::uint8_t> Session::environment() {
+    std::vector<std::uint8_t> result;
+    impl_->submit(
+        [&result](Impl::Worker &worker) { result = worker.environment(); });
+    return result;
+}
 
 bool Session::mapping_required(const Mapping &mapping) const {
     std::lock_guard lock(impl_->mapping_mutex);

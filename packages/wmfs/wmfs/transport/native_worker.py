@@ -22,10 +22,12 @@ from wmfs.invocation import (
     share_input,
 )
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
-from wmfs.registry import PluginMetadata
+from wmfs.registry import EnvironmentMetadata, OperationMetadata, PluginMetadata
 from wmfs.transport.worker_process import (
+    _load_runtime_schema,
     _start_worker,
 )
+from wmfs_plugin.metadata import metadata_from_reader
 
 _MAX_NATIVE_DESCRIPTORS = 256
 
@@ -45,12 +47,13 @@ class NativeWorkerSession:
         self,
         manifest: object,
         buffers: BufferManager,
-        metadata: PluginMetadata,
+        metadata: PluginMetadata | None = None,
     ) -> None:
         native: ModuleType = importlib.import_module("wmfs._native")
         self._native = native
         self._buffers = buffers
-        self._operations = {item.name: item for item in metadata.operations}
+        self._metadata: PluginMetadata | None = None
+        self._operations: dict[str, OperationMetadata] = {}
         self._process: subprocess.Popen[str] | None = None
         self._session: object | None = None
         self._native_descriptors: OrderedDict[TensorDescriptor, object] = OrderedDict()
@@ -64,15 +67,46 @@ class NativeWorkerSession:
             rpc_child.close()
             fd_child.close()
             self._session = native.Session(
-                rpc_parent.detach(), fd_parent.detach(), metadata.fingerprint
+                rpc_parent.detach(),
+                fd_parent.detach(),
+                metadata.fingerprint if metadata is not None else 0,
             )
+            with _load_runtime_schema().PluginMetadata.from_bytes(
+                self._session.metadata
+            ) as reader:
+                discovered = metadata_from_reader(reader)
+            if metadata is not None and discovered != metadata:
+                raise RuntimeError("Worker metadata does not match discovered plugin")
+            self._metadata = discovered
+            self._operations = {item.name: item for item in discovered.operations}
         except Exception:
             rpc_parent.close()
             rpc_child.close()
             fd_parent.close()
             fd_child.close()
+            if self._session is not None:
+                self._session.close()
+                self._session = None
             self._stop_process()
             raise
+
+    @property
+    def metadata(self) -> PluginMetadata:
+        if self._metadata is None:
+            raise RuntimeError("Worker session is not ready")
+        return self._metadata
+
+    def environment(self) -> EnvironmentMetadata:
+        with self._lifecycle_lock:
+            with _load_runtime_schema().EnvironmentMetadata.from_bytes(
+                self._ensure_open().environment()
+            ) as environment:
+                return EnvironmentMetadata(
+                    python_version=str(environment.pythonVersion),
+                    torch_version=str(environment.torchVersion),
+                    glibc_version=str(environment.glibcVersion),
+                    executable=str(environment.executable),
+                )
 
     def invoke(
         self,

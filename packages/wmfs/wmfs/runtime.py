@@ -7,7 +7,7 @@ from typing import Protocol
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
-from wmfs.plugins import discover_plugin_manifests
+from wmfs.plugins import find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
 
 
@@ -65,15 +65,14 @@ class Runtime:
         with self._condition:
             self._accept_work()
         try:
-            registry, manifests = discover_plugin_manifests(list(plugin_directories))
+            manifests = find_manifests(list(plugin_directories))
+            registry, replacement = IsolatedBackend.discover(
+                manifests,
+                memory_mode=self._memory_mode,
+                arena_bytes=self._arena_bytes,
+                control_mode=self._control_mode,
+            )
             with self._condition:
-                replacement = IsolatedBackend(
-                    manifests,
-                    registry,
-                    memory_mode=self._memory_mode,
-                    arena_bytes=self._arena_bytes,
-                    control_mode=self._control_mode,
-                )
                 previous = self._backends.get("isolated")
                 self._registry = registry
                 self._backends["isolated"] = replacement

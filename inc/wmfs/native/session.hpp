@@ -74,6 +74,8 @@ class Session {
                     const TensorDescriptors &outputs,
                     const std::vector<ScalarArgument> &scalars);
     void ping(std::uint64_t nonce);
+    std::vector<std::uint8_t> metadata();
+    std::vector<std::uint8_t> environment();
     void close();
 
     std::uint64_t transfer_count() const;

@@ -5,7 +5,7 @@ import torch
 from wmfs.autograd import invoke_with_vjp
 from wmfs.memory import BufferManager
 from wmfs.plugins import PluginManifest
-from wmfs.registry import OperationRegistry
+from wmfs.registry import EnvironmentMetadata, OperationRegistry
 from wmfs.transport.native_worker import NativeWorkerSession, native_available
 from wmfs.transport.worker_process import WorkerSession
 
@@ -31,6 +31,55 @@ class IsolatedBackend:
         self._creating: set[str] = set()
         self._inflight = 0
         self._state = "open"
+
+    @classmethod
+    def discover(
+        cls,
+        manifests: tuple[PluginManifest, ...],
+        *,
+        memory_mode: str = "pooled",
+        arena_bytes: int | None = None,
+        control_mode: str = "auto",
+    ) -> tuple[OperationRegistry, "IsolatedBackend"]:
+        registry = OperationRegistry()
+        backend = cls(
+            manifests,
+            registry,
+            memory_mode=memory_mode,
+            arena_bytes=arena_bytes,
+            control_mode=control_mode,
+        )
+        try:
+            for manifest in manifests:
+                if manifest.name in backend._sessions:
+                    raise ValueError(f"Plugin {manifest.name!r} is already discovered")
+                session = backend._new_session(manifest.name, discover=True)
+                backend._sessions[manifest.name] = session
+                metadata = session.metadata
+                if metadata.name != manifest.name:
+                    raise ValueError(
+                        f"Plugin manifest names {manifest.name!r}, but worker reports "
+                        f"{metadata.name!r}"
+                    )
+                if metadata.version != manifest.version:
+                    raise ValueError(
+                        f"Plugin manifest version is {manifest.version!r}, but worker "
+                        f"reports {metadata.version!r}"
+                    )
+                registry.register(metadata)
+            return registry, backend
+        except BaseException:
+            backend.close()
+            raise
+
+    def plugin_environment(self, plugin_name: str) -> EnvironmentMetadata:
+        session = self._acquire_session(plugin_name)
+        try:
+            return session.environment()
+        finally:
+            with self._condition:
+                self._inflight -= 1
+                self._condition.notify_all()
 
     def invoke(
         self,
@@ -152,7 +201,10 @@ class IsolatedBackend:
                 self._condition.notify_all()
         raise RuntimeError("Isolated backend is closed")
 
-    def _new_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+    def _new_session(
+        self, plugin_name: str, *, discover: bool = False
+    ) -> WorkerSession | NativeWorkerSession:
+        expected = None if discover else self._registry.plugin(plugin_name)
         use_native = self._control_mode == "native" or (
             self._control_mode == "auto" and native_available()
         )
@@ -160,10 +212,10 @@ class IsolatedBackend:
             return NativeWorkerSession(
                 self._manifests[plugin_name],
                 self._buffers,
-                self._registry.plugin(plugin_name),
+                expected,
             )
         return WorkerSession(
             self._manifests[plugin_name],
             self._buffers,
-            self._registry.plugin(plugin_name),
+            expected,
         )

@@ -21,11 +21,7 @@ from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.registry import PluginMetadata
 from wmfs.transport.native_worker import NativeWorkerSession
-from wmfs.transport.worker_process import (
-    WorkerSession,
-    inspect_plugin,
-    inspect_worker_environment,
-)
+from wmfs.transport.worker_process import WorkerSession
 
 _TIERS = ("small", "medium", "large")
 _DEFAULT_SIZES = {
@@ -116,10 +112,17 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             f"found {len(manifests)}"
         )
     manifest = manifests[0]
-    metadata = inspect_plugin(manifest)
+    with BufferManager(
+        mode=config.memory_mode, arena_bytes=config.arena_bytes
+    ) as discovery_buffers:
+        discovery_session = _new_session(manifest, discovery_buffers, None, config)
+        try:
+            metadata = discovery_session.metadata
+            worker = discovery_session.environment()
+        finally:
+            discovery_session.close()
 
     startup = _benchmark_startup(manifest, metadata, config)
-    worker = inspect_worker_environment(manifest)
     rpc = _benchmark_rpc(manifest, metadata, config)
 
     generator = torch.Generator().manual_seed(config.seed)
@@ -793,7 +796,7 @@ def _benchmark_high_frequency(
 def _new_session(
     manifest: Any,
     buffers: BufferManager,
-    metadata: PluginMetadata,
+    metadata: PluginMetadata | None,
     config: BenchmarkConfig,
 ) -> WorkerSession | NativeWorkerSession:
     if config.control_mode == "native":

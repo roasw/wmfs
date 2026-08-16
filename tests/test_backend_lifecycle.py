@@ -137,3 +137,54 @@ def test_backend_close_attempts_all_sessions_and_buffers(
     assert raised.value is first_failure
     assert closed == ["first", "second", "third", "buffers"]
     backend.close()
+
+
+def test_discovery_failure_closes_all_partial_sessions_and_buffers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+
+    def metadata(name: str, operation: str) -> PluginMetadata:
+        return PluginMetadata(
+            name=name,
+            version="1",
+            protocol_version=1,
+            operations=(
+                OperationMetadata(
+                    name=operation,
+                    tensor_inputs=(),
+                    tensor_outputs=(),
+                    scalar_parameters=(),
+                    operation_id=1,
+                    output_plans=(),
+                ),
+            ),
+            fingerprint=1,
+        )
+
+    class Session:
+        def __init__(self, manifest: PluginManifest, *_args: object) -> None:
+            self.name = manifest.name
+            self.metadata = metadata(manifest.name, "duplicate")
+
+        def close(self) -> None:
+            closed.append(self.name)
+
+    class Buffers:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            closed.append("buffers")
+
+    manifests = (
+        PluginManifest("first", "1", Path(), "First", "first", Path()),
+        PluginManifest("second", "1", Path(), "Second", "second", Path()),
+    )
+    monkeypatch.setattr(isolated_module, "WorkerSession", Session)
+    monkeypatch.setattr(isolated_module, "BufferManager", Buffers)
+
+    with pytest.raises(ValueError, match="already registered"):
+        IsolatedBackend.discover(manifests, control_mode="python")
+
+    assert closed == ["first", "second", "buffers"]

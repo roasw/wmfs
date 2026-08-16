@@ -65,11 +65,12 @@ class WorkerSession:
         self,
         manifest: "PluginManifest",
         buffers: BufferManager,
-        expected_metadata: PluginMetadata,
+        expected_metadata: PluginMetadata | None = None,
     ) -> None:
         self._manifest = manifest
         self._buffers = buffers
         self._expected_metadata = expected_metadata
+        self._metadata: PluginMetadata | None = None
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._submit_lock = threading.RLock()
@@ -93,6 +94,21 @@ class WorkerSession:
             raise RuntimeError(
                 "Worker session failed to start"
             ) from self._startup_error
+
+    @property
+    def metadata(self) -> PluginMetadata:
+        if self._metadata is None:
+            raise RuntimeError("Worker session is not ready")
+        return self._metadata
+
+    def environment(self) -> EnvironmentMetadata:
+        with self._submit_lock:
+            if self._closed or self._loop is None:
+                raise RuntimeError("Worker session is closed")
+            if threading.current_thread() is self._thread:
+                raise RuntimeError("Worker session cannot synchronously call itself")
+            future = asyncio.run_coroutine_threadsafe(self._environment(), self._loop)
+            return future.result(timeout=_RPC_TIMEOUT_SECONDS)
 
     def invoke(
         self,
@@ -151,12 +167,16 @@ class WorkerSession:
         self._invoke_lock = asyncio.Lock()
         async with _worker_connection(self._manifest) as (plugin, fd_sender):
             metadata = await _validate_worker(plugin)
-            if metadata != self._expected_metadata:
+            if (
+                self._expected_metadata is not None
+                and metadata != self._expected_metadata
+            ):
                 raise RuntimeError(
                     "Worker metadata changed after plugin discovery "
                     f"(expected fingerprint 0x{self._expected_metadata.fingerprint:016x}, "
                     f"received 0x{metadata.fingerprint:016x})"
                 )
+            self._metadata = metadata
             self._plugin = plugin
             self._operations = {item.name: item for item in metadata.operations}
             self._fd_sender = fd_sender
@@ -337,6 +357,21 @@ class WorkerSession:
             )
             if response.nonce != nonce:
                 raise RuntimeError("Worker returned an invalid ping response")
+
+    async def _environment(self) -> EnvironmentMetadata:
+        if self._invoke_lock is None or self._plugin is None:
+            raise RuntimeError("Worker session is not ready")
+        async with self._invoke_lock:
+            response = await asyncio.wait_for(
+                self._plugin.getEnvironment(), _RPC_TIMEOUT_SECONDS
+            )
+            environment = response.environment
+            return EnvironmentMetadata(
+                python_version=str(environment.pythonVersion),
+                torch_version=str(environment.torchVersion),
+                glibc_version=str(environment.glibcVersion),
+                executable=str(environment.executable),
+            )
 
     def _submit_invocation(
         self,

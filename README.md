@@ -169,9 +169,11 @@ runtime.discover_plugins(Path("plugins"))
 print(runtime.operation_names)
 ```
 
-Discovery exchanges metadata only. Discovered operations continue to execute
-through the explicitly selected backend until isolated operation dispatch is
-enabled.
+Discovery is eager: it starts one worker per plugin, validates its metadata, and
+retains that session for isolated execution. A discovery failure closes every
+session started by that attempt, and the existing registry remains unchanged.
+Discovered operations continue to execute through the explicitly selected
+backend until isolated operation dispatch is enabled.
 
 Output plans may reference input axes, minimum dimensions, Boolean scalar
 selection, input dtypes, and tensor/scalar dtype promotion. The runtime

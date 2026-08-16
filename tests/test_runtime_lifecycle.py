@@ -74,23 +74,22 @@ def test_close_resets_registry_and_configuration(
     configurations: list[tuple[str, int | None, str]] = []
 
     class Backend:
-        def __init__(
-            self,
+        @classmethod
+        def discover(
+            cls,
             _manifests: object,
-            _registry: object,
             *,
             memory_mode: str,
             arena_bytes: int | None,
             control_mode: str,
-        ) -> None:
+        ) -> tuple[OperationRegistry, "Backend"]:
             configurations.append((memory_mode, arena_bytes, control_mode))
+            return registry, cls()
 
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr(
-        runtime_module, "discover_plugin_manifests", lambda _directories: (registry, ())
-    )
+    monkeypatch.setattr(runtime_module, "find_manifests", lambda _directories: ())
     monkeypatch.setattr(runtime_module, "IsolatedBackend", Backend)
     candidate = Runtime()
     candidate.configure_memory("arena", arena_bytes=1024)

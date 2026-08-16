@@ -165,6 +165,18 @@ nb::dict invoke_profiled(Session &session, std::uint64_t invocation_id,
     return result;
 }
 
+nb::bytes metadata(Session &session) {
+    auto value = session.metadata();
+    return nb::bytes(reinterpret_cast<const char *>(value.data()),
+                     value.size());
+}
+
+nb::bytes environment(Session &session) {
+    auto value = session.environment();
+    return nb::bytes(reinterpret_cast<const char *>(value.data()),
+                     value.size());
+}
+
 } // namespace
 
 NB_MODULE(_native, module) {
@@ -185,6 +197,8 @@ NB_MODULE(_native, module) {
              "operation_id"_a, "inputs"_a, "outputs"_a, "scalars"_a)
         .def("ping", &Session::ping, "nonce"_a,
              nb::call_guard<nb::gil_scoped_release>())
+        .def_prop_ro("metadata", &metadata)
+        .def("environment", &environment)
         .def("close", &Session::close, nb::call_guard<nb::gil_scoped_release>())
         .def_prop_ro("transfer_count", &Session::transfer_count)
         .def_prop_ro("retirement_count", &Session::retirement_count);
