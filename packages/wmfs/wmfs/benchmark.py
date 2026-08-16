@@ -33,6 +33,89 @@ _DEFAULT_SIZES = {
 _DTYPES = {"float32": torch.float32, "float64": torch.float64}
 _BACKEND_NAMES = ("local", "bundled", "isolated")
 
+_COMPARISON_CONTRACT = {
+    "local": (
+        "In-process public PyTorch operation, including its ordinary Python dispatch, "
+        "output allocation, and numerical kernel."
+    ),
+    "bundled": (
+        "In-process bundled plugin operation using the same transport-neutral C++ "
+        "kernel as the reference worker, without RPC or shared-memory transport."
+    ),
+    "isolated": (
+        "Python frontend binding and planning, runtime-owned shared outputs, native "
+        "handoff, RPC, worker dispatch, and the same transport-neutral C++ kernel."
+    ),
+}
+
+_DIAGNOSTIC_PROVENANCE = {
+    "frontend_python": {
+        "metrics": ["scalar_binding_ms", "output_plan_evaluation_ms"],
+        "boundary": (
+            "Direct timers around scalar binding and schema output-expression "
+            "evaluation. Other Python bookkeeping remains included in isolated call "
+            "latency and is not inferred by subtracting overlapping timers."
+        ),
+    },
+    "rpc_control": {
+        "metrics": [
+            "rpc_round_trip_ms",
+            "native_call_ms",
+            "native_queue_wait_ms",
+            "native_rpc_ms",
+            "worker_dispatch_ms",
+        ],
+        "boundary": (
+            "RPC-only ping is independent. Native call is an invocation envelope; "
+            "queue, operation RPC, and worker dispatch are nested profile components."
+        ),
+    },
+    "mapping_transport": {
+        "metrics": [
+            "input_shared_preparation_ms",
+            "first_use_fd_transfer_mmap_ms",
+            "cached_ensure_mapped_ms",
+            "output_ensure_mapped_ms",
+            "worker_input_views_ms",
+            "worker_output_views_ms",
+        ],
+        "boundary": (
+            "Input sharing, FD transfer and mmap, cached mapping checks, and worker "
+            "tensor-view construction; first-use and cached samples are separate."
+        ),
+    },
+    "allocation": {
+        "metrics": [
+            "shared_memory_allocation_ms",
+            "pooled_shared_memory_allocation_ms",
+            "output_preallocation_service_ms",
+            "output_shared_allocation_ms",
+        ],
+        "boundary": (
+            "Runtime-owned cold, pooled, and per-output allocation service. Output "
+            "service is an envelope that includes its allocation and mapping work."
+        ),
+    },
+    "reclamation": {
+        "metrics": [
+            "uncached_buffer_reclamation_ms",
+            "cached_buffer_reclamation_ms",
+            "uncached_recipient_retirement_ms",
+            "cached_recipient_retirement_ms",
+            "uncached_buffer_reset_ms",
+            "cached_buffer_reset_ms",
+        ],
+        "boundary": (
+            "Post-return collection, worker recipient retirement, and buffer reset; "
+            "excluded from primary call latency."
+        ),
+    },
+    "kernel": {
+        "metrics": ["worker_kernel_ms"],
+        "boundary": "Worker-side transport-neutral numerical kernel execution.",
+    },
+}
+
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
@@ -169,7 +252,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -234,6 +317,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                 "come from separate, equally sized sample populations."
             ),
         },
+        "comparison_contract": _COMPARISON_CONTRACT,
+        "diagnostic_provenance": _DIAGNOSTIC_PROVENANCE,
         "high_frequency_add_scalar": high_frequency,
         "high_frequency_add_scalar_out": high_frequency_out,
         "operations": cases,
@@ -418,6 +503,7 @@ def render_table(report: dict[str, Any]) -> str:
             (
                 case["operation"],
                 case["tier"],
+                _median(diagnostics, "scalar_binding_ms"),
                 _median(diagnostics, "output_plan_evaluation_ms"),
                 _median(diagnostics, "native_queue_wait_ms"),
                 _median(diagnostics, "native_rpc_ms"),
@@ -435,6 +521,7 @@ def render_table(report: dict[str, Any]) -> str:
                 (
                     "operation",
                     "tier",
+                    "scalar bind",
                     "shape plan",
                     "queue",
                     "RPC",

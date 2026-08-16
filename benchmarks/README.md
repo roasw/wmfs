@@ -15,13 +15,13 @@ and C++ worker were built in Release mode by their Nix packages. The worker
 contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
 glibc 2.42.
 Torch was limited to one CPU thread. Each operation was warmed up twice, then
-measured ten times. The checked report envelopes use schema 8 and explicitly
+measured ten times. The checked report envelopes use schema 9 and explicitly
 contain no current operation samples because bundled measurements have not been
 generated on the reference host. Their `historical_report` links point to the
 earlier schema 5 numeric reports retained as `baseline.schema5.json` and
 `arena.schema5.json`, rather than relabeling or fabricating results. Those
 legacy boundaries included result destruction and safe-pool
-retirement/reset in isolated end-to-end samples. New schema 8 reports contain
+retirement/reset in isolated end-to-end samples. New schema 9 reports contain
 local, bundled, and isolated samples keyed by backend. All primary samples stop
 at backend return and post-return cleanup is measured separately.
 Known outputs are preallocated from schema metadata and each operation uses one
@@ -70,10 +70,13 @@ about 0.020 ms. Implementing the worker control plane and ATen views in C++
 reduced that to about 0.003 ms and removed pycapnp and asyncio from steady-state
 dispatch. Compared with the optimized Python worker report, arena small
 `add_scalar` fell from 0.431 ms to 0.198 ms and high-frequency latency fell from
-0.342 ms to 0.186 ms. Detailed JSON diagnostics separate output-plan
-evaluation, native queue wait, RPC, worker views, dispatch, and kernel execution.
-Profiling is opt-in on each invocation, so ordinary calls do not execute the
-timing code.
+0.342 ms to 0.186 ms. Detailed JSON diagnostics separate scalar binding,
+output-plan evaluation, native queue wait, RPC, worker views, dispatch, and
+kernel execution. Schema 9 also records backend comparison contracts and groups
+diagnostics by Python frontend, RPC/control, mapping/transport, allocation,
+reclamation, and kernel provenance. It does not derive a residual Python
+bookkeeping value from overlapping component timers. Profiling is opt-in on
+each invocation, so ordinary calls do not execute the timing code.
 
 Protocol v7 separates ordinary completion from profiled metrics. The native
 client also caches value-only tensor descriptors and replaces its allocating
@@ -84,5 +87,11 @@ outputs are the measurable remaining eager-path optimization, improving the
 high-frequency cheap-operation median by roughly 19-22% in this report.
 
 These historical values characterize one WSL2 host and are not performance
-thresholds. Regenerate both schema 8 reports on the target system when
-evaluating the security and performance tradeoff.
+thresholds. Regenerate both schema 9 reports on the target system when
+evaluating the security and performance tradeoff. Compare local, bundled, and
+isolated under identical settings; bundled versus isolated is the focused
+isolation comparison because it holds the reference C++ kernel constant. Only
+consider moving scalar binding, output planning, or other Python bookkeeping to
+C++ after repeated profiles show that specific boundary is material relative to
+end-to-end latency and run-to-run spread. Already-small paths are not
+optimization targets by default.

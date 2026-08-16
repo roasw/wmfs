@@ -1,5 +1,5 @@
 {
-    "schema_version": 8,
+    "schema_version": 9,
     "measurement_status": "Bundled reference measurements have not been generated.",
     "backends": [
         "local",

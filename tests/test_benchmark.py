@@ -34,14 +34,14 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
 
 
 @pytest.mark.parametrize("name", ("baseline", "arena"))
-def test_checked_reports_use_schema_8_without_fabricated_samples(name: str) -> None:
+def test_checked_reports_use_schema_9_without_fabricated_samples(name: str) -> None:
     benchmark_directory = Path(__file__).parents[1] / "benchmarks"
     report = json.loads((benchmark_directory / f"{name}.json").read_text())
     historical = json.loads(
         (benchmark_directory / report["historical_report"]).read_text()
     )
 
-    assert report["schema_version"] == 8
+    assert report["schema_version"] == 9
     assert report["backends"] == ["local", "bundled", "isolated"]
     assert report["operations"] == []
     assert historical["schema_version"] == 5
@@ -133,7 +133,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 8
+    assert report["schema_version"] == 9
     assert report["configuration"]["plugin_directory"] == str(
         PLUGIN_DIRECTORY.resolve()
     )
@@ -216,3 +216,9 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert (
         "nested within and overlap" in report["measurement_boundaries"]["diagnostics"]
     )
+    assert set(report["comparison_contract"]) == {"local", "bundled", "isolated"}
+    provenance = report["diagnostic_provenance"]
+    assert "scalar_binding_ms" in provenance["frontend_python"]["metrics"]
+    assert "worker_kernel_ms" in provenance["kernel"]["metrics"]
+    assert "not inferred by subtracting" in provenance["frontend_python"]["boundary"]
+    assert "scalar bind" in render_table(report)

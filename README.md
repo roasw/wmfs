@@ -411,9 +411,15 @@ sample populations. Component timings are nested within and overlap their
 associated invocation, so adding components does not reconstruct end-to-end
 time.
 
-Profiled invocations additionally separate output-plan evaluation, C++ queue
-wait, RPC, worker input/output view construction, worker dispatch, and kernel
-execution. Profiling first showed repeated worker view construction was the
+Profiled invocations additionally separate scalar binding, output-plan
+evaluation, C++ queue wait, RPC, worker input/output view construction, worker
+dispatch, and kernel execution. The JSON report groups diagnostics by
+provenance: Python frontend, RPC/control, mapping/transport, allocation,
+reclamation, or kernel. Remaining Python work, including access reservation,
+descriptor assembly, reusable-output validation, and result wrapping, stays in
+isolated call latency but has no synthetic "bookkeeping" timer: the nested
+profile components overlap, so subtracting them would not produce a valid
+measurement. Profiling first showed repeated worker view construction was the
 largest avoidable cheap-operation cost, so each worker mapping keeps a bounded
 cache of validated tensor views. Moving the worker control plane and view
 construction to C++ reduced the remaining Python worker scheduling overhead.
@@ -425,6 +431,26 @@ and uses an allocation-free synchronous handoff to its thread-affine KJ event
 loop. At this point process scheduling and the required RPC completion dominate
 cheap calls; larger improvements require output reuse, batching, or changing the
 eager execution model.
+
+Use the three backends as controlled comparisons on the same machine, build,
+dtype, thread count, operation shape, warmup, and iteration count. Local versus
+bundled measures plugin/native-kernel integration cost, although local PyTorch
+and the plugin entry point are not identical call paths. Bundled versus isolated
+is the primary isolation comparison because both use the same
+transport-neutral C++ kernel. Local versus isolated remains the user-facing
+end-to-end comparison. Compare medians together with p95 and standard deviation,
+repeat runs before attributing small differences, and use reusable `out=` runs
+to separate output lifetime from mandatory eager-call control cost.
+
+Do not move scalar binding, output planning, or remaining Python bookkeeping to
+C++ merely because it is on the call path. Move one only after an opt-in profile
+repeatedly identifies that named boundary as material to end-to-end latency for
+a representative workload and a prototype demonstrates improvement beyond
+run-to-run spread. Treat already-small components as a reason to stop: optimize
+mapping, allocation/reclamation, RPC scheduling, output reuse, or kernels when
+their own measurements dominate. There is intentionally no absolute or
+percentage latency gate; reports inform a deployment tradeoff rather than a
+pass/fail performance test.
 
 Write a machine-readable report with:
 
@@ -447,7 +473,7 @@ service metric measures
 metadata-driven runtime allocation and output mapping before the single
 operation RPC. Lazy page faults remain part of isolated end-to-end time.
 The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) and
-[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 8 report shape
+[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 9 report shape
 but contain no fabricated samples until the packaged reference benchmark is
 rerun. [`benchmarks/README.md`](benchmarks/README.md) links the retained schema 5
 measurements and summarizes their historical primary results.
