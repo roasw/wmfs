@@ -269,6 +269,7 @@ class BufferManager:
         self._region_ids: set[int] = set()
         self._released: queue.SimpleQueue[int] = queue.SimpleQueue()
         self._lock = threading.RLock()
+        self._collection_lock = threading.Lock()
         self._access_changed = threading.Condition(self._lock)
         self._access_states: dict[_AccessKey, _AccessState] = {}
         self._access_waiters: deque[_AccessWaiter] = deque()
@@ -289,9 +290,9 @@ class BufferManager:
         byte_strides = tuple(
             stride * item_size for stride in _contiguous_strides(shape)
         )
+        self.collect()
         with self._lock:
             self._ensure_open()
-            self.collect()
             self._stats.allocation_requests += 1
             allocation_id = secrets.randbits(64)
             while allocation_id == 0 or allocation_id in self._active:
@@ -421,24 +422,30 @@ class BufferManager:
         return BufferAccessLease(self, accesses, tuple(held_tensors.values()))
 
     def collect(self) -> None:
-        with self._lock:
-            while True:
-                try:
-                    allocation_id = self._released.get_nowait()
-                except queue.Empty:
-                    break
-                allocation = self._active.pop(allocation_id, None)
-                if allocation is None:
-                    continue
-                if allocation.buffer.arena:
-                    self._release_arena(allocation.buffer)
-                else:
-                    self._release_pooled(allocation.buffer)
-                self._stats.buffers_reclaimed += 1
+        with self._collection_lock:
+            pooled = []
+            with self._lock:
+                while True:
+                    try:
+                        allocation_id = self._released.get_nowait()
+                    except queue.Empty:
+                        break
+                    allocation = self._active.pop(allocation_id, None)
+                    if allocation is None:
+                        continue
+                    if allocation.buffer.arena:
+                        self._release_arena(allocation.buffer)
+                        self._stats.buffers_reclaimed += 1
+                    else:
+                        pooled.append(allocation.buffer)
+            for buffer in pooled:
+                self._release_pooled(buffer)
+                with self._lock:
+                    self._stats.buffers_reclaimed += 1
 
     def stats(self) -> dict[str, int | float | str]:
+        self.collect()
         with self._lock:
-            self.collect()
             result: dict[str, int | float | str] = asdict(self._stats)
             result.update(
                 {
@@ -459,7 +466,8 @@ class BufferManager:
         with self._access_changed:
             self._closed = True
             self._access_changed.notify_all()
-            self.collect()
+        self.collect()
+        with self._lock:
             for regions in self._free.values():
                 for region in regions:
                     region.close()
@@ -505,9 +513,12 @@ class BufferManager:
                 recipient.retire_buffer(buffer)
         except Exception:
             region.close()
-            self._stats.buffers_quarantined += 1
+            with self._lock:
+                self._stats.buffers_quarantined += 1
             return
-        if self._closed or region.generation == 0xFFFFFFFF:
+        with self._lock:
+            close_region = self._closed or region.generation == 0xFFFFFFFF
+        if close_region:
             region.close()
             return
         try:
@@ -515,15 +526,19 @@ class BufferManager:
         except Exception:
             region.close()
             raise
-        if (
-            sum(len(items) for items in self._free.values()) >= self._max_cached_buffers
-            or self._cached_bytes + region.byte_length > self._max_cached_bytes
-        ):
-            region.close()
-            self._stats.buffers_evicted += 1
-            return
-        self._free.setdefault(region.byte_length, []).append(region)
-        self._cached_bytes += region.byte_length
+        with self._lock:
+            if (
+                self._closed
+                or sum(len(items) for items in self._free.values())
+                >= self._max_cached_buffers
+                or self._cached_bytes + region.byte_length > self._max_cached_bytes
+            ):
+                region.close()
+                if not self._closed:
+                    self._stats.buffers_evicted += 1
+                return
+            self._free.setdefault(region.byte_length, []).append(region)
+            self._cached_bytes += region.byte_length
 
     def _allocate_arena(self, byte_length: int, allocation_id: int) -> SharedBuffer:
         created = False

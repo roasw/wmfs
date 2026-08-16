@@ -101,6 +101,40 @@ def test_storage_alias_prevents_early_pool_reuse() -> None:
         assert third.buffer.id == first_id
 
 
+def test_pooled_retirement_does_not_hold_the_manager_lock() -> None:
+    manager = BufferManager()
+    managed = manager.empty((8,))
+    lifecycle_lock = threading.Lock()
+    invocation_ready = threading.Event()
+    retirement_started = threading.Event()
+
+    class Recipient:
+        def retire_buffer(self, _buffer: object) -> None:
+            retirement_started.set()
+            with lifecycle_lock:
+                pass
+
+    managed.buffer.register_recipient(Recipient())
+    del managed
+    gc.collect()
+
+    def invoke() -> None:
+        with lifecycle_lock:
+            invocation_ready.set()
+            assert retirement_started.wait(2)
+            assert manager._lock.acquire(timeout=2)
+            manager._lock.release()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        invocation = executor.submit(invoke)
+        assert invocation_ready.wait(2)
+        collection = executor.submit(manager.collect)
+        invocation.result(timeout=3)
+        collection.result(timeout=3)
+
+    manager.close()
+
+
 def test_managed_alias_reports_its_own_view_descriptor() -> None:
     with BufferManager() as manager:
         original = manager.empty((8,), dtype=torch.float64)
