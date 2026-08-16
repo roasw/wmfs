@@ -36,6 +36,11 @@ class IsolatedBackend:
         self._inflight = 0
         self._state = "open"
 
+    @property
+    def operation_names(self) -> tuple[str, ...]:
+        """Return public operations advertised by discovered workers."""
+        return self._registry.operation_names
+
     @classmethod
     def discover(
         cls,

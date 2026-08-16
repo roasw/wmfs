@@ -79,6 +79,7 @@ TEST_LAYERS = {
     "unit": {
         "test_api.py",
         "test_backend_lifecycle.py",
+        "test_dynamic_api.py",
         "test_fd_broker.py",
         "test_invocation.py",
         "test_memory.py",

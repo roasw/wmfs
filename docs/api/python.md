@@ -5,10 +5,25 @@ Public docstrings use Google-style parameter and return sections.
 
 ## User API
 
+Tensor constructors are static API members:
+
 ```{eval-rst}
 .. automodule:: wmfs.api
    :members:
 ```
+
+Plugin operations are dynamic attributes of `wmfs`. They become available only
+after `Runtime.discover_plugins` publishes worker metadata or after an
+in-process backend is explicitly selected. The reference plugin publishes:
+
+```python
+wmfs.matmul(a, b, *, out=None)
+wmfs.svd(a, full_matrices=True, *, out=None)
+wmfs.add_scalar(a, value, *, out=None)
+```
+
+Other plugins publish their own schema-declared operation names; internal
+operations are never exposed as module attributes.
 
 ## Runtime
 

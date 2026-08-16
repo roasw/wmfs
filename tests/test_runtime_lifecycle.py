@@ -46,6 +46,7 @@ def test_close_waits_for_accepted_call_and_rejects_calls_while_closing() -> None
         assert invocation.result(timeout=2) == 1
         closing.result(timeout=2)
 
+    candidate.use_backend("local")
     torch.testing.assert_close(
         candidate.invoke("add_scalar", torch.ones(1), 2.0), torch.full((1,), 3.0)
     )
@@ -139,7 +140,7 @@ def test_close_resets_registry_and_configuration(
     candidate.close()
     candidate.close()
 
-    assert candidate.backend_name == "local"
+    assert candidate.backend_name is None
     assert candidate.operation_names == ()
     candidate.discover_plugins()
     assert configurations == [
@@ -204,4 +205,51 @@ def test_runtime_close_attempts_every_backend_before_raising() -> None:
 
     assert raised.value is first_failure
     assert closed == ["first", "second", "third"]
-    assert candidate.backend_name == "local"
+    assert candidate.backend_name is None
+
+
+def test_discovery_rejects_operation_names_that_cannot_be_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = OperationRegistry()
+    registry.register(
+        PluginMetadata(
+            name="test",
+            version="1",
+            protocol_version=1,
+            operations=(
+                OperationMetadata(
+                    name="runtime",
+                    tensor_inputs=(),
+                    tensor_outputs=(),
+                    scalar_parameters=(),
+                    operation_id=1,
+                    output_plans=(),
+                ),
+            ),
+            fingerprint=1,
+        )
+    )
+    closed = False
+
+    class Backend:
+        @classmethod
+        def discover(
+            cls, *_args: object, **_kwargs: object
+        ) -> tuple[OperationRegistry, "Backend"]:
+            return registry, cls()
+
+        def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(runtime_module, "find_manifests", lambda _directories: ())
+    monkeypatch.setattr(runtime_module, "IsolatedBackend", Backend)
+    candidate = Runtime()
+
+    with pytest.raises(ValueError, match="cannot be published"):
+        candidate.discover_plugins()
+
+    assert closed
+    assert candidate.operation_names == ()
+    candidate.close()

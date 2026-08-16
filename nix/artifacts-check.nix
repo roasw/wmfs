@@ -177,7 +177,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     import wmfs_plugin
     import wmfs_reference
     from wmfs_reference._generated import PLUGIN_VERSION
-    from wmfs import add_scalar, runtime
     from wmfs.plugins import find_manifests
     from wmfs_plugin.schema import load_runtime_schema, schema_root
 
@@ -211,9 +210,9 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     assert str(reference_schema.pluginMetadata.version) == manifest.version
     assert (Path(sys.prefix) / "bin/wmfs-reference-worker").is_file()
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
-    runtime.use_backend("local")
-    torch.testing.assert_close(add_scalar(value, 2.0), value + 2.0)
-    runtime.close()
+    wmfs.runtime.use_backend("local")
+    torch.testing.assert_close(wmfs.add_scalar(value, 2.0), value + 2.0)
+    wmfs.runtime.close()
     PY
 
     env -u PYTHONPATH "$work/venv-bundled/bin/python" - <<'PY'
@@ -224,13 +223,12 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     import wmfs
     import wmfs._bundled
     import wmfs._native
-    from wmfs import add_scalar, runtime
 
     assert Path(wmfs.__file__).is_relative_to(Path(sys.prefix))
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
-    runtime.use_backend("bundled")
-    torch.testing.assert_close(add_scalar(value, 2.0), value + 2.0)
-    runtime.close()
+    wmfs.runtime.use_backend("bundled")
+    torch.testing.assert_close(wmfs.add_scalar(value, 2.0), value + 2.0)
+    wmfs.runtime.close()
     PY
     touch "$out"
   ''

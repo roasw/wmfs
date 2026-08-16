@@ -6,7 +6,8 @@ from importlib.util import find_spec
 import pytest
 import torch
 
-from wmfs import add_scalar, matmul, runtime, svd
+import wmfs
+from wmfs import runtime
 
 BUNDLED_AVAILABLE = find_spec("wmfs._bundled") is not None
 if os.environ.get("WMFS_REQUIRE_BUNDLED") == "1" and not BUNDLED_AVAILABLE:
@@ -16,6 +17,18 @@ pytestmark = pytest.mark.skipif(
     not BUNDLED_AVAILABLE,
     reason="bundled plugins were not compiled",
 )
+
+
+def matmul(*args: object, **kwargs: object) -> object:
+    return wmfs.matmul(*args, **kwargs)
+
+
+def svd(*args: object, **kwargs: object) -> object:
+    return wmfs.svd(*args, **kwargs)
+
+
+def add_scalar(*args: object, **kwargs: object) -> object:
+    return wmfs.add_scalar(*args, **kwargs)
 
 
 @pytest.fixture

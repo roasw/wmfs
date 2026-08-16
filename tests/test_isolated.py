@@ -3,10 +3,23 @@ from pathlib import Path
 import pytest
 import torch
 
-from wmfs import add_scalar, matmul, randn, runtime, svd
+import wmfs
+from wmfs import randn, runtime
 from wmfs.runtime import Runtime
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+
+
+def matmul(*args: object, **kwargs: object) -> object:
+    return wmfs.matmul(*args, **kwargs)
+
+
+def svd(*args: object, **kwargs: object) -> object:
+    return wmfs.svd(*args, **kwargs)
+
+
+def add_scalar(*args: object, **kwargs: object) -> object:
+    return wmfs.add_scalar(*args, **kwargs)
 
 
 @pytest.fixture

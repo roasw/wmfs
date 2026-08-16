@@ -48,10 +48,12 @@
             from pathlib import Path
 
             import torch
+            import wmfs
 
-            from wmfs import add_scalar, matmul, runtime, svd
             from wmfs.plugins import find_manifests
             from wmfs.transport.worker_process import inspect_worker_environment
+
+            runtime = wmfs.runtime
 
             plugin_directory = Path(
                 "${reference-worker}/share/wmfs/plugins/reference"
@@ -76,22 +78,24 @@
             runtime.use_backend("isolated")
             try:
                 source = torch.arange(4, dtype=torch.float64)
-                result = add_scalar(source, 1.5)
+                result = wmfs.add_scalar(source, 1.5)
                 torch.testing.assert_close(result, source + 1.5)
 
                 matrix = torch.arange(12, dtype=torch.float64).reshape(4, 3)
-                product = matmul(matrix, matrix.T)
+                product = wmfs.matmul(matrix, matrix.T)
                 torch.testing.assert_close(product, matrix @ matrix.T)
 
                 differentiable = matrix.clone().requires_grad_()
                 expected = matrix.clone().requires_grad_()
-                loss = add_scalar(matmul(differentiable, differentiable.T), 1.0).sum()
+                loss = wmfs.add_scalar(
+                    wmfs.matmul(differentiable, differentiable.T), 1.0
+                ).sum()
                 expected_loss = (expected @ expected.T + 1.0).sum()
                 loss.backward()
                 expected_loss.backward()
                 torch.testing.assert_close(differentiable.grad, expected.grad)
 
-                u, singular_values, vh = svd(matrix, full_matrices=False)
+                u, singular_values, vh = wmfs.svd(matrix, full_matrices=False)
                 torch.testing.assert_close(
                     u @ torch.diag(singular_values) @ vh,
                     matrix,

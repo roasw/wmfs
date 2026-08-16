@@ -1,8 +1,31 @@
 import pytest
 import torch
 
-from wmfs import add_scalar, empty, matmul, ones, randn, runtime, svd, zeros
+import wmfs
+from wmfs import empty, ones, randn, runtime, zeros
 from wmfs.runtime import Runtime
+
+
+@pytest.fixture(autouse=True)
+def local_runtime() -> None:
+    runtime.close()
+    runtime.use_backend("local")
+    try:
+        yield
+    finally:
+        runtime.close()
+
+
+def matmul(*args: object, **kwargs: object) -> object:
+    return wmfs.matmul(*args, **kwargs)
+
+
+def svd(*args: object, **kwargs: object) -> object:
+    return wmfs.svd(*args, **kwargs)
+
+
+def add_scalar(*args: object, **kwargs: object) -> object:
+    return wmfs.add_scalar(*args, **kwargs)
 
 
 def test_matmul_matches_torch() -> None:
@@ -88,7 +111,7 @@ def test_local_operations_support_reusable_outputs() -> None:
     torch.testing.assert_close(result[0] @ torch.diag(result[1]) @ result[2], a)
 
 
-def test_runtime_uses_local_backend_by_default() -> None:
+def test_runtime_uses_explicitly_selected_local_backend() -> None:
     assert runtime.backend_name == "local"
     runtime.use_backend("local")
     assert runtime.backend_name == "local"

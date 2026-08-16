@@ -1,4 +1,5 @@
 import atexit
+import keyword
 import threading
 from importlib.util import find_spec
 from pathlib import Path
@@ -9,6 +10,7 @@ import torch
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
+from wmfs.operations import python_parameter_name
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
 from wmfs.tensors import Size, TensorFactory, normalize_shape
@@ -19,6 +21,10 @@ from wmfs.transport.deadlines import (
 
 
 class Backend(Protocol):
+    @property
+    def operation_names(self) -> tuple[str, ...]:
+        """Return the public operations implemented by this backend."""
+
     def invoke(
         self,
         operation: str,
@@ -60,15 +66,16 @@ class Runtime:
         self._active_work = 0
         self._close_generation = 0
         self._backends = _initial_backends()
-        self._backend_name = "local"
+        self._backend_name: str | None = None
         self._registry = OperationRegistry()
+        self._operation_generation = 0
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
         self._control_mode = "auto"
         self._deadlines = DEFAULT_TRANSPORT_DEADLINES
 
     @property
-    def backend_name(self) -> str:
+    def backend_name(self) -> str | None:
         """Return the currently selected execution backend."""
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
@@ -76,10 +83,22 @@ class Runtime:
 
     @property
     def operation_names(self) -> tuple[str, ...]:
-        """Return the names of operations registered by discovered plugins."""
+        """Return operations published by discovery or the selected backend."""
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
-            return self._registry.operation_names
+            return self._operation_names_locked()
+
+    def resolve_operation(self, name: str) -> tuple[int, OperationMetadata | None]:
+        """Resolve a visible operation and its discovered metadata."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            if name not in self._operation_names_locked():
+                raise KeyError(f"Operation {name!r} is not registered")
+            try:
+                metadata = self._registry.operation(name)
+            except KeyError:
+                metadata = None
+            return self._operation_generation, metadata
 
     def operation_metadata(self, name: str) -> OperationMetadata:
         """Return registered metadata for an operation name.
@@ -116,12 +135,18 @@ class Runtime:
                 control_mode=self._control_mode,
                 deadlines=self._deadlines,
             )
+            try:
+                _validate_public_operations(registry)
+            except BaseException:
+                replacement.close()
+                raise
             with self._condition:
                 previous = self._backends.get("isolated")
                 self._registry = registry
                 self._backends["isolated"] = replacement
                 if self._backend_name == "isolated":
-                    self._backend_name = "local"
+                    self._backend_name = None
+                self._operation_generation += 1
             if previous is not None:
                 previous.close()
         finally:
@@ -204,7 +229,10 @@ class Runtime:
                 raise ValueError(
                     f"Unknown backend {name!r}; available backends: {available}"
                 )
+            previous_names = self._operation_names_locked()
             self._backend_name = name
+            if self._operation_names_locked() != previous_names:
+                self._operation_generation += 1
 
     def empty(
         self,
@@ -293,7 +321,45 @@ class Runtime:
         """
         with self._condition:
             self._accept_work()
-            backend = self._backends[self._backend_name]
+            try:
+                backend = self._selected_backend_locked()
+            except BaseException:
+                self._active_work -= 1
+                self._condition.notify_all()
+                raise
+        try:
+            return backend.invoke(operation, *args, out=out, **kwargs)
+        finally:
+            self._finish_work()
+
+    def invoke_registered(
+        self,
+        operation: str,
+        generation: int,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
+        """Invoke a generation-bound dynamically published operation."""
+        with self._condition:
+            self._accept_work()
+            if generation != self._operation_generation:
+                self._active_work -= 1
+                self._condition.notify_all()
+                raise RuntimeError(
+                    f"Operation {operation!r} belongs to a stale plugin catalog"
+                )
+            if operation not in self._operation_names_locked():
+                self._active_work -= 1
+                self._condition.notify_all()
+                raise RuntimeError(f"Operation {operation!r} is no longer registered")
+            try:
+                backend = self._selected_backend_locked()
+            except BaseException:
+                self._active_work -= 1
+                self._condition.notify_all()
+                raise
         try:
             return backend.invoke(operation, *args, out=out, **kwargs)
         finally:
@@ -315,7 +381,12 @@ class Runtime:
             raise TypeError("dtype must be a torch.dtype")
         with self._condition:
             self._accept_work()
-            backend = self._backends[self._backend_name]
+            try:
+                backend = self._selected_backend_locked()
+            except BaseException:
+                self._active_work -= 1
+                self._condition.notify_all()
+                raise
         try:
             return backend.construct_tensor(
                 factory,
@@ -354,8 +425,9 @@ class Runtime:
         replacements = _initial_backends()
         with self._condition:
             self._backends = replacements
-            self._backend_name = "local"
+            self._backend_name = None
             self._registry = OperationRegistry()
+            self._operation_generation += 1
             self._memory_mode = "pooled"
             self._arena_bytes = None
             self._control_mode = "auto"
@@ -379,12 +451,61 @@ class Runtime:
         if self._state != "open":
             raise RuntimeError("Runtime is closing")
 
+    def _operation_names_locked(self) -> tuple[str, ...]:
+        names = set(self._registry.operation_names)
+        if self._backend_name is not None:
+            names.update(self._backends[self._backend_name].operation_names)
+        return tuple(sorted(names))
+
+    def _selected_backend_locked(self) -> Backend:
+        if self._backend_name is None:
+            raise RuntimeError(
+                "No execution backend is selected; call runtime.use_backend() first"
+            )
+        return self._backends[self._backend_name]
+
 
 def _initial_backends() -> dict[str, Backend]:
     backends: dict[str, Backend] = {"local": LocalBackend()}
     if find_spec("wmfs._bundled") is not None:
         backends["bundled"] = BundledBackend()
     return backends
+
+
+_RESERVED_OPERATION_NAMES = {
+    "__version__",
+    "api",
+    "empty",
+    "ones",
+    "randn",
+    "runtime",
+    "zeros",
+}
+
+
+def _validate_public_operations(registry: OperationRegistry) -> None:
+    for name in registry.operation_names:
+        if (
+            not name.isidentifier()
+            or keyword.iskeyword(name)
+            or name.startswith("_")
+            or name in _RESERVED_OPERATION_NAMES
+        ):
+            raise ValueError(f"Plugin operation name {name!r} cannot be published")
+        operation = registry.operation(name)
+        parameter_names = [
+            python_parameter_name(parameter.name)
+            for parameter in (*operation.tensor_inputs, *operation.scalar_parameters)
+        ]
+        if any(
+            not parameter_name.isidentifier()
+            or keyword.iskeyword(parameter_name)
+            or parameter_name == "out"
+            for parameter_name in parameter_names
+        ) or len(parameter_names) != len(set(parameter_names)):
+            raise ValueError(
+                f"Plugin operation {name!r} has parameters that cannot be published"
+            )
 
 
 runtime = Runtime()

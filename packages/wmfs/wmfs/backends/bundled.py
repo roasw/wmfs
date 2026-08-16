@@ -1,9 +1,11 @@
-from collections.abc import Callable
 from importlib import import_module
+from typing import Callable
 
 import torch
 
 from wmfs.tensors import TensorFactory, native_tensor
+
+_OPERATION_NAMES = ("add_scalar", "matmul", "svd")
 
 
 class BundledBackend:
@@ -13,6 +15,11 @@ class BundledBackend:
         self._operations: (
             dict[str, tuple[Callable[..., object], Callable[..., object]]] | None
         ) = None
+
+    @property
+    def operation_names(self) -> tuple[str, ...]:
+        """Return operations compiled into the bundled plugin."""
+        return _OPERATION_NAMES
 
     def invoke(
         self,

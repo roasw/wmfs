@@ -137,23 +137,24 @@ packages, checks, and development shells together.
 ## Usage
 
 ```python
-from wmfs import add_scalar, matmul, randn, runtime, svd
+import wmfs
 
-runtime.use_backend("local")
-a = randn(4, 4)
-b = randn(4, 4)
-c = matmul(a, b)
-u, s, vh = svd(c)
-d = add_scalar(c, 1.0)
+wmfs.runtime.use_backend("local")
+a = wmfs.randn(4, 4)
+b = wmfs.randn(4, 4)
+c = wmfs.matmul(a, b)
+u, s, vh = wmfs.svd(c)
+d = wmfs.add_scalar(c, 1.0)
 ```
 
-The `local` backend is the direct Torch baseline and remains the default. A
-runtime built with bundled plugins also exposes `bundled` without changing the
-public calls:
+The `local` backend is the direct Torch baseline. A new runtime has no selected
+backend: operation attributes do not exist until a backend is selected or
+plugin discovery publishes them. A runtime built with bundled plugins also
+exposes `bundled` without changing the public calls:
 
 ```python
-runtime.use_backend("bundled")
-c = matmul(a, b)
+wmfs.runtime.use_backend("bundled")
+c = wmfs.matmul(a, b)
 ```
 
 The bundled extension is loaded lazily on its first invocation. It calls the
@@ -210,6 +211,11 @@ from wmfs import runtime
 runtime.discover_plugins(Path("plugins"))
 print(runtime.operation_names)
 ```
+
+Discovery publishes each plugin's public operation names as attributes of the
+`wmfs` module. Internal operations remain available only to runtime machinery.
+Import or access dynamic operations after discovery; importing `wmfs.matmul`
+before discovery or explicit local/bundled selection fails.
 
 Discovery is eager: it starts one worker per plugin, validates its metadata, and
 retains that session for isolated execution. A discovery failure closes every
@@ -299,14 +305,14 @@ by the runtime:
 ```python
 from pathlib import Path
 
-from wmfs import matmul, randn, runtime
+import wmfs
 
-runtime.discover_plugins(Path("plugins"))
-runtime.use_backend("isolated")
-a = randn(4, 4)
-b = randn(4, 4)
-result = matmul(a, b)
-runtime.close()
+wmfs.runtime.discover_plugins(Path("plugins"))
+wmfs.runtime.use_backend("isolated")
+a = wmfs.randn(4, 4)
+b = wmfs.randn(4, 4)
+result = wmfs.matmul(a, b)
+wmfs.runtime.close()
 ```
 
 `runtime.close()` is idempotent and the runtime remains reusable. Close first
@@ -314,10 +320,10 @@ stops accepting invocations, waits for every invocation and plugin discovery
 already accepted by the runtime, and then attempts to close every backend even
 if one fails. Calls arriving while close is in progress fail with
 `RuntimeError`; concurrent close calls wait for that close. After cleanup, the
-runtime has the same state as a new instance: the local backend is selected,
-the plugin registry is empty, and memory and control modes are `pooled` and
-`auto`. Cleanup raises the first resource failure after attempting the rest,
-but the reset still completes.
+runtime has the same state as a new instance: no backend is selected, the plugin
+registry is empty, and memory and control modes are `pooled` and `auto`.
+Cleanup raises the first resource failure after attempting the rest, but the
+reset still completes.
 
 Managed tensors already returned by isolated operations remain valid after
 close. Their shared storage is released only after the last Torch storage alias

@@ -1,9 +1,11 @@
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 
 import pytest
 import torch
 
+import wmfs
 import wmfs.transport.native_worker as native_worker_module
 import wmfs.transport.worker_process as worker_process_module
 from wmfs.memory import BufferManager
@@ -60,6 +62,29 @@ def test_runtime_registers_discovered_operations() -> None:
     assert discovered_runtime.operation_names == ("add_scalar", "matmul", "svd")
     assert discovered_runtime.operation_metadata("add_scalar").name == "add_scalar"
     discovered_runtime.close()
+
+
+def test_discovery_publishes_dynamic_module_operations() -> None:
+    wmfs.runtime.close()
+    try:
+        wmfs.runtime.discover_plugins(PLUGIN_DIRECTORY)
+
+        assert wmfs.runtime.backend_name is None
+        assert wmfs.matmul.__name__ == "matmul"
+        assert tuple(signature(wmfs.svd).parameters) == (
+            "a",
+            "full_matrices",
+            "out",
+        )
+        assert {"add_scalar", "matmul", "svd"} <= set(dir(wmfs))
+        with pytest.raises(RuntimeError, match="No execution backend"):
+            wmfs.matmul(torch.ones((1, 1)), torch.ones((1, 1)))
+
+        wmfs.runtime.use_backend("isolated")
+        result = wmfs.matmul(a=torch.ones((1, 1)), b=torch.full((1, 1), 2.0))
+        torch.testing.assert_close(result, torch.full((1, 1), 2.0))
+    finally:
+        wmfs.runtime.close()
 
 
 @pytest.mark.parametrize("control_mode", ["python", "native"])

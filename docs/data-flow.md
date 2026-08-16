@@ -9,7 +9,8 @@ native session extension.
 
 ```text
 user script
-  -> wmfs.api.matmul
+  -> wmfs.__getattr__("matmul")
+  -> generation-bound operation callable
   -> Runtime.invoke
   -> IsolatedBackend.invoke
   -> bind_invocation / BufferManager
@@ -25,19 +26,21 @@ user script
 
 ### 1. Public Call
 
-`wmfs.api.matmul` deliberately contains no transport concepts. It forwards the
+`wmfs.__getattr__` publishes only operations present in the live runtime
+catalog. The returned function records the catalog generation and forwards
 ordinary Python arguments to the selected runtime.
 
-```{literalinclude} ../packages/wmfs/wmfs/api.py
+```{literalinclude} ../packages/wmfs/wmfs/__init__.py
 ---
 language: python
-pyobject: matmul
+pyobject: __getattr__
 ---
 ```
 
 Read next:
 
-- `packages/wmfs/wmfs/api.py`: stable user-facing functions.
+- `packages/wmfs/wmfs/__init__.py`: dynamic operation publication.
+- `packages/wmfs/wmfs/api.py`: static backend-aware tensor constructors.
 - `packages/wmfs/wmfs/runtime.py`, `Runtime.invoke`: lifecycle-safe backend
   selection and accepted-work accounting.
 

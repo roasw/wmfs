@@ -11,15 +11,35 @@ def _add_scalar(
     return torch.add(a, float(value), out=out)
 
 
+def _matmul(
+    a: torch.Tensor, b: torch.Tensor, *, out: torch.Tensor | None = None
+) -> torch.Tensor:
+    return torch.matmul(a, b, out=out)
+
+
+def _svd(
+    a: torch.Tensor,
+    full_matrices: bool = True,
+    *,
+    out: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return torch.linalg.svd(a, full_matrices=full_matrices, out=out)
+
+
 _OPERATIONS = {
     "add_scalar": _add_scalar,
-    "matmul": torch.matmul,
-    "svd": torch.linalg.svd,
+    "matmul": _matmul,
+    "svd": _svd,
 }
 
 
 class LocalBackend:
     """Execute operations directly in the application process."""
+
+    @property
+    def operation_names(self) -> tuple[str, ...]:
+        """Return the operations implemented by this backend."""
+        return tuple(sorted(_OPERATIONS))
 
     def invoke(
         self,

@@ -168,14 +168,15 @@ def test_invalid_invocations_are_rejected(
         runtime.invoke("missing", source)
 
 
-def test_close_restores_reusable_local_runtime(
+def test_close_restores_reusable_unconfigured_runtime(
     backend: tuple[Runtime, BackendCapabilities],
 ) -> None:
     runtime, _capabilities = backend
 
     runtime.close()
 
-    assert runtime.backend_name == "local"
+    assert runtime.backend_name is None
+    runtime.use_backend("local")
     torch.testing.assert_close(
         runtime.invoke("add_scalar", torch.ones(2), 2.0), torch.full((2,), 3.0)
     )
