@@ -1,3 +1,8 @@
-from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
+from wmfs.memory.buffers import (
+    BufferManager,
+    ManagedTensor,
+    ReclamationStats,
+    TensorDescriptor,
+)
 
-__all__ = ["BufferManager", "ManagedTensor", "TensorDescriptor"]
+__all__ = ["BufferManager", "ManagedTensor", "ReclamationStats", "TensorDescriptor"]

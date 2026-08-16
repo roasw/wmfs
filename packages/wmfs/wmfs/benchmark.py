@@ -153,7 +153,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 6,
+        "schema_version": 7,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -362,7 +362,9 @@ def render_table(report: dict[str, Any]) -> str:
                 _median(diagnostics, "shared_memory_allocation_ms"),
                 _median(diagnostics, "pooled_shared_memory_allocation_ms"),
                 _median(diagnostics, "uncached_buffer_reclamation_ms"),
+                diagnostics["uncached_reclaimed_buffers_per_invocation"],
                 _median(diagnostics, "cached_buffer_reclamation_ms"),
+                diagnostics["cached_reclaimed_buffers_per_invocation"],
                 _median(diagnostics, "output_preallocation_service_ms"),
                 _median(diagnostics, "output_shared_allocation_ms"),
                 _median(diagnostics, "output_ensure_mapped_ms"),
@@ -382,7 +384,9 @@ def render_table(report: dict[str, Any]) -> str:
                 "cold alloc",
                 "pool alloc",
                 "uncached reclaim",
+                "uncached buffers",
                 "cached reclaim",
+                "cached buffers",
                 "output prealloc",
                 "output alloc",
                 "output ensure",
@@ -574,6 +578,12 @@ def _benchmark_diagnostics(
     output_counts = []
     uncached_reclamation = []
     cached_reclamation = []
+    uncached_reclaimed = []
+    cached_reclaimed = []
+    uncached_retirement = []
+    cached_retirement = []
+    uncached_reset = []
+    cached_reset = []
     scalar_binding = []
     output_plan = []
     native_call = []
@@ -605,9 +615,13 @@ def _benchmark_diagnostics(
         if config.memory_mode == "pooled":
             first_mapping.append(sum(item.mapping_ns for item in metrics.inputs))
         del _result, profiled
-        start = perf_counter_ns()
+        before_reclamation = buffers.reclamation_stats()
         buffers.collect()
-        uncached_reclamation.append(perf_counter_ns() - start)
+        delta = buffers.reclamation_stats().delta(before_reclamation)
+        uncached_reclamation.append(delta.collection_ns)
+        uncached_reclaimed.append(delta.buffers_reclaimed)
+        uncached_retirement.append(delta.recipient_retirement_ns)
+        uncached_reset.append(delta.buffer_reset_ns)
 
         _result, metrics = session.invoke_profiled(operation, *managed_args, **kwargs)
         if any(item.fd_transferred for item in metrics.inputs):
@@ -629,9 +643,13 @@ def _benchmark_diagnostics(
         worker_dispatch.append(metrics.worker_dispatch_ns)
         worker_kernel.append(metrics.worker_kernel_ns)
         del _result
-        start = perf_counter_ns()
+        before_reclamation = buffers.reclamation_stats()
         buffers.collect()
-        cached_reclamation.append(perf_counter_ns() - start)
+        delta = buffers.reclamation_stats().delta(before_reclamation)
+        cached_reclamation.append(delta.collection_ns)
+        cached_reclaimed.append(delta.buffers_reclaimed)
+        cached_retirement.append(delta.recipient_retirement_ns)
+        cached_reset.append(delta.buffer_reset_ns)
 
     pooled_allocation_samples = []
     for _ in range(config.diagnostic_iterations):
@@ -670,6 +688,16 @@ def _benchmark_diagnostics(
         "pooled_shared_memory_allocation_ms": summarize(pooled_allocation_samples),
         "uncached_buffer_reclamation_ms": summarize(uncached_reclamation),
         "cached_buffer_reclamation_ms": summarize(cached_reclamation),
+        "uncached_recipient_retirement_ms": summarize(uncached_retirement),
+        "cached_recipient_retirement_ms": summarize(cached_retirement),
+        "uncached_buffer_reset_ms": summarize(uncached_reset),
+        "cached_buffer_reset_ms": summarize(cached_reset),
+        "uncached_reclaimed_buffers_per_invocation": _constant_count(
+            uncached_reclaimed, "Uncached reclaimed buffer"
+        ),
+        "cached_reclaimed_buffers_per_invocation": _constant_count(
+            cached_reclaimed, "Cached reclaimed buffer"
+        ),
         "output_preallocation_service_ms": summarize(output_service),
         "output_shared_allocation_ms": summarize(output_allocation),
         "output_ensure_mapped_ms": summarize(output_mapping),
@@ -853,6 +881,14 @@ def _time_call(call: Callable[[], Any]) -> tuple[int, Any]:
     start = perf_counter_ns()
     result = call()
     return perf_counter_ns() - start, result
+
+
+def _constant_count(samples: Sequence[int], label: str) -> int:
+    if not samples or len(set(samples)) != 1:
+        raise RuntimeError(f"{label} count changed between invocations")
+    if samples[0] <= 0:
+        raise RuntimeError(f"{label} diagnostics did not reclaim a buffer")
+    return samples[0]
 
 
 def _sample_invocation(

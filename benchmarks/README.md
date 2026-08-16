@@ -18,12 +18,14 @@ Torch was limited to one CPU thread. Each operation was warmed up twice, then
 measured ten times. The checked-in numeric reports use the earlier schema 5
 boundary, which included result destruction and safe-pool retirement/reset in
 isolated end-to-end samples. They are retained rather than rerunning the
-expensive reference cases. Current schema 6 reports stop local and isolated
+expensive reference cases. Current schema 7 reports stop local and isolated
 primary samples at backend return and measure post-return cleanup separately.
 Known outputs are preallocated from schema metadata and each operation uses one
 Cap'n Proto RPC between the C++ client and C++ worker. The table reports
 medians; the JSON reports also contain p95, standard deviation, allocation
-statistics, and transport diagnostics.
+statistics, and transport diagnostics. Pooled reclamation diagnostics use
+internal cumulative metric deltas and report the reclaimed-buffer population,
+recipient retirement, and memfd reset time for each sample.
 
 | Mode   | Operation  | Size             | Local (ms) | Isolated (ms) | Overhead (ms) | Overhead |
 | ------ | ---------- | ---------------- | ---------: | ------------: | ------------: | -------: |

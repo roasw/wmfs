@@ -82,7 +82,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 6
+    assert report["schema_version"] == 7
     assert report["configuration"]["plugin_directory"] == "plugins"
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
@@ -101,6 +101,9 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert svd_case["isolated_result_cleanup_reclamation_ms"]["count"] == 1
     assert set(svd_case["diagnostics"]) == {
         "cached_buffer_reclamation_ms",
+        "cached_buffer_reset_ms",
+        "cached_reclaimed_buffers_per_invocation",
+        "cached_recipient_retirement_ms",
         "cached_ensure_mapped_ms",
         "first_use_fd_transfer_mmap_ms",
         "input_shared_preparation_ms",
@@ -117,6 +120,9 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "scalar_binding_ms",
         "shared_memory_allocation_ms",
         "uncached_buffer_reclamation_ms",
+        "uncached_buffer_reset_ms",
+        "uncached_reclaimed_buffers_per_invocation",
+        "uncached_recipient_retirement_ms",
         "worker_dispatch_ms",
         "worker_input_views_ms",
         "worker_kernel_ms",
@@ -126,8 +132,15 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert all(
         summary["count"] == 1
         for name, summary in svd_case["diagnostics"].items()
-        if name != "output_allocations_per_invocation"
+        if name
+        not in {
+            "output_allocations_per_invocation",
+            "cached_reclaimed_buffers_per_invocation",
+            "uncached_reclaimed_buffers_per_invocation",
+        }
     )
+    assert svd_case["diagnostics"]["cached_reclaimed_buffers_per_invocation"] == 3
+    assert svd_case["diagnostics"]["uncached_reclaimed_buffers_per_invocation"] == 4
     assert add_scalar_case["diagnostics"]["output_allocations_per_invocation"] == 1
     assert svd_case["memory_pool"]["mode"] == "pooled"
     assert svd_case["memory_pool"]["pool_hits"] > 0

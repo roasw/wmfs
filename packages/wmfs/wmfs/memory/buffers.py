@@ -6,7 +6,8 @@ import threading
 import weakref
 from collections import deque
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
+from time import perf_counter_ns
 from typing import Protocol
 
 import torch
@@ -231,6 +232,50 @@ class PoolStats:
     buffers_reclaimed: int = 0
     buffers_evicted: int = 0
     buffers_quarantined: int = 0
+    collection_calls: int = 0
+    collection_noops: int = 0
+    collection_ns: int = 0
+    allocation_collection_calls: int = 0
+    stats_collection_calls: int = 0
+    allocations_drained: int = 0
+    recipient_notifications: int = 0
+    recipient_retirement_ns: int = 0
+    buffers_reset: int = 0
+    buffer_reset_ns: int = 0
+    buffers_cached: int = 0
+    buffer_cache_ns: int = 0
+    buffer_eviction_ns: int = 0
+    buffer_quarantine_ns: int = 0
+
+
+@dataclass(frozen=True)
+class ReclamationStats:
+    collection_calls: int = 0
+    collection_noops: int = 0
+    collection_ns: int = 0
+    allocation_collection_calls: int = 0
+    stats_collection_calls: int = 0
+    allocations_drained: int = 0
+    buffers_reclaimed: int = 0
+    recipient_notifications: int = 0
+    recipient_retirement_ns: int = 0
+    buffers_reset: int = 0
+    buffer_reset_ns: int = 0
+    buffers_cached: int = 0
+    buffer_cache_ns: int = 0
+    buffers_evicted: int = 0
+    buffer_eviction_ns: int = 0
+    buffers_quarantined: int = 0
+    buffer_quarantine_ns: int = 0
+
+    def delta(self, previous: "ReclamationStats") -> "ReclamationStats":
+        values = {
+            field.name: getattr(self, field.name) - getattr(previous, field.name)
+            for field in fields(self)
+        }
+        if any(value < 0 for value in values.values()):
+            raise ValueError("Reclamation snapshots are not in cumulative order")
+        return ReclamationStats(**values)
 
 
 class BufferManager:
@@ -290,7 +335,7 @@ class BufferManager:
         byte_strides = tuple(
             stride * item_size for stride in _contiguous_strides(shape)
         )
-        self.collect()
+        self._collect(source="allocation")
         with self._lock:
             self._ensure_open()
             self._stats.allocation_requests += 1
@@ -422,29 +467,57 @@ class BufferManager:
         return BufferAccessLease(self, accesses, tuple(held_tensors.values()))
 
     def collect(self) -> None:
-        with self._collection_lock:
-            pooled = []
-            with self._lock:
-                while True:
-                    try:
-                        allocation_id = self._released.get_nowait()
-                    except queue.Empty:
-                        break
-                    allocation = self._active.pop(allocation_id, None)
-                    if allocation is None:
-                        continue
-                    if allocation.buffer.arena:
-                        self._release_arena(allocation.buffer)
-                        self._stats.buffers_reclaimed += 1
-                    else:
-                        pooled.append(allocation.buffer)
-            for buffer in pooled:
-                self._release_pooled(buffer)
+        self._collect(source="explicit")
+
+    def _collect(self, *, source: str) -> None:
+        started = perf_counter_ns()
+        drained = 0
+        reclaimed = 0
+        try:
+            with self._collection_lock:
+                pooled = []
                 with self._lock:
-                    self._stats.buffers_reclaimed += 1
+                    while True:
+                        try:
+                            allocation_id = self._released.get_nowait()
+                        except queue.Empty:
+                            break
+                        drained += 1
+                        allocation = self._active.pop(allocation_id, None)
+                        if allocation is None:
+                            continue
+                        if allocation.buffer.arena:
+                            self._release_arena(allocation.buffer)
+                            reclaimed += 1
+                        else:
+                            pooled.append(allocation.buffer)
+                for buffer in pooled:
+                    self._release_pooled(buffer)
+                    reclaimed += 1
+        finally:
+            with self._lock:
+                self._stats.collection_calls += 1
+                self._stats.collection_noops += reclaimed == 0
+                self._stats.collection_ns += perf_counter_ns() - started
+                self._stats.allocations_drained += drained
+                self._stats.buffers_reclaimed += reclaimed
+                if source == "allocation":
+                    self._stats.allocation_collection_calls += 1
+                elif source == "stats":
+                    self._stats.stats_collection_calls += 1
+
+    def reclamation_stats(self) -> ReclamationStats:
+        """Return an immutable, side-effect-free cumulative metrics snapshot."""
+        with self._lock:
+            return ReclamationStats(
+                **{
+                    field.name: getattr(self._stats, field.name)
+                    for field in fields(ReclamationStats)
+                }
+            )
 
     def stats(self) -> dict[str, int | float | str]:
-        self.collect()
+        self._collect(source="stats")
         with self._lock:
             result: dict[str, int | float | str] = asdict(self._stats)
             result.update(
@@ -508,37 +581,60 @@ class BufferManager:
 
     def _release_pooled(self, buffer: SharedBuffer) -> None:
         region = buffer._region
+        notifications = 0
+        retirement_ns = 0
         try:
             for recipient in tuple(region.recipients):
-                recipient.retire_buffer(buffer)
+                started = perf_counter_ns()
+                try:
+                    recipient.retire_buffer(buffer)
+                finally:
+                    retirement_ns += perf_counter_ns() - started
+                    notifications += 1
         except Exception:
+            started = perf_counter_ns()
             region.close()
             with self._lock:
+                self._stats.recipient_notifications += notifications
+                self._stats.recipient_retirement_ns += retirement_ns
                 self._stats.buffers_quarantined += 1
+                self._stats.buffer_quarantine_ns += perf_counter_ns() - started
             return
+        with self._lock:
+            self._stats.recipient_notifications += notifications
+            self._stats.recipient_retirement_ns += retirement_ns
         with self._lock:
             close_region = self._closed or region.generation == 0xFFFFFFFF
         if close_region:
             region.close()
             return
         try:
+            started = perf_counter_ns()
             region.reset()
+            reset_ns = perf_counter_ns() - started
         except Exception:
             region.close()
             raise
         with self._lock:
+            self._stats.buffers_reset += 1
+            self._stats.buffer_reset_ns += reset_ns
             if (
                 self._closed
                 or sum(len(items) for items in self._free.values())
                 >= self._max_cached_buffers
                 or self._cached_bytes + region.byte_length > self._max_cached_bytes
             ):
+                started = perf_counter_ns()
                 region.close()
                 if not self._closed:
                     self._stats.buffers_evicted += 1
+                    self._stats.buffer_eviction_ns += perf_counter_ns() - started
                 return
+            started = perf_counter_ns()
             self._free.setdefault(region.byte_length, []).append(region)
             self._cached_bytes += region.byte_length
+            self._stats.buffers_cached += 1
+            self._stats.buffer_cache_ns += perf_counter_ns() - started
 
     def _allocate_arena(self, byte_length: int, allocation_id: int) -> SharedBuffer:
         created = False

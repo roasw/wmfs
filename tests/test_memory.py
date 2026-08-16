@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import torch
 
+import wmfs.memory.buffers as buffer_module
 from wmfs.memory import BufferManager
 
 
@@ -133,6 +134,115 @@ def test_pooled_retirement_does_not_hold_the_manager_lock() -> None:
         collection.result(timeout=3)
 
     manager.close()
+
+
+def test_reclamation_stats_record_noop_collection() -> None:
+    with BufferManager() as manager:
+        before = manager.reclamation_stats()
+
+        manager.collect()
+
+        delta = manager.reclamation_stats().delta(before)
+        assert delta.collection_calls == 1
+        assert delta.collection_noops == 1
+        assert delta.allocations_drained == 0
+        assert delta.buffers_reclaimed == 0
+
+
+def test_reclamation_stats_record_pooled_reset_and_cache() -> None:
+    with BufferManager() as manager:
+        managed = manager.empty((8,))
+        del managed
+        gc.collect()
+        before = manager.reclamation_stats()
+
+        manager.collect()
+
+        delta = manager.reclamation_stats().delta(before)
+        assert delta.allocations_drained == 1
+        assert delta.buffers_reclaimed == 1
+        assert delta.buffers_reset == 1
+        assert delta.buffers_cached == 1
+        assert delta.buffers_evicted == 0
+        assert delta.buffers_quarantined == 0
+
+
+def test_reclamation_stats_time_delayed_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0
+
+    class Recipient:
+        def retire_buffer(self, _buffer: object) -> None:
+            nonlocal now
+            now += 25
+
+    monkeypatch.setattr(buffer_module, "perf_counter_ns", lambda: now)
+    with BufferManager() as manager:
+        managed = manager.empty((8,))
+        managed.buffer.register_recipient(Recipient())
+        del managed
+        gc.collect()
+        before = manager.reclamation_stats()
+
+        manager.collect()
+
+        delta = manager.reclamation_stats().delta(before)
+        assert delta.recipient_notifications == 1
+        assert delta.recipient_retirement_ns == 25
+        assert delta.collection_ns == 25
+
+
+def test_reclamation_stats_include_implicit_collections() -> None:
+    with BufferManager() as manager:
+        managed = manager.empty((8,))
+        del managed
+        gc.collect()
+        before = manager.reclamation_stats()
+
+        replacement = manager.empty((8,))
+        allocation_delta = manager.reclamation_stats().delta(before)
+        assert allocation_delta.allocation_collection_calls == 1
+        assert allocation_delta.buffers_reclaimed == 1
+
+        del replacement
+        gc.collect()
+        before = manager.reclamation_stats()
+        stats = manager.stats()
+        stats_delta = manager.reclamation_stats().delta(before)
+        assert stats_delta.stats_collection_calls == 1
+        assert stats_delta.buffers_reclaimed == 1
+        assert stats["stats_collection_calls"] == 1
+
+
+def test_reclamation_stats_record_eviction_and_quarantine() -> None:
+    with BufferManager(max_cached_buffers=0) as manager:
+        managed = manager.empty((8,))
+        del managed
+        gc.collect()
+        before = manager.reclamation_stats()
+        manager.collect()
+        eviction = manager.reclamation_stats().delta(before)
+        assert eviction.buffers_reset == 1
+        assert eviction.buffers_evicted == 1
+        assert eviction.buffers_cached == 0
+
+    class FailingRecipient:
+        def retire_buffer(self, _buffer: object) -> None:
+            raise RuntimeError("retirement failed")
+
+    with BufferManager() as manager:
+        managed = manager.empty((8,))
+        managed.buffer.register_recipient(FailingRecipient())
+        del managed
+        gc.collect()
+        before = manager.reclamation_stats()
+        manager.collect()
+        quarantine = manager.reclamation_stats().delta(before)
+        assert quarantine.recipient_notifications == 1
+        assert quarantine.buffers_quarantined == 1
+        assert quarantine.buffers_reset == 0
+        assert quarantine.buffers_cached == 0
 
 
 def test_managed_alias_reports_its_own_view_descriptor() -> None:
