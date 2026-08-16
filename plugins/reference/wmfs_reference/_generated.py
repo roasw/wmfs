@@ -3,6 +3,7 @@ from collections.abc import Callable, Mapping
 
 from wmfs_plugin import InvocationContext, OperationHandler
 
+PLUGIN_VERSION = "0.1.0"
 Implementation = Callable[..., None]
 
 

@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from wmfs_plugin.worker import OperationHandler
 
 __all__ = [
+    "__version__",
     "InvocationContext",
     "OperationHandler",
     "PROTOCOL_VERSION",
@@ -16,6 +17,10 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
+    if name == "__version__":
+        from importlib.metadata import version
+
+        return version("wmfs-plugin")
     if name == "InvocationContext":
         from wmfs_plugin.invocation import InvocationContext
 

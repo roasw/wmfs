@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.26)
 
-project(wmfs LANGUAGES CXX)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.json" WMFS_RELEASE_METADATA)
+string(JSON WMFS_RELEASE_VERSION GET "${WMFS_RELEASE_METADATA}" version)
+project(wmfs VERSION "${WMFS_RELEASE_VERSION}" LANGUAGES CXX)
 
 include(CTest)
 

@@ -4,7 +4,7 @@
 }:
 pkgs.python3Packages.buildPythonPackage {
   pname = "wmfs-plugin";
-  version = "0.1.0";
+  version = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
   pyproject = true;
   src = source + "/packages/wmfs-plugin";
 

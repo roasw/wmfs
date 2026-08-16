@@ -98,6 +98,7 @@ TEST_LAYERS = {
         "test_benchmark.py",
         "test_bundled.py",
         "test_codegen.py",
+        "test_version.py",
     },
     "native": {"test_native_session.py"},
 }

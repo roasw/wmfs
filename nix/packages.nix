@@ -3,6 +3,7 @@
   source ? ../.,
 }:
 let
+  releaseVersion = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
   workers = import ./reference-workers.nix { inherit pkgs source; };
   failureWorker = ../tests/fixtures/failure_worker.py;
   buildRuntime =
@@ -11,7 +12,7 @@ let
     }:
     pkgs.python3Packages.buildPythonPackage {
       pname = "wmfs";
-      version = "0.1.0";
+      version = releaseVersion;
       pyproject = true;
       src = source;
 

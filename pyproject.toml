@@ -22,6 +22,7 @@ install.components = ["runtime"]
 include = [
     "/CMakeLists.txt",
     "/README.md",
+    "/version.json",
     "/inc/**",
     "/packages/wmfs/wmfs/**",
     "/packages/wmfs-plugin/wmfs_plugin/schemas/**",

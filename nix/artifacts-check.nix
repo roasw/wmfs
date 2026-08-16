@@ -3,6 +3,7 @@
   source ? ../.,
 }:
 let
+  releaseVersion = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
   python = pkgs.python3.withPackages (
     ps: with ps; [
       build
@@ -60,6 +61,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "CMakeLists.txt",
             "README.md",
             "pyproject.toml",
+            "version.json",
             "inc/wmfs/unique_fd.hpp",
             "packages/wmfs/wmfs/__init__.py",
             "packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp",
@@ -90,8 +92,13 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         archive = next((root / distribution).glob("*.tar.gz"))
         with tarfile.open(archive) as package:
             members = {"/".join(Path(name).parts[1:]) for name in package.getnames()}
+            pkg_info_name = next(name for name in package.getnames() if name.endswith("/PKG-INFO"))
+            pkg_info = package.extractfile(pkg_info_name).read().decode()
         missing = required - members
         assert not missing, f"{archive.name} is missing {sorted(missing)}"
+        assert "Version: ${releaseVersion}\n" in pkg_info
+        if distribution in {"runtime", "reference"}:
+            assert "Requires-Dist: wmfs-plugin==${releaseVersion}\n" in pkg_info
     PY
 
     for distribution in runtime plugin reference; do
@@ -119,13 +126,13 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     checks = {
         "plugin": (
             "wmfs_plugin/schemas/wmfs/runtime.capnp",
-            "wmfs_plugin-0.1.0.dist-info/entry_points.txt",
+            "wmfs_plugin-${releaseVersion}.dist-info/entry_points.txt",
         ),
         "reference": (
             "wmfs_reference/worker.py",
             "share/wmfs/plugins/reference/plugin.toml",
             "share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp",
-            "wmfs_reference-0.1.0.dist-info/entry_points.txt",
+            "wmfs_reference-${releaseVersion}.dist-info/entry_points.txt",
         ),
         "runtime": ("wmfs/__init__.py", "wmfs/_native"),
         "bundled": ("wmfs/_native", "wmfs/_bundled"),
@@ -134,6 +141,11 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         archive = next((root / distribution).glob("*.whl"))
         with zipfile.ZipFile(archive) as package:
             members = package.namelist()
+            metadata_name = next(name for name in members if name.endswith(".dist-info/METADATA"))
+            metadata = package.read(metadata_name).decode()
+        assert "Version: ${releaseVersion}\n" in metadata
+        if distribution in {"runtime", "reference", "bundled"}:
+            assert "Requires-Dist: wmfs-plugin==${releaseVersion}\n" in metadata
         for fragment in fragments:
             assert any(fragment in member for member in members), (
                 f"{archive.name} is missing {fragment}"
@@ -156,14 +168,27 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     import sys
     from pathlib import Path
 
+    import capnp
     import torch
     import wmfs
     import wmfs._native
+    import wmfs_plugin
+    import wmfs_reference
+    from wmfs_reference._generated import PLUGIN_VERSION
     from wmfs import add_scalar, runtime
     from wmfs.plugins import find_manifests
     from wmfs_plugin.schema import load_runtime_schema, schema_root
 
     assert Path(wmfs.__file__).is_relative_to(Path(sys.prefix))
+    expected_version = "${releaseVersion}"
+    for distribution, module in (
+        ("wmfs", wmfs),
+        ("wmfs-plugin", wmfs_plugin),
+        ("wmfs-reference", wmfs_reference),
+    ):
+        assert importlib.metadata.version(distribution) == expected_version
+        assert module.__version__ == expected_version
+    assert PLUGIN_VERSION == expected_version
     assert (schema_root() / "wmfs" / "tensor.capnp").is_file()
     assert int(load_runtime_schema().protocolVersion) > 0
     scripts = {
@@ -177,7 +202,12 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     assert scripts["wmfs-reference-worker"] == "wmfs_reference.worker:main"
     plugin_root = Path(sys.prefix) / "share/wmfs/plugins/reference"
     manifest = find_manifests([plugin_root])[0]
+    assert manifest.version == expected_version
     assert manifest.schema_path.is_file()
+    reference_schema = capnp.load(
+        str(manifest.schema_path), imports=[str(schema_root()), str(manifest.schema_path.parent.parent)]
+    )
+    assert str(reference_schema.pluginMetadata.version) == expected_version
     assert (Path(sys.prefix) / "bin/wmfs-reference-worker").is_file()
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     runtime.use_backend("local")

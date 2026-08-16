@@ -3,6 +3,7 @@
   source ? ../.,
 }:
 let
+  releaseVersion = (builtins.fromJSON (builtins.readFile (source + "/version.json"))).version;
   pluginSrc = source + "/plugins/reference";
   wmfsPlugin = import ./wmfs-plugin.nix { inherit pkgs source; };
 in
@@ -11,7 +12,7 @@ in
 
   reference-python-worker = pkgs.python3Packages.buildPythonApplication {
     pname = "wmfs-reference";
-    version = "0.1.0";
+    version = releaseVersion;
     pyproject = true;
     src = pluginSrc;
 
@@ -33,7 +34,7 @@ in
 
   reference-worker = pkgs.stdenv.mkDerivation {
     pname = "wmfs-reference-worker";
-    version = "0.1.0";
+    version = releaseVersion;
     src = source;
 
     nativeBuildInputs = with pkgs; [
