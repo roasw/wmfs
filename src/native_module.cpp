@@ -232,8 +232,11 @@ NB_MODULE(_native, module) {
     module.def("_make_tensor_descriptor", &descriptor_from_object,
                "descriptor"_a);
     nb::class_<Session>(module, "Session")
-        .def(nb::init<int, int, std::uint64_t>(), "rpc_fd"_a, "control_fd"_a,
-             "expected_fingerprint"_a, nb::call_guard<nb::gil_scoped_release>())
+        .def(nb::init<int, int, std::uint64_t, double, double, double>(),
+             "rpc_fd"_a, "control_fd"_a, "expected_fingerprint"_a,
+             "startup_timeout_seconds"_a, "request_timeout_seconds"_a,
+             "fd_transfer_timeout_seconds"_a,
+             nb::call_guard<nb::gil_scoped_release>())
         .def("ensure_mapped", &ensure_mapped, "buffer"_a, "invocation_id"_a,
              "writable"_a = false)
         .def("ensure_mapped_many", &ensure_mapped_many, "buffers"_a,

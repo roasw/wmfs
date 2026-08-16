@@ -32,14 +32,13 @@ from wmfs.registry import (
     OperationMetadata,
     PluginMetadata,
 )
+from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.fd_broker import FdSender
 from wmfs_plugin.metadata import metadata_from_reader
 from wmfs_plugin.schema import schema_root
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
-
-_RPC_TIMEOUT_SECONDS = 30.0
 
 
 def _load_runtime_schema() -> ModuleType:
@@ -65,10 +64,12 @@ class WorkerSession:
         manifest: "PluginManifest",
         buffers: BufferManager,
         expected_metadata: PluginMetadata | None = None,
+        deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> None:
         self._manifest = manifest
         self._buffers = buffers
         self._expected_metadata = expected_metadata
+        self._deadlines = deadlines
         self._metadata: PluginMetadata | None = None
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -84,12 +85,12 @@ class WorkerSession:
         self._closed = False
         self._invalidated = False
         self._thread.start()
-        if not self._ready.wait(_RPC_TIMEOUT_SECONDS):
+        if not self._ready.wait(self._deadlines.startup):
             self._abort_startup()
             raise RuntimeError("Worker session did not start")
         if self._startup_error is not None:
             self._closed = True
-            self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+            self._thread.join(timeout=self._deadlines.shutdown)
             raise RuntimeError(
                 "Worker session failed to start"
             ) from self._startup_error
@@ -107,7 +108,7 @@ class WorkerSession:
             if threading.current_thread() is self._thread:
                 raise RuntimeError("Worker session cannot synchronously call itself")
             future = asyncio.run_coroutine_threadsafe(self._environment(), self._loop)
-            return future.result(timeout=_RPC_TIMEOUT_SECONDS)
+            return future.result(timeout=self._deadlines.request)
 
     def invoke(
         self,
@@ -138,7 +139,7 @@ class WorkerSession:
             if threading.current_thread() is self._thread:
                 raise RuntimeError("Worker session cannot synchronously call itself")
             future = asyncio.run_coroutine_threadsafe(self._ping(), self._loop)
-            future.result(timeout=_RPC_TIMEOUT_SECONDS)
+            future.result(timeout=self._deadlines.request)
 
     def close(self) -> None:
         with self._submit_lock:
@@ -147,7 +148,7 @@ class WorkerSession:
             self._closed = True
             if self._loop is not None and self._shutdown is not None:
                 self._loop.call_soon_threadsafe(self._shutdown.set)
-            self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+            self._thread.join(timeout=self._deadlines.shutdown)
             if self._thread.is_alive():
                 raise RuntimeError("Worker session did not stop")
 
@@ -164,8 +165,11 @@ class WorkerSession:
         self._loop = asyncio.get_running_loop()
         self._shutdown = asyncio.Event()
         self._invoke_lock = asyncio.Lock()
-        async with _worker_connection(self._manifest) as (plugin, fd_sender):
-            metadata = await _validate_worker(plugin)
+        async with _worker_connection(self._manifest, self._deadlines) as (
+            plugin,
+            fd_sender,
+        ):
+            metadata = await _validate_worker(plugin, self._deadlines.startup)
             if (
                 self._expected_metadata is not None
                 and metadata != self._expected_metadata
@@ -186,7 +190,7 @@ class WorkerSession:
         self._closed = True
         if self._loop is not None and self._serve_task is not None:
             self._loop.call_soon_threadsafe(self._serve_task.cancel)
-        self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+        self._thread.join(timeout=self._deadlines.shutdown)
 
     async def _invoke(
         self,
@@ -330,12 +334,12 @@ class WorkerSession:
             if collect_metrics:
                 response = await asyncio.wait_for(
                     self._plugin.invokeKnownProfiled(invocation=wire_invocation),
-                    _RPC_TIMEOUT_SECONDS,
+                    self._deadlines.request,
                 )
             else:
                 await asyncio.wait_for(
                     self._plugin.invokeKnown(invocation=wire_invocation),
-                    _RPC_TIMEOUT_SECONDS,
+                    self._deadlines.request,
                 )
                 response = None
             self._fd_sender.finish_invocation(invocation_id)
@@ -379,7 +383,7 @@ class WorkerSession:
         async with self._invoke_lock:
             nonce = secrets.randbits(64)
             response = await asyncio.wait_for(
-                self._plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS
+                self._plugin.ping(nonce=nonce), self._deadlines.request
             )
             if response.nonce != nonce:
                 raise RuntimeError("Worker returned an invalid ping response")
@@ -389,7 +393,7 @@ class WorkerSession:
             raise RuntimeError("Worker session is not ready")
         async with self._invoke_lock:
             response = await asyncio.wait_for(
-                self._plugin.getEnvironment(), _RPC_TIMEOUT_SECONDS
+                self._plugin.getEnvironment(), self._deadlines.request
             )
             environment = response.environment
             return EnvironmentMetadata(
@@ -443,27 +447,34 @@ def _scalar_arguments(
     ]
 
 
-def inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
-    return asyncio.run(capnp.run(_inspect_plugin(manifest)))
+def inspect_plugin(
+    manifest: "PluginManifest",
+    deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
+) -> PluginMetadata:
+    return asyncio.run(capnp.run(_inspect_plugin(manifest, deadlines)))
 
 
 def inspect_worker_environment(
     manifest: "PluginManifest",
+    deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
 ) -> EnvironmentMetadata:
-    return asyncio.run(capnp.run(_inspect_worker_environment(manifest)))
+    return asyncio.run(capnp.run(_inspect_worker_environment(manifest, deadlines)))
 
 
-async def _inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:
-    async with _worker_connection(manifest) as (plugin, _fd_sender):
-        return await _validate_worker(plugin)
+async def _inspect_plugin(
+    manifest: "PluginManifest", deadlines: TransportDeadlines
+) -> PluginMetadata:
+    async with _worker_connection(manifest, deadlines) as (plugin, _fd_sender):
+        return await _validate_worker(plugin, deadlines.startup)
 
 
 async def _inspect_worker_environment(
     manifest: "PluginManifest",
+    deadlines: TransportDeadlines,
 ) -> EnvironmentMetadata:
-    async with _worker_connection(manifest) as (plugin, _fd_sender):
-        await _validate_worker(plugin)
-        response = await asyncio.wait_for(plugin.getEnvironment(), _RPC_TIMEOUT_SECONDS)
+    async with _worker_connection(manifest, deadlines) as (plugin, _fd_sender):
+        await _validate_worker(plugin, deadlines.startup)
+        response = await asyncio.wait_for(plugin.getEnvironment(), deadlines.request)
         environment = response.environment
         return EnvironmentMetadata(
             python_version=str(environment.pythonVersion),
@@ -473,12 +484,10 @@ async def _inspect_worker_environment(
         )
 
 
-async def _validate_worker(plugin: object) -> PluginMetadata:
+async def _validate_worker(plugin: object, timeout: float) -> PluginMetadata:
     runtime_schema = _load_runtime_schema()
     try:
-        protocol = await asyncio.wait_for(
-            plugin.getProtocolVersion(), _RPC_TIMEOUT_SECONDS
-        )
+        protocol = await asyncio.wait_for(plugin.getProtocolVersion(), timeout)
     except Exception as error:
         raise RuntimeError(
             "Worker does not implement the required protocol handshake"
@@ -489,10 +498,10 @@ async def _validate_worker(plugin: object) -> PluginMetadata:
             f"{runtime_schema.protocolVersion}"
         )
     nonce = secrets.randbits(64)
-    ping = await asyncio.wait_for(plugin.ping(nonce=nonce), _RPC_TIMEOUT_SECONDS)
+    ping = await asyncio.wait_for(plugin.ping(nonce=nonce), timeout)
     if ping.nonce != nonce:
         raise RuntimeError("Worker returned an invalid ping response")
-    response = await asyncio.wait_for(plugin.getMetadata(), _RPC_TIMEOUT_SECONDS)
+    response = await asyncio.wait_for(plugin.getMetadata(), timeout)
     metadata = metadata_from_reader(response.metadata)
     if metadata.protocol_version != runtime_schema.protocolVersion:
         raise RuntimeError(
@@ -505,6 +514,7 @@ async def _validate_worker(plugin: object) -> PluginMetadata:
 @asynccontextmanager
 async def _worker_connection(
     manifest: "PluginManifest",
+    deadlines: TransportDeadlines,
 ) -> AsyncIterator[tuple[object, FdSender]]:
     rpc_parent, rpc_child = socket.socketpair()
     fd_parent, fd_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
@@ -522,7 +532,7 @@ async def _worker_connection(
     client = None
     fd_sender = None
     try:
-        fd_sender = FdSender(fd_parent, _load_tensor_schema())
+        fd_sender = FdSender(fd_parent, _load_tensor_schema(), deadlines.fd_transfer)
         plugin_schema = _load_plugin_schema(manifest)
         interface = getattr(plugin_schema, manifest.interface)
         stream = await capnp.AsyncIoStream.create_unix_connection(sock=rpc_parent)
@@ -539,7 +549,7 @@ async def _worker_connection(
             fd_sender.close()
         else:
             fd_parent.close()
-        await _wait_for_worker(process)
+        await _wait_for_worker(process, deadlines)
         if fd_sender is not None:
             fd_sender.worker_exited()
 
@@ -579,13 +589,15 @@ def _start_worker(
     )
 
 
-async def _wait_for_worker(process: subprocess.Popen[str]) -> None:
+async def _wait_for_worker(
+    process: subprocess.Popen[str], deadlines: TransportDeadlines
+) -> None:
     try:
-        await asyncio.to_thread(process.wait, timeout=_RPC_TIMEOUT_SECONDS)
+        await asyncio.to_thread(process.wait, timeout=deadlines.shutdown)
     except subprocess.TimeoutExpired:
         process.terminate()
         try:
-            await asyncio.to_thread(process.wait, timeout=_RPC_TIMEOUT_SECONDS)
+            await asyncio.to_thread(process.wait, timeout=deadlines.kill_grace)
         except subprocess.TimeoutExpired:
             process.kill()
             await asyncio.to_thread(process.wait)

@@ -55,7 +55,9 @@ struct InvocationProfile {
 
 class Session {
   public:
-    Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint);
+    Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
+            double startup_timeout_seconds, double request_timeout_seconds,
+            double fd_transfer_timeout_seconds);
     ~Session();
 
     Session(const Session &) = delete;

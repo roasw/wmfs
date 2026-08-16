@@ -190,6 +190,17 @@ session started by that attempt, and the existing registry remains unchanged.
 Discovered operations continue to execute through the explicitly selected
 backend until isolated operation dispatch is enabled.
 
+Transport deadlines are immutable for a discovered backend and can be changed
+before discovery. Defaults are 30 seconds for startup, requests, shutdown, and
+post-terminate kill grace, and 5 seconds for FD transfer:
+
+```python
+runtime.configure_deadlines(
+    startup=30, request=30, fd_transfer=5, shutdown=30, kill_grace=30
+)
+runtime.discover_plugins(Path("plugins"))
+```
+
 Output plans may reference input axes, minimum dimensions, Boolean scalar
 selection, input dtypes, and tensor/scalar dtype promotion. The runtime
 validates these plans during discovery, preallocates every output, and passes

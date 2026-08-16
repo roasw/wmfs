@@ -9,6 +9,7 @@ import wmfs.backends.isolated as isolated_module
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.plugins import PluginManifest
 from wmfs.registry import OperationMetadata, OperationRegistry, PluginMetadata
+from wmfs.transport.deadlines import TransportDeadlines
 
 
 def _backend(
@@ -65,6 +66,43 @@ def test_concurrent_first_calls_create_one_plugin_session(
 
         assert results == (1,) * 8
         assert created == 1
+    finally:
+        backend.close()
+
+
+def test_backend_propagates_deadlines_to_python_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[TransportDeadlines] = []
+
+    class Session:
+        def __init__(self, *_args: object) -> None:
+            received.append(_args[-1])
+
+        def invoke(self, _operation: str, *_args: object, **_kwargs: object) -> int:
+            return 1
+
+        def close(self) -> None:
+            pass
+
+    deadlines = TransportDeadlines(1, 2, 3, 4, 5)
+    metadata = PluginMetadata(
+        name="test",
+        version="1",
+        protocol_version=1,
+        operations=(),
+        fingerprint=1,
+    )
+    registry = OperationRegistry()
+    registry.register(metadata)
+    manifest = PluginManifest("test", "1", Path(), "Test", "test", Path())
+    monkeypatch.setattr(isolated_module, "WorkerSession", Session)
+    backend = IsolatedBackend(
+        (manifest,), registry, control_mode="python", deadlines=deadlines
+    )
+    try:
+        backend._new_session("test")
+        assert received == [deadlines]
     finally:
         backend.close()
 

@@ -8,13 +8,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <semaphore>
@@ -53,8 +56,36 @@ struct MappingKeyHash {
     }
 };
 
-void set_socket_timeout(int fd) {
-    constexpr timeval timeout{30, 0};
+std::chrono::nanoseconds timeout_from_seconds(double seconds) {
+    const auto nanoseconds = static_cast<long double>(seconds) * 1'000'000'000;
+    if (!std::isfinite(seconds) || seconds <= 0 ||
+        nanoseconds > std::numeric_limits<std::int64_t>::max()) {
+        throw std::invalid_argument("Native transport deadline must be finite, "
+                                    "positive, and convertible");
+    }
+    return std::chrono::nanoseconds(
+        std::max<std::int64_t>(1, static_cast<std::int64_t>(nanoseconds)));
+}
+
+timeval timeval_from_timeout(std::chrono::nanoseconds timeout) {
+    const auto seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(timeout);
+    const auto microseconds =
+        std::chrono::duration_cast<std::chrono::microseconds>(timeout -
+                                                              seconds);
+    using TimevalSeconds = decltype(timeval{}.tv_sec);
+    using TimevalMicroseconds = decltype(timeval{}.tv_usec);
+    if (seconds.count() > std::numeric_limits<TimevalSeconds>::max()) {
+        throw std::invalid_argument(
+            "Native FD transfer deadline is not convertible to timeval");
+    }
+    return timeval{static_cast<TimevalSeconds>(seconds.count()),
+                   static_cast<TimevalMicroseconds>(
+                       std::max<std::int64_t>(1, microseconds.count()))};
+}
+
+void set_socket_timeout(int fd, std::chrono::nanoseconds duration) {
+    const auto timeout = timeval_from_timeout(duration);
     if (::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) <
             0 ||
         ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) <
@@ -104,15 +135,19 @@ std::runtime_error kj_error(const kj::Exception &error) {
 struct Session::Impl {
     struct Worker {
         explicit Worker(UniqueFd rpc_fd, UniqueFd control_fd,
-                        std::uint64_t expected_fingerprint)
+                        std::uint64_t expected_fingerprint,
+                        std::chrono::nanoseconds startup_timeout,
+                        std::chrono::nanoseconds request_timeout,
+                        std::chrono::nanoseconds fd_transfer_timeout)
             : control_fd(std::move(control_fd)), io(kj::setupAsyncIo()),
               stream(io.lowLevelProvider->wrapSocketFd(
                   kj::AutoCloseFd(rpc_fd.release()))),
-              client(*stream), plugin(client.bootstrap().castAs<::Plugin>()) {
-            set_socket_timeout(this->control_fd.get());
+              client(*stream), plugin(client.bootstrap().castAs<::Plugin>()),
+              request_timeout(request_timeout) {
+            set_socket_timeout(this->control_fd.get(), fd_transfer_timeout);
             auto version =
                 io.provider->getTimer()
-                    .timeoutAfter(30 * kj::SECONDS,
+                    .timeoutAfter(startup_timeout.count() * kj::NANOSECONDS,
                                   plugin.getProtocolVersionRequest().send())
                     .wait(io.waitScope);
             if (version.getVersion() != PROTOCOL_VERSION) {
@@ -121,7 +156,7 @@ struct Session::Impl {
             }
             auto metadata =
                 io.provider->getTimer()
-                    .timeoutAfter(30 * kj::SECONDS,
+                    .timeoutAfter(startup_timeout.count() * kj::NANOSECONDS,
                                   plugin.getMetadataRequest().send())
                     .wait(io.waitScope);
             metadata_bytes = serialize_reader(metadata.getMetadata());
@@ -136,7 +171,7 @@ struct Session::Impl {
         std::vector<std::uint8_t> environment() {
             auto response =
                 io.provider->getTimer()
-                    .timeoutAfter(30 * kj::SECONDS,
+                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
                                   plugin.getEnvironmentRequest().send())
                     .wait(io.waitScope);
             return serialize_reader(response.getEnvironment());
@@ -145,9 +180,11 @@ struct Session::Impl {
         void ping(std::uint64_t nonce) {
             auto request = plugin.pingRequest();
             request.setNonce(nonce);
-            auto response = io.provider->getTimer()
-                                .timeoutAfter(30 * kj::SECONDS, request.send())
-                                .wait(io.waitScope);
+            auto response =
+                io.provider->getTimer()
+                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
+                                  request.send())
+                    .wait(io.waitScope);
             if (response.getNonce() != nonce) {
                 throw std::runtime_error(
                     "Worker returned an invalid ping response");
@@ -228,7 +265,8 @@ struct Session::Impl {
             write_invocation(request.initInvocation(), invocation_id,
                              operation_id, inputs, outputs, scalars);
             io.provider->getTimer()
-                .timeoutAfter(30 * kj::SECONDS, request.send())
+                .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
+                              request.send())
                 .wait(io.waitScope);
         }
 
@@ -241,9 +279,11 @@ struct Session::Impl {
             write_invocation(request.initInvocation(), invocation_id,
                              operation_id, inputs, outputs, scalars);
             const auto rpc_started = std::chrono::steady_clock::now();
-            auto response = io.provider->getTimer()
-                                .timeoutAfter(30 * kj::SECONDS, request.send())
-                                .wait(io.waitScope);
+            auto response =
+                io.provider->getTimer()
+                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
+                                  request.send())
+                    .wait(io.waitScope);
             const auto rpc_ns =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - rpc_started)
@@ -320,6 +360,7 @@ struct Session::Impl {
         kj::Own<kj::AsyncIoStream> stream;
         capnp::TwoPartyClient client;
         ::Plugin::Client plugin;
+        std::chrono::nanoseconds request_timeout;
     };
 
     struct Command {
@@ -332,11 +373,17 @@ struct Session::Impl {
         std::binary_semaphore complete{0};
     };
 
-    Impl(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint)
+    Impl(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
+         double startup_timeout_seconds, double request_timeout_seconds,
+         double fd_transfer_timeout_seconds)
         : rpc_fd(rpc_fd), control_fd(control_fd),
           interrupt_rpc_fd(this->rpc_fd.duplicate_cloexec()),
           interrupt_control_fd(this->control_fd.duplicate_cloexec()),
           expected_fingerprint(expected_fingerprint),
+          startup_timeout(timeout_from_seconds(startup_timeout_seconds)),
+          request_timeout(timeout_from_seconds(request_timeout_seconds)),
+          fd_transfer_timeout(
+              timeout_from_seconds(fd_transfer_timeout_seconds)),
           thread([this] { run(); }) {
         startup_complete.acquire();
         if (startup_error) {
@@ -371,7 +418,14 @@ struct Session::Impl {
         std::optional<Worker> worker;
         try {
             worker.emplace(std::move(rpc_fd), std::move(control_fd),
-                           expected_fingerprint);
+                           expected_fingerprint, startup_timeout,
+                           request_timeout, fd_transfer_timeout);
+        } catch (const kj::Exception &error) {
+            try {
+                startup_error = std::make_exception_ptr(kj_error(error));
+            } catch (...) {
+                startup_error = std::current_exception();
+            }
         } catch (...) {
             startup_error = std::current_exception();
         }
@@ -459,6 +513,9 @@ struct Session::Impl {
     UniqueFd interrupt_rpc_fd;
     UniqueFd interrupt_control_fd;
     std::uint64_t expected_fingerprint;
+    std::chrono::nanoseconds startup_timeout;
+    std::chrono::nanoseconds request_timeout;
+    std::chrono::nanoseconds fd_transfer_timeout;
     std::binary_semaphore startup_complete{0};
     std::binary_semaphore command_ready{0};
     std::mutex submit_mutex;
@@ -476,8 +533,12 @@ struct Session::Impl {
     std::thread thread;
 };
 
-Session::Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint)
-    : impl_(std::make_unique<Impl>(rpc_fd, control_fd, expected_fingerprint)) {}
+Session::Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
+                 double startup_timeout_seconds, double request_timeout_seconds,
+                 double fd_transfer_timeout_seconds)
+    : impl_(std::make_unique<Impl>(
+          rpc_fd, control_fd, expected_fingerprint, startup_timeout_seconds,
+          request_timeout_seconds, fd_transfer_timeout_seconds)) {}
 
 Session::~Session() = default;
 

@@ -21,13 +21,16 @@ class _RemoteMapping:
 
 class FdSender:
     def __init__(
-        self, transfer_socket: socket.socket, tensor_schema: ModuleType
+        self,
+        transfer_socket: socket.socket,
+        tensor_schema: ModuleType,
+        timeout: float = 5.0,
     ) -> None:
         self._socket = transfer_socket
         self._schema = tensor_schema
         self._mapped_buffers: dict[tuple[int, int], _RemoteMapping] = {}
         self._lock = threading.Lock()
-        self._socket.settimeout(5.0)
+        self._socket.settimeout(timeout)
         self._closed = False
         self._worker_exited = False
         self._failed = False

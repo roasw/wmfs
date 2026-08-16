@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 import torch
 
 from wmfs.memory import BufferManager
@@ -176,6 +177,23 @@ def test_native_session_serializes_concurrent_callers() -> None:
                     future.result()
         finally:
             session.close()
+
+
+def test_native_session_honors_short_startup_timeout() -> None:
+    from wmfs import _native
+
+    rpc_parent, rpc_peer = socket.socketpair()
+    fd_parent, fd_peer = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    started = time.monotonic()
+    try:
+        with pytest.raises(RuntimeError):
+            _native.Session(rpc_parent.detach(), fd_parent.detach(), 0, 0.02, 1.0, 1.0)
+        assert time.monotonic() - started < 1.0
+    finally:
+        rpc_parent.close()
+        rpc_peer.close()
+        fd_parent.close()
+        fd_peer.close()
 
 
 def test_native_receiver_rejects_malformed_descriptor_batch() -> None:

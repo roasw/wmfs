@@ -1,6 +1,7 @@
 import socket
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from wmfs.memory import BufferManager
@@ -69,3 +70,16 @@ def test_sender_orders_read_only_upgrade_in_one_batch() -> None:
             sender.close()
             receiver.close()
             cache.close()
+
+
+def test_sender_honors_short_fd_transfer_timeout() -> None:
+    sender_socket, peer_socket = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    sender = FdSender(sender_socket, load_tensor_schema(), timeout=0.02)
+    with BufferManager() as manager:
+        managed = manager.from_tensor(torch.arange(1, dtype=torch.float32))
+        try:
+            with pytest.raises(TimeoutError):
+                sender.ensure_mapped(managed.buffer, invocation_id=1)
+        finally:
+            sender.close()
+            peer_socket.close()

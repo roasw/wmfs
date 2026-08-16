@@ -9,6 +9,10 @@ from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
+from wmfs.transport.deadlines import (
+    DEFAULT_TRANSPORT_DEADLINES,
+    TransportDeadlines,
+)
 
 
 class Backend(Protocol):
@@ -43,6 +47,7 @@ class Runtime:
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
         self._control_mode = "auto"
+        self._deadlines = DEFAULT_TRANSPORT_DEADLINES
 
     @property
     def backend_name(self) -> str:
@@ -71,6 +76,7 @@ class Runtime:
                 memory_mode=self._memory_mode,
                 arena_bytes=self._arena_bytes,
                 control_mode=self._control_mode,
+                deadlines=self._deadlines,
             )
             with self._condition:
                 previous = self._backends.get("isolated")
@@ -105,6 +111,28 @@ class Runtime:
             if mode not in {"auto", "native", "python"}:
                 raise ValueError("Control mode must be 'auto', 'native', or 'python'")
             self._control_mode = mode
+
+    def configure_deadlines(
+        self,
+        *,
+        startup: object = 30.0,
+        request: object = 30.0,
+        fd_transfer: object = 5.0,
+        shutdown: object = 30.0,
+        kill_grace: object = 30.0,
+    ) -> None:
+        """Configure isolated transport deadlines before plugin discovery."""
+        with self._condition:
+            self._ensure_open()
+            if "isolated" in self._backends:
+                raise RuntimeError("Configure deadlines before discovering plugins")
+            self._deadlines = TransportDeadlines(
+                startup=startup,
+                request=request,
+                fd_transfer=fd_transfer,
+                shutdown=shutdown,
+                kill_grace=kill_grace,
+            )
 
     def use_backend(self, name: str) -> None:
         with self._condition:
@@ -158,6 +186,7 @@ class Runtime:
             self._memory_mode = "pooled"
             self._arena_bytes = None
             self._control_mode = "auto"
+            self._deadlines = DEFAULT_TRANSPORT_DEADLINES
             self._state = "open"
             self._close_generation += 1
             self._condition.notify_all()

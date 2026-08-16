@@ -22,6 +22,7 @@ from wmfs.invocation import (
 )
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
 from wmfs.registry import EnvironmentMetadata, OperationMetadata, PluginMetadata
+from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.worker_process import (
     _load_runtime_schema,
     _start_worker,
@@ -47,10 +48,12 @@ class NativeWorkerSession:
         manifest: object,
         buffers: BufferManager,
         metadata: PluginMetadata | None = None,
+        deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> None:
         native: ModuleType = importlib.import_module("wmfs._native")
         self._native = native
         self._buffers = buffers
+        self._deadlines = deadlines
         self._metadata: PluginMetadata | None = None
         self._operations: dict[str, OperationMetadata] = {}
         self._process: subprocess.Popen[str] | None = None
@@ -69,6 +72,9 @@ class NativeWorkerSession:
                 rpc_parent.detach(),
                 fd_parent.detach(),
                 metadata.fingerprint if metadata is not None else 0,
+                deadlines.startup,
+                deadlines.request,
+                deadlines.fd_transfer,
             )
             with _load_runtime_schema().PluginMetadata.from_bytes(
                 self._session.metadata
@@ -357,11 +363,11 @@ class NativeWorkerSession:
         if process is None:
             return
         try:
-            process.wait(timeout=30)
+            process.wait(timeout=self._deadlines.shutdown)
         except subprocess.TimeoutExpired:
             process.terminate()
             try:
-                process.wait(timeout=30)
+                process.wait(timeout=self._deadlines.kill_grace)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()

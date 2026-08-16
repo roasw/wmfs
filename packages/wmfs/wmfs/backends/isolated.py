@@ -6,6 +6,7 @@ from wmfs.autograd import invoke_with_vjp
 from wmfs.memory import BufferManager
 from wmfs.plugins import PluginManifest
 from wmfs.registry import EnvironmentMetadata, OperationRegistry
+from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.native_worker import NativeWorkerSession, native_available
 from wmfs.transport.worker_process import WorkerSession
 
@@ -21,11 +22,13 @@ class IsolatedBackend:
         memory_mode: str = "pooled",
         arena_bytes: int | None = None,
         control_mode: str = "auto",
+        deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> None:
         self._registry = registry
         self._buffers = BufferManager(mode=memory_mode, arena_bytes=arena_bytes)
         self._manifests = {manifest.name: manifest for manifest in manifests}
         self._control_mode = control_mode
+        self._deadlines = deadlines
         self._sessions: dict[str, WorkerSession | NativeWorkerSession] = {}
         self._condition = threading.Condition()
         self._creating: set[str] = set()
@@ -40,6 +43,7 @@ class IsolatedBackend:
         memory_mode: str = "pooled",
         arena_bytes: int | None = None,
         control_mode: str = "auto",
+        deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> tuple[OperationRegistry, "IsolatedBackend"]:
         registry = OperationRegistry()
         backend = cls(
@@ -48,6 +52,7 @@ class IsolatedBackend:
             memory_mode=memory_mode,
             arena_bytes=arena_bytes,
             control_mode=control_mode,
+            deadlines=deadlines,
         )
         try:
             for manifest in manifests:
@@ -213,9 +218,11 @@ class IsolatedBackend:
                 self._manifests[plugin_name],
                 self._buffers,
                 expected,
+                self._deadlines,
             )
         return WorkerSession(
             self._manifests[plugin_name],
             self._buffers,
             expected,
+            self._deadlines,
         )
