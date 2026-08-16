@@ -2,8 +2,8 @@ from typing import Protocol
 
 import torch
 
+from wmfs.invocation import bind_scalars
 from wmfs.registry import OperationMetadata
-from wmfs.transport.worker_process import _bind_scalars
 
 
 class _PluginInvoker(Protocol):
@@ -28,7 +28,7 @@ def invoke_with_vjp(
     if any(parameter.access != "readOnly" for parameter in operation.tensor_inputs):
         raise RuntimeError("Isolated autograd does not support mutable tensor inputs")
     tensor_inputs = tuple(item for item in args if isinstance(item, torch.Tensor))
-    scalars = _bind_scalars(operation, args, kwargs)
+    scalars = bind_scalars(operation, args, kwargs)
     raw_result = backend._invoke_plugin(
         plugin_name, operation.name, *tensor_inputs, *scalars
     )

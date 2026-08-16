@@ -57,6 +57,8 @@ def test_safe_pool_reuses_memfd_but_transfers_each_generation() -> None:
             assert second_metrics.outputs[0].fd_transferred
             assert first_metrics.worker_kernel_ns > 0
             assert second_metrics.worker_kernel_ns > 0
+            assert first_metrics.scalar_binding_ns > 0
+            assert first_metrics.output_plan_ns > 0
             assert manager.stats()["memfds_created"] == 2
         finally:
             session.close()

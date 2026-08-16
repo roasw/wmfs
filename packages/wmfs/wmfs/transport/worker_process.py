@@ -13,18 +13,23 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 import capnp
-import torch
 
-from wmfs.memory.buffers import (
-    BufferAccessLease,
-    BufferManager,
-    ManagedTensor,
+from wmfs.invocation import (
+    BoundInvocation,
+    BoundTensorInput,
+    InputPreparationMetrics,
+    InvocationMetrics,
+    OutputAllocationMetrics,
+    bind_invocation,
+    invocation_result,
+    mark_reused_outputs_dirty,
+    materialize_output,
+    plan_outputs,
+    reserve_invocation_access,
+    share_input,
 )
-from wmfs.output_metadata import (
-    bind_reusable_outputs,
-    evaluate_outputs,
-    validate_operation_metadata,
-)
+from wmfs.memory.buffers import BufferManager, ManagedTensor
+from wmfs.output_metadata import validate_operation_metadata
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -53,63 +58,6 @@ _RPC_TIMEOUT_SECONDS = 30.0
 class TensorProbe:
     checksum: float
     fd_transfers: int
-
-
-@dataclass(frozen=True)
-class InputPreparationMetrics:
-    byte_length: int
-    shared_copy_ns: int
-    mapping_ns: int
-    fd_transferred: bool
-
-
-@dataclass(frozen=True)
-class OutputAllocationMetrics:
-    byte_length: int
-    shared_allocation_ns: int
-    mapping_ns: int
-    service_ns: int
-    fd_transferred: bool
-
-
-@dataclass(frozen=True)
-class InvocationMetrics:
-    inputs: tuple[InputPreparationMetrics, ...]
-    outputs: tuple[OutputAllocationMetrics, ...]
-    scalar_binding_ns: int = 0
-    output_plan_ns: int = 0
-    native_call_ns: int = 0
-    native_queue_wait_ns: int = 0
-    native_rpc_ns: int = 0
-    worker_input_views_ns: int = 0
-    worker_output_views_ns: int = 0
-    worker_dispatch_ns: int = 0
-    worker_kernel_ns: int = 0
-
-
-def _reserve_invocation_access(
-    buffers: BufferManager,
-    operation: OperationMetadata,
-    args: tuple[object, ...],
-    out: object | None,
-) -> BufferAccessLease:
-    reads: list[ManagedTensor] = []
-    writes: list[ManagedTensor] = []
-    tensor_args = [item for item in args if isinstance(item, torch.Tensor)]
-    if len(tensor_args) == len(operation.tensor_inputs):
-        for tensor, parameter in zip(tensor_args, operation.tensor_inputs, strict=True):
-            managed = buffers.managed(tensor)
-            if managed is None:
-                continue
-            (writes if parameter.access == "readWrite" else reads).append(managed)
-
-    output_values = out if isinstance(out, tuple) else (out,)
-    for value in output_values:
-        if isinstance(value, torch.Tensor):
-            managed = buffers.managed(value)
-            if managed is not None:
-                writes.append(managed)
-    return buffers.reserve_access(reads=reads, writes=writes)
 
 
 def _load_runtime_schema() -> ModuleType:
@@ -228,10 +176,7 @@ class WorkerSession:
 
     async def _invoke(
         self,
-        operation: str,
-        args: tuple[object, ...],
-        kwargs: dict[str, object],
-        out: object | None,
+        invocation: BoundInvocation,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
         if self._invoke_lock is None or self._plugin is None or self._fd_sender is None:
@@ -244,52 +189,31 @@ class WorkerSession:
             output_metrics: list[OutputAllocationMetrics] | None = (
                 [] if collect_metrics else None
             )
-            metadata = self._operations[operation]
-            tensor_args = [item for item in args if isinstance(item, torch.Tensor)]
-            if len(tensor_args) != len(metadata.tensor_inputs):
-                raise TypeError(
-                    f"Operation {operation!r} expected "
-                    f"{len(metadata.tensor_inputs)} tensor inputs"
-                )
-            if (
-                out is not None
-                and torch.is_grad_enabled()
-                and any(item.requires_grad for item in tensor_args)
-            ):
-                raise RuntimeError("Isolated out does not support autograd inputs")
             inputs = [
                 await self._prepare_input(
                     item,
                     invocation_id,
                     input_metrics,
-                    writable=parameter.access == "readWrite",
                 )
-                for item, parameter in zip(
-                    tensor_args, metadata.tensor_inputs, strict=True
-                )
+                for item in invocation.tensor_inputs
             ]
-            scalars = _bind_scalars(metadata, args, kwargs)
             return await self._invoke_known(
-                metadata,
+                invocation,
                 inputs,
-                scalars,
                 invocation_id,
                 input_metrics,
                 output_metrics,
                 collect_metrics,
-                out,
             )
 
     async def _invoke_known(
         self,
-        metadata: OperationMetadata,
+        invocation: BoundInvocation,
         inputs: list[ManagedTensor],
-        scalars: tuple[object, ...],
         invocation_id: int,
         input_metrics: list[InputPreparationMetrics] | None,
         output_metrics: list[OutputAllocationMetrics] | None,
         collect_metrics: bool,
-        out: object | None,
     ) -> tuple[object, InvocationMetrics]:
         if self._plugin is None or self._fd_sender is None:
             raise RuntimeError("Worker session is not ready")
@@ -297,26 +221,19 @@ class WorkerSession:
         dispatched = False
         completed = False
         try:
-            output_specs = evaluate_outputs(metadata, inputs, scalars)
-            reused_outputs = out is not None
-            if reused_outputs:
-                outputs.extend(
-                    bind_reusable_outputs(
-                        metadata, output_specs, inputs, out, self._buffers
-                    )
-                )
-            for index, (shape, dtype) in enumerate(output_specs):
+            output_plan = plan_outputs(
+                self._buffers,
+                invocation,
+                tuple(inputs),
+                collect_metrics=collect_metrics,
+            )
+            for index in range(len(output_plan.specs)):
                 service_start = perf_counter_ns() if collect_metrics else 0
-                allocation_start = perf_counter_ns() if collect_metrics else 0
-                managed = (
-                    outputs[index]
-                    if reused_outputs
-                    else self._buffers.empty_named(shape, dtype)
-                )
-                allocation_ns = (
-                    perf_counter_ns() - allocation_start
-                    if collect_metrics and not reused_outputs
-                    else 0
+                managed, allocation_ns = materialize_output(
+                    self._buffers,
+                    output_plan,
+                    index,
+                    collect_metrics=collect_metrics,
                 )
                 mapping_start = perf_counter_ns() if collect_metrics else 0
                 transferred = await asyncio.to_thread(
@@ -326,8 +243,7 @@ class WorkerSession:
                     writable=True,
                 )
                 mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
-                if not reused_outputs:
-                    outputs.append(managed)
+                outputs.append(managed)
                 if output_metrics is not None:
                     output_metrics.append(
                         OutputAllocationMetrics(
@@ -339,37 +255,36 @@ class WorkerSession:
                         )
                     )
 
-            invocation = {
+            wire_invocation = {
                 "invocationId": invocation_id,
-                "operationId": metadata.operation_id,
+                "operationId": invocation.operation.operation_id,
                 "inputs": [item.descriptor.as_capnp() for item in inputs],
                 "outputs": [item.descriptor.as_capnp() for item in outputs],
-                "scalars": _scalar_arguments(metadata, scalars),
+                "scalars": _scalar_arguments(invocation.operation, invocation.scalars),
             }
-            if reused_outputs:
-                for output in outputs:
-                    torch.autograd.graph.increment_version(output.tensor)
+            mark_reused_outputs_dirty(output_plan)
             dispatched = True
             if collect_metrics:
                 response = await asyncio.wait_for(
-                    self._plugin.invokeKnownProfiled(invocation=invocation),
+                    self._plugin.invokeKnownProfiled(invocation=wire_invocation),
                     _RPC_TIMEOUT_SECONDS,
                 )
             else:
                 await asyncio.wait_for(
-                    self._plugin.invokeKnown(invocation=invocation),
+                    self._plugin.invokeKnown(invocation=wire_invocation),
                     _RPC_TIMEOUT_SECONDS,
                 )
                 response = None
             self._fd_sender.finish_invocation(invocation_id)
             completed = True
-            tensors = tuple(item.tensor for item in outputs)
-            result: object = tensors[0] if len(tensors) == 1 else tensors
+            result = invocation_result(outputs)
             outputs.clear()
             worker = response.metrics if response is not None else None
             return result, InvocationMetrics(
                 inputs=tuple(input_metrics or ()),
                 outputs=tuple(output_metrics or ()),
+                scalar_binding_ns=invocation.scalar_binding_ns,
+                output_plan_ns=output_plan.output_plan_ns,
                 worker_input_views_ns=(
                     int(worker.inputViewsNs) if worker is not None else 0
                 ),
@@ -391,26 +306,21 @@ class WorkerSession:
 
     async def _prepare_input(
         self,
-        tensor: torch.Tensor,
+        item: BoundTensorInput,
         invocation_id: int,
         metrics: list[InputPreparationMetrics] | None,
-        *,
-        writable: bool = False,
     ) -> ManagedTensor:
-        managed = self._buffers.managed(tensor)
-        shared_copy_ns = 0
-        if managed is None:
-            copy_start = perf_counter_ns()
-            managed = self._buffers.from_tensor(tensor.contiguous())
-            shared_copy_ns = perf_counter_ns() - copy_start
-        mapping_start = perf_counter_ns()
+        managed, shared_copy_ns = share_input(
+            self._buffers, item.tensor, collect_metrics=metrics is not None
+        )
+        mapping_start = perf_counter_ns() if metrics is not None else 0
         transferred = await asyncio.to_thread(
             self._fd_sender.ensure_mapped,
             managed.buffer,
             invocation_id=invocation_id,
-            writable=writable,
+            writable=item.writable,
         )
-        mapping_ns = perf_counter_ns() - mapping_start
+        mapping_ns = perf_counter_ns() - mapping_start if metrics is not None else 0
         if metrics is not None:
             metrics.append(
                 InputPreparationMetrics(
@@ -446,10 +356,16 @@ class WorkerSession:
         with self._submit_lock:
             if self._closed or self._loop is None:
                 raise RuntimeError("Worker session is closed")
-            metadata = self._operations[operation]
-            with _reserve_invocation_access(self._buffers, metadata, args, out):
+            invocation = bind_invocation(
+                self._operations[operation],
+                args,
+                kwargs,
+                out,
+                collect_metrics=collect_metrics,
+            )
+            with reserve_invocation_access(self._buffers, invocation):
                 future = asyncio.run_coroutine_threadsafe(
-                    self._invoke(operation, args, kwargs, out, collect_metrics),
+                    self._invoke(invocation, collect_metrics),
                     self._loop,
                 )
                 try:
@@ -458,61 +374,6 @@ class WorkerSession:
                     if self._invalidated:
                         self.close()
                     raise
-
-
-def _bind_scalars(
-    metadata: OperationMetadata,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> tuple[object, ...]:
-    positional = [item for item in args if not isinstance(item, torch.Tensor)]
-    if len(positional) > len(metadata.scalar_parameters):
-        raise TypeError(f"Operation {metadata.name!r} received too many arguments")
-    remaining = dict(kwargs)
-    values: list[object] = []
-    for index, parameter in enumerate(metadata.scalar_parameters):
-        python_name = _python_parameter_name(parameter.name)
-        if index < len(positional):
-            if parameter.name in remaining or python_name in remaining:
-                raise TypeError(f"Scalar {python_name!r} was supplied more than once")
-            value = positional[index]
-        elif python_name in remaining:
-            value = remaining.pop(python_name)
-        elif parameter.name in remaining:
-            value = remaining.pop(parameter.name)
-        elif parameter.default is not None:
-            value = parameter.default
-        elif parameter.required:
-            raise TypeError(f"Missing required scalar {python_name!r}")
-        else:
-            raise ValueError(
-                f"Optional scalar {python_name!r} needs a default for preallocation"
-            )
-        values.append(_coerce_scalar(parameter, value))
-    if remaining:
-        unexpected = next(iter(remaining))
-        raise TypeError(f"Unexpected scalar argument {unexpected!r}")
-    return tuple(values)
-
-
-def _coerce_scalar(parameter: ScalarParameter, value: object) -> object:
-    if parameter.kind == "boolean":
-        if not isinstance(value, bool):
-            raise TypeError(f"Scalar {parameter.name!r} must be Boolean")
-        return value
-    if parameter.kind == "float64":
-        if isinstance(value, bool) or not isinstance(value, (float, int)):
-            raise TypeError(f"Scalar {parameter.name!r} must be numeric")
-        return float(value)
-    if parameter.kind == "int64":
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError(f"Scalar {parameter.name!r} must be an integer")
-        return value
-    if parameter.kind == "text":
-        if not isinstance(value, str):
-            raise TypeError(f"Scalar {parameter.name!r} must be text")
-        return value
-    raise TypeError(f"Scalar {parameter.name!r} has an unknown kind")
 
 
 def _scalar_arguments(
@@ -524,16 +385,6 @@ def _scalar_arguments(
             zip(metadata.scalar_parameters, scalars, strict=True)
         )
     ]
-
-
-def _python_parameter_name(name: str) -> str:
-    converted = []
-    for character in name:
-        if character.isupper():
-            converted.extend(("_", character.lower()))
-        else:
-            converted.append(character)
-    return "".join(converted)
 
 
 def inspect_plugin(manifest: "PluginManifest") -> PluginMetadata:

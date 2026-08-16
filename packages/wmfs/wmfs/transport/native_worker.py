@@ -7,17 +7,23 @@ from collections import OrderedDict
 from time import perf_counter_ns
 from types import ModuleType
 
-import torch
-
-from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
-from wmfs.output_metadata import bind_reusable_outputs, evaluate_outputs
-from wmfs.registry import PluginMetadata
-from wmfs.transport.worker_process import (
+from wmfs.invocation import (
+    BoundInvocation,
+    BoundTensorInput,
     InputPreparationMetrics,
     InvocationMetrics,
     OutputAllocationMetrics,
-    _bind_scalars,
-    _reserve_invocation_access,
+    bind_invocation,
+    invocation_result,
+    mark_reused_outputs_dirty,
+    materialize_output,
+    plan_outputs,
+    reserve_invocation_access,
+    share_input,
+)
+from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
+from wmfs.registry import PluginMetadata
+from wmfs.transport.worker_process import (
     _start_worker,
 )
 
@@ -76,10 +82,7 @@ class NativeWorkerSession:
         out: object | None = None,
         **kwargs: object,
     ) -> object:
-        with self._lifecycle_lock:
-            metadata = self._operations[operation]
-            with _reserve_invocation_access(self._buffers, metadata, args, out):
-                result, _metrics = self._invoke(operation, args, kwargs, out, False)
+        result, _metrics = self._submit_invocation(operation, args, kwargs, out, False)
         return result
 
     def invoke_profiled(
@@ -90,10 +93,26 @@ class NativeWorkerSession:
         out: object | None = None,
         **kwargs: object,
     ) -> tuple[object, InvocationMetrics]:
+        return self._submit_invocation(operation, args, kwargs, out, True)
+
+    def _submit_invocation(
+        self,
+        operation: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        out: object | None,
+        collect_metrics: bool,
+    ) -> tuple[object, InvocationMetrics]:
         with self._lifecycle_lock:
-            metadata = self._operations[operation]
-            with _reserve_invocation_access(self._buffers, metadata, args, out):
-                return self._invoke(operation, args, kwargs, out, True)
+            invocation = bind_invocation(
+                self._operations[operation],
+                args,
+                kwargs,
+                out,
+                collect_metrics=collect_metrics,
+            )
+            with reserve_invocation_access(self._buffers, invocation):
+                return self._invoke(invocation, collect_metrics)
 
     def ping(self) -> None:
         with self._lifecycle_lock:
@@ -118,74 +137,43 @@ class NativeWorkerSession:
 
     def _invoke(
         self,
-        operation_name: str,
-        args: tuple[object, ...],
-        kwargs: dict[str, object],
-        out: object | None,
+        invocation: BoundInvocation,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
-        operation = self._operations[operation_name]
+        operation = invocation.operation
         invocation_id = secrets.randbits(64)
         input_metrics: list[InputPreparationMetrics] = []
         output_metrics: list[OutputAllocationMetrics] = []
-        tensor_args = [item for item in args if isinstance(item, torch.Tensor)]
-        if len(tensor_args) != len(operation.tensor_inputs):
-            raise TypeError(
-                f"Operation {operation_name!r} expected "
-                f"{len(operation.tensor_inputs)} tensor inputs"
-            )
-        if (
-            out is not None
-            and torch.is_grad_enabled()
-            and any(item.requires_grad for item in tensor_args)
-        ):
-            raise RuntimeError("Isolated out does not support autograd inputs")
         inputs = [
             self._prepare_input(
                 item,
                 invocation_id,
                 input_metrics,
                 collect_metrics,
-                writable=parameter.access == "readWrite",
             )
-            for item, parameter in zip(
-                tensor_args, operation.tensor_inputs, strict=True
-            )
+            for item in invocation.tensor_inputs
         ]
-        scalar_start = perf_counter_ns() if collect_metrics else 0
-        scalars = _bind_scalars(operation, args, kwargs)
-        scalar_binding_ns = perf_counter_ns() - scalar_start if collect_metrics else 0
         outputs: list[ManagedTensor] = []
         dispatched = False
         try:
-            plan_start = perf_counter_ns() if collect_metrics else 0
-            output_specs = evaluate_outputs(operation, inputs, scalars)
-            output_plan_ns = perf_counter_ns() - plan_start if collect_metrics else 0
-            reused_outputs = out is not None
-            if reused_outputs:
-                outputs.extend(
-                    bind_reusable_outputs(
-                        operation, output_specs, inputs, out, self._buffers
-                    )
-                )
-            for index, (shape, dtype) in enumerate(output_specs):
+            output_plan = plan_outputs(
+                self._buffers,
+                invocation,
+                tuple(inputs),
+                collect_metrics=collect_metrics,
+            )
+            for index in range(len(output_plan.specs)):
                 service_start = perf_counter_ns() if collect_metrics else 0
-                allocation_start = perf_counter_ns() if collect_metrics else 0
-                output = (
-                    outputs[index]
-                    if reused_outputs
-                    else self._buffers.empty_named(shape, dtype)
-                )
-                allocation_ns = (
-                    perf_counter_ns() - allocation_start
-                    if collect_metrics and not reused_outputs
-                    else 0
+                output, allocation_ns = materialize_output(
+                    self._buffers,
+                    output_plan,
+                    index,
+                    collect_metrics=collect_metrics,
                 )
                 mapping_start = perf_counter_ns() if collect_metrics else 0
                 transferred = self._ensure_mapped(output, invocation_id, writable=True)
                 mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
-                if not reused_outputs:
-                    outputs.append(output)
+                outputs.append(output)
                 if collect_metrics:
                     output_metrics.append(
                         OutputAllocationMetrics(
@@ -206,13 +194,15 @@ class NativeWorkerSession:
                     [
                         (index, parameter.kind, value)
                         for index, (parameter, value) in enumerate(
-                            zip(operation.scalar_parameters, scalars, strict=True)
+                            zip(
+                                operation.scalar_parameters,
+                                invocation.scalars,
+                                strict=True,
+                            )
                         )
                     ],
                 )
-                if reused_outputs:
-                    for output in outputs:
-                        torch.autograd.graph.increment_version(output.tensor)
+                mark_reused_outputs_dirty(output_plan)
                 dispatched = True
                 if collect_metrics:
                     native_profile = self._ensure_open().invoke_profiled(*arguments)
@@ -225,15 +215,14 @@ class NativeWorkerSession:
             except Exception:
                 self.close()
                 raise
-            tensors = tuple(item.tensor for item in outputs)
-            result: object = tensors[0] if len(tensors) == 1 else tensors
+            result = invocation_result(outputs)
             outputs.clear()
             native_profile = native_profile or {}
             return result, InvocationMetrics(
                 inputs=tuple(input_metrics),
                 outputs=tuple(output_metrics),
-                scalar_binding_ns=scalar_binding_ns,
-                output_plan_ns=output_plan_ns,
+                scalar_binding_ns=invocation.scalar_binding_ns,
+                output_plan_ns=output_plan.output_plan_ns,
                 native_call_ns=native_call_ns,
                 native_queue_wait_ns=int(native_profile.get("queue_wait_ns", 0)),
                 native_rpc_ns=int(native_profile.get("rpc_ns", 0)),
@@ -252,22 +241,18 @@ class NativeWorkerSession:
 
     def _prepare_input(
         self,
-        tensor: torch.Tensor,
+        item: BoundTensorInput,
         invocation_id: int,
         metrics: list[InputPreparationMetrics],
         collect_metrics: bool,
-        *,
-        writable: bool = False,
     ) -> ManagedTensor:
-        managed = self._buffers.managed(tensor)
-        shared_copy_ns = 0
-        if managed is None:
-            copy_start = perf_counter_ns() if collect_metrics else 0
-            managed = self._buffers.from_tensor(tensor.contiguous())
-            if collect_metrics:
-                shared_copy_ns = perf_counter_ns() - copy_start
+        managed, shared_copy_ns = share_input(
+            self._buffers, item.tensor, collect_metrics=collect_metrics
+        )
         mapping_start = perf_counter_ns() if collect_metrics else 0
-        transferred = self._ensure_mapped(managed, invocation_id, writable=writable)
+        transferred = self._ensure_mapped(
+            managed, invocation_id, writable=item.writable
+        )
         mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
         if collect_metrics:
             metrics.append(

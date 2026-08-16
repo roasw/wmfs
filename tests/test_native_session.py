@@ -34,6 +34,8 @@ def test_native_session_runs_known_outputs_with_one_arena_mapping() -> None:
             assert profile.native_rpc_ns > profile.worker_kernel_ns > 0
             assert profile.worker_input_views_ns > 0
             assert profile.worker_output_views_ns > 0
+            assert profile.scalar_binding_ns > 0
+            assert profile.output_plan_ns > 0
             del result
             buffers.collect()
             repeated = session.invoke("add_scalar", a.tensor, 2.5)
