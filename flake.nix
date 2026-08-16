@@ -107,6 +107,18 @@
                     b = torch.arange(6, dtype=torch.float64).reshape(3, 2)
                     torch.testing.assert_close(matmul(a, b), a @ b)
                     torch.testing.assert_close(add_scalar(a, 1.5), a + 1.5)
+                    differentiable_a = a.clone().requires_grad_()
+                    differentiable_b = b.clone().requires_grad_()
+                    expected_a = a.clone().requires_grad_()
+                    expected_b = b.clone().requires_grad_()
+                    loss = add_scalar(
+                        matmul(differentiable_a, differentiable_b), 1.0
+                    ).square().sum()
+                    expected_loss = (expected_a @ expected_b + 1.0).square().sum()
+                    loss.backward()
+                    expected_loss.backward()
+                    torch.testing.assert_close(differentiable_a.grad, expected_a.grad)
+                    torch.testing.assert_close(differentiable_b.grad, expected_b.grad)
                     u, s, vh = svd(a, full_matrices=False)
                     torch.testing.assert_close(u @ torch.diag(s) @ vh, a)
                 finally:

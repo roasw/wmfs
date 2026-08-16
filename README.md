@@ -167,6 +167,14 @@ its writable descriptor in the operation request. Dynamic output plans are
 reserved by the protocol but rejected until a generic allocator invocation is
 implemented for both control paths.
 
+Plugins may advertise an internal vector-Jacobian product (VJP) operation for a
+public operation. Its metadata identifies the forward inputs and outputs that
+must be saved, output cotangents it consumes, scalar values it needs, and input
+gradients it returns. The plugin implements the VJP as an ordinary tensor
+operation using the same known-output and shared-memory protocol. Internal VJP
+operations participate in registration and validation but are omitted from
+`runtime.operation_names`.
+
 ## Shared CPU Tensors
 
 The runtime can move a contiguous CPU tensor into runtime-owned memfd storage.
@@ -263,6 +271,16 @@ for value in values:
 Reusable isolated outputs must have the schema-derived shape and dtype, cannot
 require gradients, and cannot alias an input or another output. Existing calls
 without `out=` retain the allocate-and-return behavior.
+
+Isolated operations that advertise a VJP participate in ordinary PyTorch
+autograd graphs. PyTorch schedules the graph in the main process; WMFS invokes
+the plugin's forward and VJP operations in its isolated worker. The reference
+plugin provides VJPs for `matmul` and `add_scalar`, so they can be chained with
+local Torch operations and with each other before calling `backward()`. `svd`
+currently raises when an isolated differentiable call is requested because it
+does not advertise a VJP. The initial contract supports first-order reverse
+mode only and rejects higher-order gradients, mutable differentiable inputs,
+and `out=` with differentiable inputs.
 
 ## Incompatible Worker Environment
 

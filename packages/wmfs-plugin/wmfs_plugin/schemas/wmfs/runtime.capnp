@@ -2,7 +2,7 @@
 
 using Tensor = import "/wmfs/tensor.capnp";
 
-const protocolVersion :UInt16 = 7;
+const protocolVersion :UInt16 = 8;
 
 enum TensorAccess {
   readOnly @0;
@@ -87,6 +87,22 @@ struct OutputPlan {
   }
 }
 
+struct VjpMetadata {
+  operationId @0 :UInt32;
+  savedInputs @1 :List(UInt16);
+  savedOutputs @2 :List(UInt16);
+  outputCotangents @3 :List(UInt16);
+  inputGradients @4 :List(UInt16);
+  scalarParameters @5 :List(UInt16);
+}
+
+struct VjpPlan {
+  union {
+    none @0 :Void;
+    known @1 :VjpMetadata;
+  }
+}
+
 struct OperationMetadata {
   name @0 :Text;
   tensorInputs @1 :List(TensorParameter);
@@ -94,6 +110,8 @@ struct OperationMetadata {
   scalarParameters @3 :List(ScalarParameter);
   operationId @4 :UInt32;
   outputPlans @5 :List(OutputPlan);
+  vjp @6 :VjpPlan;
+  internal @7 :Bool = false;
 }
 
 struct PluginMetadata {

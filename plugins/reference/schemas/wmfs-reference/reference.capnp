@@ -6,8 +6,8 @@ using Tensor = import "/wmfs/tensor.capnp";
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
-  protocolVersion = 7,
-  fingerprint = 0x89cb48fe8cefb759,
+  protocolVersion = 8,
+  fingerprint = 0xe7ba5a83d19c4261,
   operations = [
     (
       name = "matmul",
@@ -29,6 +29,14 @@ const pluginMetadata :Runtime.PluginMetadata = (
           ),
         ),
       ],
+      vjp = (
+        known = (
+          operationId = 4,
+          savedInputs = [0, 1],
+          outputCotangents = [0],
+          inputGradients = [0, 1],
+        ),
+      ),
     ),
     (
       name = "svd",
@@ -123,6 +131,50 @@ const pluginMetadata :Runtime.PluginMetadata = (
           ),
         ),
       ],
+      vjp = (
+        known = (
+          operationId = 5,
+          outputCotangents = [0],
+          inputGradients = [0],
+        ),
+      ),
+    ),
+    (
+      name = "matmul_vjp",
+      tensorInputs = [
+        (name = "a"),
+        (name = "b"),
+        (name = "resultCotangent"),
+      ],
+      tensorOutputs = [
+        (name = "aGradient"),
+        (name = "bGradient"),
+      ],
+      operationId = 4,
+      outputPlans = [
+        (
+          name = "aGradient",
+          known = (sameShapeAsInput = 0, dtype = (input = 0)),
+        ),
+        (
+          name = "bGradient",
+          known = (sameShapeAsInput = 1, dtype = (input = 1)),
+        ),
+      ],
+      internal = true,
+    ),
+    (
+      name = "add_scalar_vjp",
+      tensorInputs = [(name = "resultCotangent")],
+      tensorOutputs = [(name = "aGradient")],
+      operationId = 5,
+      outputPlans = [
+        (
+          name = "aGradient",
+          known = (sameShapeAsInput = 0, dtype = (input = 0)),
+        ),
+      ],
+      internal = true,
     ),
   ],
 );

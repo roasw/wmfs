@@ -57,6 +57,32 @@ def _add_scalar(
     kernels.add_scalar(a, value, out=outputs[0])
 
 
+def _matmul_vjp(
+    inputs: tuple[torch.Tensor, ...],
+    outputs: tuple[torch.Tensor, ...],
+    scalars: tuple[object, ...],
+) -> None:
+    if len(inputs) != 3 or len(outputs) != 2 or scalars:
+        raise ValueError("Invalid matmul VJP invocation")
+    a, b, result_cotangent = inputs
+    if a.ndim != 2 or b.ndim != 2 or result_cotangent.shape != (a.shape[0], b.shape[1]):
+        raise ValueError("matmul VJP input dimensions are incompatible")
+    _validate_output(outputs[0], tuple(a.shape), a.dtype)
+    _validate_output(outputs[1], tuple(b.shape), b.dtype)
+    kernels.matmul_vjp(a, b, result_cotangent, out=(outputs[0], outputs[1]))
+
+
+def _add_scalar_vjp(
+    inputs: tuple[torch.Tensor, ...],
+    outputs: tuple[torch.Tensor, ...],
+    scalars: tuple[object, ...],
+) -> None:
+    if len(inputs) != 1 or len(outputs) != 1 or scalars:
+        raise ValueError("Invalid add_scalar VJP invocation")
+    _validate_output(outputs[0], tuple(inputs[0].shape), inputs[0].dtype)
+    kernels.add_scalar_vjp(inputs[0], out=outputs[0])
+
+
 def _tensor_checksum(
     mapped_buffers: MappedBufferCache,
     invocationId: int,
@@ -81,6 +107,8 @@ def main() -> None:
             "matmul": _matmul,
             "svd": _svd,
             "add_scalar": _add_scalar,
+            "matmul_vjp": _matmul_vjp,
+            "add_scalar_vjp": _add_scalar_vjp,
         },
         extra_server_methods={"tensorChecksum": _tensor_checksum},
     )

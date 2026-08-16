@@ -18,7 +18,10 @@
         inherit system;
         config.allowUnfree = true;
       };
-      source = wmfs.outPath;
+      source = builtins.path {
+        path = wmfs.outPath;
+        name = "wmfs-source";
+      };
       workers = import (source + "/nix/reference-workers.nix") {
         inherit pkgs source;
       };
@@ -75,6 +78,14 @@
                 matrix = torch.arange(12, dtype=torch.float64).reshape(4, 3)
                 product = matmul(matrix, matrix.T)
                 torch.testing.assert_close(product, matrix @ matrix.T)
+
+                differentiable = matrix.clone().requires_grad_()
+                expected = matrix.clone().requires_grad_()
+                loss = add_scalar(matmul(differentiable, differentiable.T), 1.0).sum()
+                expected_loss = (expected @ expected.T + 1.0).sum()
+                loss.backward()
+                expected_loss.backward()
+                torch.testing.assert_close(differentiable.grad, expected.grad)
 
                 u, singular_values, vh = svd(matrix, full_matrices=False)
                 torch.testing.assert_close(

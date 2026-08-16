@@ -79,4 +79,27 @@ at::Tensor &add_scalar_out(const at::Tensor &a, double value, at::Tensor &out) {
     return at::add_out(out, a, scalar, at::Scalar(1));
 }
 
+std::tuple<at::Tensor, at::Tensor>
+matmul_vjp_out(const at::Tensor &a, const at::Tensor &b,
+               const at::Tensor &result_cotangent, at::Tensor &a_gradient,
+               at::Tensor &b_gradient) {
+    require(a.dim() == 2 && b.dim() == 2 && a.size(1) == b.size(0),
+            "matmul VJP input dimensions are incompatible");
+    std::array<std::int64_t, 2> result_shape{a.size(0), b.size(1)};
+    require(result_cotangent.sizes().equals(result_shape),
+            "matmul VJP cotangent has an invalid shape");
+    validate_output(a_gradient, a.sizes(), a.scalar_type());
+    validate_output(b_gradient, b.sizes(), b.scalar_type());
+    at::matmul_out(a_gradient, result_cotangent, b.transpose(0, 1));
+    at::matmul_out(b_gradient, a.transpose(0, 1), result_cotangent);
+    return {a_gradient, b_gradient};
+}
+
+at::Tensor &add_scalar_vjp_out(const at::Tensor &result_cotangent,
+                               at::Tensor &a_gradient) {
+    validate_output(a_gradient, result_cotangent.sizes(),
+                    result_cotangent.scalar_type());
+    return a_gradient.copy_(result_cotangent);
+}
+
 } // namespace wmfs::reference

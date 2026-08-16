@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from wmfs import add_scalar, matmul, runtime, svd
+from wmfs.runtime import Runtime
 
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
@@ -122,3 +123,56 @@ def test_isolated_out_upgrades_prior_read_only_mapping(
 
     assert add_scalar(source, 2.0, out=reusable) is reusable
     torch.testing.assert_close(reusable, source + 2.0)
+
+
+@pytest.mark.parametrize("control_mode", ["native", "python"])
+def test_isolated_vjps_chain_with_torch_autograd(control_mode: str) -> None:
+    candidate = Runtime()
+    candidate.configure_control(control_mode)
+    candidate.discover_plugins(PLUGIN_DIRECTORY)
+    candidate.use_backend("isolated")
+    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+    b = torch.tensor([[0.5, 1.5], [2.0, 3.0]], requires_grad=True)
+    expected_a = a.detach().clone().requires_grad_()
+    expected_b = b.detach().clone().requires_grad_()
+    try:
+        result = candidate.invoke("matmul", a, b)
+        shifted = candidate.invoke("add_scalar", result, 1.0)
+        loss = shifted.square().sum()
+        expected_loss = (torch.matmul(expected_a, expected_b) + 1.0).square().sum()
+
+        loss.backward()
+        expected_loss.backward()
+
+        torch.testing.assert_close(a.grad, expected_a.grad)
+        torch.testing.assert_close(b.grad, expected_b.grad)
+        assert hasattr(result.untyped_storage(), "_wmfs_allocation")
+        assert hasattr(shifted.untyped_storage(), "_wmfs_allocation")
+    finally:
+        candidate.close()
+
+
+def test_isolated_autograd_rejects_operation_without_vjp(
+    isolated_runtime: None,
+) -> None:
+    source = torch.arange(6, dtype=torch.float64).reshape(3, 2).requires_grad_()
+
+    with pytest.raises(RuntimeError, match="does not advertise a VJP"):
+        svd(source)
+
+
+def test_isolated_backend_hides_internal_vjp_operations(
+    isolated_runtime: None,
+) -> None:
+    with pytest.raises(ValueError, match="internal to its plugin"):
+        runtime.invoke("add_scalar_vjp", torch.ones(4))
+
+
+def test_isolated_vjp_rejects_higher_order_autograd(
+    isolated_runtime: None,
+) -> None:
+    source = torch.ones(4, requires_grad=True)
+    result = add_scalar(source, 1.0)
+
+    with pytest.raises(RuntimeError, match="higher-order autograd"):
+        torch.autograd.grad(result.sum(), source, create_graph=True)

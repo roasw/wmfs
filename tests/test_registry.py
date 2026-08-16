@@ -1,6 +1,12 @@
 import pytest
 
-from wmfs.registry import OperationMetadata, OperationRegistry, PluginMetadata
+from wmfs.registry import (
+    OperationMetadata,
+    OperationRegistry,
+    PluginMetadata,
+    TensorParameter,
+    VjpMetadata,
+)
 
 
 def _plugin(name: str, operation_name: str) -> PluginMetadata:
@@ -50,3 +56,50 @@ def test_registry_reports_operation_owner() -> None:
     registry.register(_plugin("example", "operation"))
 
     assert registry.plugin_for_operation("operation") == "example"
+
+
+def test_registry_resolves_internal_vjp_by_plugin_operation_id() -> None:
+    forward = OperationMetadata(
+        name="forward",
+        tensor_inputs=(TensorParameter("input", "readOnly"),),
+        tensor_outputs=(TensorParameter("output", "readOnly"),),
+        scalar_parameters=(),
+        operation_id=1,
+        output_plans=(),
+        vjp=VjpMetadata(2, (0,), (), (0,), (0,), ()),
+    )
+    vjp = OperationMetadata(
+        name="forward_vjp",
+        tensor_inputs=(
+            TensorParameter("input", "readOnly"),
+            TensorParameter("cotangent", "readOnly"),
+        ),
+        tensor_outputs=(TensorParameter("gradient", "readOnly"),),
+        scalar_parameters=(),
+        operation_id=2,
+        output_plans=(),
+        internal=True,
+    )
+    plugin = PluginMetadata("example", "1", 1, (forward, vjp), 1)
+    registry = OperationRegistry()
+
+    registry.register(plugin)
+
+    assert registry.operation_names == ("forward",)
+    assert registry.operation_by_id("example", 2) is vjp
+
+
+def test_registry_rejects_missing_vjp_operation() -> None:
+    operation = OperationMetadata(
+        name="forward",
+        tensor_inputs=(),
+        tensor_outputs=(),
+        scalar_parameters=(),
+        operation_id=1,
+        output_plans=(),
+        vjp=VjpMetadata(2, (), (), (), (), ()),
+    )
+    plugin = PluginMetadata("example", "1", 1, (operation,), 1)
+
+    with pytest.raises(ValueError, match="missing VJP"):
+        OperationRegistry().register(plugin)

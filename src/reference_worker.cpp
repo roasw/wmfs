@@ -144,6 +144,22 @@ void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
                        outputs[0].tensor());
         return;
     }
+    if (operation_id == 4) {
+        require(inputs.size() == 3 && outputs.size() == 2 &&
+                    scalars.size() == 0,
+                "Invalid matmul VJP invocation");
+        matmul_vjp_out(inputs[0].tensor(), inputs[1].tensor(),
+                       inputs[2].tensor(), outputs[0].tensor(),
+                       outputs[1].tensor());
+        return;
+    }
+    if (operation_id == 5) {
+        require(inputs.size() == 1 && outputs.size() == 1 &&
+                    scalars.size() == 0,
+                "Invalid add_scalar VJP invocation");
+        add_scalar_vjp_out(inputs[0].tensor(), outputs[0].tensor());
+        return;
+    }
     throw std::invalid_argument("Unknown operation ID " +
                                 std::to_string(operation_id));
 }

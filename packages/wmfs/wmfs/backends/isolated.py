@@ -1,5 +1,8 @@
 import threading
 
+import torch
+
+from wmfs.autograd import invoke_with_vjp
 from wmfs.memory import BufferManager
 from wmfs.plugins import PluginManifest
 from wmfs.registry import OperationRegistry
@@ -38,6 +41,42 @@ class IsolatedBackend:
         **kwargs: object,
     ) -> object:
         plugin_name = self._registry.plugin_for_operation(operation)
+        metadata = self._registry.operation(operation)
+        if metadata.internal:
+            raise ValueError(f"Operation {operation!r} is internal to its plugin")
+        tensor_inputs = tuple(item for item in args if isinstance(item, torch.Tensor))
+        autograd_requested = torch.is_grad_enabled() and any(
+            item.requires_grad for item in tensor_inputs
+        )
+        if autograd_requested:
+            if out is not None:
+                raise RuntimeError("Isolated out does not support autograd inputs")
+            if metadata.vjp is None:
+                raise RuntimeError(
+                    f"Isolated operation {operation!r} does not advertise a VJP"
+                )
+            vjp_operation = self._registry.operation_by_id(
+                plugin_name, metadata.vjp.operation_id
+            )
+            return invoke_with_vjp(
+                self,
+                plugin_name,
+                metadata,
+                vjp_operation,
+                args,
+                kwargs,
+            )
+        return self._invoke_plugin(plugin_name, operation, *args, out=out, **kwargs)
+
+    def _invoke_plugin(
+        self,
+        plugin_name: str,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
         session = self._acquire_session(plugin_name)
         try:
             return session.invoke(operation, *args, out=out, **kwargs)

@@ -20,7 +20,7 @@ def test_discovers_operations_over_rpc() -> None:
 
     assert registry.plugin_names == ("reference",)
     assert registry.operation_names == ("add_scalar", "matmul", "svd")
-    assert registry.plugin("reference").protocol_version == 7
+    assert registry.plugin("reference").protocol_version == 8
     assert registry.plugin("reference").fingerprint != 0
 
     svd_metadata = registry.operation("svd")
@@ -33,6 +33,15 @@ def test_discovers_operations_over_rpc() -> None:
     assert svd_metadata.scalar_parameters[0].default is True
     assert svd_metadata.operation_id == 2
     assert [item.name for item in svd_metadata.output_plans] == ["u", "s", "vh"]
+    assert svd_metadata.vjp is None
+
+    matmul_vjp = registry.operation("matmul").vjp
+    assert matmul_vjp is not None
+    assert matmul_vjp.operation_id == 4
+    assert matmul_vjp.saved_inputs == (0, 1)
+    assert matmul_vjp.output_cotangents == (0,)
+    assert matmul_vjp.input_gradients == (0, 1)
+    assert registry.operation("matmul_vjp").internal
 
 
 def test_runtime_registers_discovered_operations() -> None:

@@ -38,6 +38,7 @@ from wmfs.registry import (
     ScalarParameter,
     SelectDimension,
     TensorParameter,
+    VjpMetadata,
 )
 from wmfs.transport.fd_broker import FdSender
 from wmfs_plugin.schema import schema_root
@@ -727,6 +728,18 @@ def _metadata_from_reader(metadata: object) -> PluginMetadata:
 
 
 def _operation_metadata_from_reader(operation: object) -> OperationMetadata:
+    vjp_plan = operation.vjp
+    vjp = None
+    if vjp_plan.which() == "known":
+        known = vjp_plan.known
+        vjp = VjpMetadata(
+            operation_id=int(known.operationId),
+            saved_inputs=tuple(int(item) for item in known.savedInputs),
+            saved_outputs=tuple(int(item) for item in known.savedOutputs),
+            output_cotangents=tuple(int(item) for item in known.outputCotangents),
+            input_gradients=tuple(int(item) for item in known.inputGradients),
+            scalar_parameters=tuple(int(item) for item in known.scalarParameters),
+        )
     return OperationMetadata(
         name=str(operation.name),
         tensor_inputs=tuple(
@@ -750,6 +763,8 @@ def _operation_metadata_from_reader(operation: object) -> OperationMetadata:
         output_plans=tuple(
             _output_plan_from_reader(item) for item in operation.outputPlans
         ),
+        vjp=vjp,
+        internal=bool(operation.internal),
     )
 
 
