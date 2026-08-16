@@ -49,6 +49,23 @@ def test_isolated_add_scalar_matches_dtype_promotion(isolated_runtime: None) -> 
     assert result.dtype == torch.float32
 
 
+def test_isolated_operations_accept_noncontiguous_inputs(
+    isolated_runtime: None,
+) -> None:
+    a = torch.arange(6, dtype=torch.float64).reshape(3, 2).T
+    b = torch.arange(12, dtype=torch.float64).reshape(4, 3).T
+    strided = torch.arange(20, dtype=torch.float64)[::2]
+    matrix = torch.arange(24, dtype=torch.float64).reshape(4, 6)[:, ::2]
+
+    product = matmul(a, b)
+    shifted = add_scalar(strided, 1.5)
+    u, singular_values, vh = svd(matrix, full_matrices=False)
+
+    torch.testing.assert_close(product, a @ b)
+    torch.testing.assert_close(shifted, strided + 1.5)
+    torch.testing.assert_close(u @ torch.diag(singular_values) @ vh, matrix)
+
+
 @pytest.mark.parametrize("full_matrices", [True, False])
 def test_isolated_svd_matches_torch(
     isolated_runtime: None, full_matrices: bool

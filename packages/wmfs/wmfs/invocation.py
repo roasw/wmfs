@@ -127,7 +127,7 @@ def share_input(
     if managed is not None:
         return managed, 0
     copy_start = perf_counter_ns() if collect_metrics else 0
-    managed = buffers.from_tensor(tensor.contiguous())
+    managed = buffers.from_tensor(tensor)
     copy_ns = perf_counter_ns() - copy_start if collect_metrics else 0
     return managed, copy_ns
 

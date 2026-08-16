@@ -12,7 +12,7 @@ from wmfs.invocation import (
     reserve_invocation_access,
     share_input,
 )
-from wmfs.memory import BufferManager
+from wmfs.memory import BufferManager, ManagedTensor
 from wmfs.plugins import find_manifests
 from wmfs.transport.worker_process import _load_plugin_schema
 from wmfs_plugin.metadata import metadata_from_reader
@@ -114,3 +114,24 @@ def test_shared_output_planning_handles_fresh_and_reused_results() -> None:
         assert reused_output.tensor is output.tensor
         assert reused_allocation_ns == 0
         assert output.tensor._version == version + 1
+
+
+def test_share_input_passes_noncontiguous_tensor_directly_to_buffer_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = torch.arange(12, dtype=torch.float32).reshape(3, 4).T
+    with BufferManager() as buffers:
+        original_from_tensor = buffers.from_tensor
+        received: list[torch.Tensor] = []
+
+        def record_from_tensor(tensor: torch.Tensor) -> ManagedTensor:
+            received.append(tensor)
+            return original_from_tensor(tensor)
+
+        monkeypatch.setattr(buffers, "from_tensor", record_from_tensor)
+
+        managed, _copy_ns = share_input(buffers, source, collect_metrics=False)
+
+        assert len(received) == 1
+        assert received[0] is source
+        torch.testing.assert_close(managed.tensor, source)

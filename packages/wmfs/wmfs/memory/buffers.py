@@ -384,8 +384,8 @@ class BufferManager:
     def from_tensor(self, tensor: torch.Tensor) -> ManagedTensor:
         if tensor.device.type != "cpu":
             raise ValueError("Only CPU tensors can be moved into shared memory")
-        if not tensor.is_contiguous():
-            raise ValueError("Only contiguous tensors are supported initially")
+        if tensor.layout != torch.strided:
+            raise ValueError("Only strided tensors can be moved into shared memory")
         managed = self.empty(tuple(tensor.shape), dtype=tensor.dtype)
         managed.tensor.copy_(tensor)
         return managed

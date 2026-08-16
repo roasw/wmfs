@@ -44,11 +44,33 @@ def test_duplicates_read_only_fd_by_default() -> None:
             os.close(descriptor)
 
 
-def test_rejects_noncontiguous_tensor() -> None:
+@pytest.mark.parametrize(
+    "source",
+    [
+        torch.arange(12, dtype=torch.float64).reshape(3, 4).T,
+        torch.arange(20, dtype=torch.float64).reshape(4, 5)[:, ::2],
+    ],
+)
+def test_moves_noncontiguous_strided_tensor_into_contiguous_managed_memfd(
+    source: torch.Tensor,
+) -> None:
     with BufferManager() as manager:
-        tensor = torch.arange(6).reshape(2, 3).T
+        managed = manager.from_tensor(source)
 
-        with pytest.raises(ValueError, match="Only contiguous tensors"):
+        torch.testing.assert_close(managed.tensor, source)
+        assert not source.is_contiguous()
+        assert managed.tensor.is_contiguous()
+        assert managed.descriptor.shape == tuple(source.shape)
+        assert managed.descriptor.strides == tuple(
+            stride * source.element_size() for stride in managed.tensor.stride()
+        )
+
+
+def test_rejects_non_strided_tensor() -> None:
+    tensor = torch.eye(2).to_sparse()
+
+    with BufferManager() as manager:
+        with pytest.raises(ValueError, match="Only strided tensors"):
             manager.from_tensor(tensor)
 
 
