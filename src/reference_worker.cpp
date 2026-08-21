@@ -154,24 +154,48 @@ class ReferenceServer final : public ReferencePlugin::Server {
     }
 
     kj::Promise<void> invokeKnown(InvokeKnownContext context) override {
-        return translate_errors(
-            [&] { run_known(context.getParams().getInvocation(), false); });
+        return translate_errors([&] {
+            auto outcome = context.getResults().initOutcome();
+            try {
+                run_known(context.getParams().getInvocation(), false);
+                outcome.setSuccess();
+            } catch (const OperationFailure &error) {
+                auto result = outcome.initOperationError();
+                result.setType(error.type);
+                result.setMessage(error.what());
+            }
+        });
     }
 
     kj::Promise<void>
     invokeKnownProfiled(InvokeKnownProfiledContext context) override {
         return translate_errors([&] {
-            auto measured =
-                run_known(context.getParams().getInvocation(), true);
-            auto metrics = context.getResults().initMetrics();
-            metrics.setInputViewsNs(measured.input_views_ns);
-            metrics.setOutputViewsNs(measured.output_views_ns);
-            metrics.setDispatchNs(measured.dispatch_ns);
-            metrics.setKernelNs(measured.kernel_ns);
+            auto outcome = context.getResults().initOutcome();
+            try {
+                auto measured =
+                    run_known(context.getParams().getInvocation(), true);
+                outcome.setSuccess();
+                auto metrics = context.getResults().initMetrics();
+                metrics.setInputViewsNs(measured.input_views_ns);
+                metrics.setOutputViewsNs(measured.output_views_ns);
+                metrics.setDispatchNs(measured.dispatch_ns);
+                metrics.setKernelNs(measured.kernel_ns);
+            } catch (const OperationFailure &error) {
+                auto result = outcome.initOperationError();
+                result.setType(error.type);
+                result.setMessage(error.what());
+            }
         });
     }
 
   private:
+    struct OperationFailure : std::runtime_error {
+        std::string type;
+
+        OperationFailure(std::string type, std::string message)
+            : std::runtime_error(std::move(message)), type(std::move(type)) {}
+    };
+
     struct InvocationMeasurements {
         std::uint64_t input_views_ns{};
         std::uint64_t output_views_ns{};
@@ -213,8 +237,17 @@ class ReferenceServer final : public ReferencePlugin::Server {
         auto kernel_started = profiled
                                   ? std::chrono::steady_clock::now()
                                   : std::chrono::steady_clock::time_point{};
-        execute_known(invocation.getOperationId(), inputs, outputs,
-                      invocation.getScalars());
+        try {
+            execute_known(invocation.getOperationId(), inputs, outputs,
+                          invocation.getScalars());
+        } catch (const c10::Error &error) {
+            throw OperationFailure("RuntimeError",
+                                   error.what_without_backtrace());
+        } catch (const std::invalid_argument &error) {
+            throw OperationFailure("ValueError", error.what());
+        } catch (const std::exception &error) {
+            throw OperationFailure("RuntimeError", error.what());
+        }
         auto kernel_ns = profiled ? nanoseconds_since(kernel_started) : 0;
         auto elapsed_ns = profiled ? nanoseconds_since(started) : 0;
         auto measured_ns = input_views_ns + output_views_ns + kernel_ns;

@@ -8,8 +8,10 @@ import pytest
 import torch
 
 from wmfs.memory import BufferManager
+from wmfs.plugins import find_manifests
 from wmfs.registry import PluginMetadata
 from wmfs.transport.deadlines import TransportDeadlines
+from wmfs.transport.errors import OperationError, WorkerTransportError
 from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import (
     WorkerSession,
@@ -24,6 +26,35 @@ def _metadata(worker: object) -> PluginMetadata:
 
 def _session_type(control_mode: str) -> type[WorkerSession] | type[NativeWorkerSession]:
     return NativeWorkerSession if control_mode == "native" else WorkerSession
+
+
+@pytest.mark.parametrize("control_mode", ["python", "native"])
+@pytest.mark.parametrize("profiled", [False, True])
+def test_operation_error_preserves_worker_session(
+    control_mode: str, profiled: bool
+) -> None:
+    manifest = find_manifests((Path(__file__).parents[1] / "plugins",))[0]
+    with BufferManager() as buffers:
+        session = _session_type(control_mode)(
+            manifest,
+            buffers,
+            metadata_from_reader(_load_plugin_schema(manifest).pluginMetadata),
+        )
+        try:
+            invoke = session.invoke_profiled if profiled else session.invoke
+            with pytest.raises(OperationError, match="matmul|shape|multiplied"):
+                invoke(
+                    "matmul",
+                    torch.ones((2, 3), dtype=torch.float64),
+                    torch.ones((4, 2), dtype=torch.float64),
+                )
+
+            source = torch.arange(4, dtype=torch.float64)
+            torch.testing.assert_close(
+                session.invoke("add_scalar", source, 2.0), source + 2.0
+            )
+        finally:
+            session.close()
 
 
 @pytest.mark.parametrize("control_mode", ["python", "native"])
@@ -93,12 +124,9 @@ def test_hostile_invocation_invalidates_and_cleans_resources(
         open_fds = len(tuple(Path("/proc/self/fd").iterdir()))
         started = time.monotonic()
         try:
-            with pytest.raises(Exception) as raised:
+            with pytest.raises(WorkerTransportError) as raised:
                 session.invoke("add_scalar", source.tensor, 1.0)
-            if mode == "hang-invocation" and control_mode == "python":
-                assert isinstance(raised.value, TimeoutError)
-            else:
-                assert re.search(error, str(raised.value), re.IGNORECASE)
+            assert re.search(error, str(raised.value), re.IGNORECASE)
             del raised
             assert time.monotonic() - started < 1.5
 

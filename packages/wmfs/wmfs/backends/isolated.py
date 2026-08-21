@@ -8,6 +8,7 @@ from wmfs.plugins import PluginManifest
 from wmfs.registry import EnvironmentMetadata, OperationRegistry
 from wmfs.tensors import TensorFactory
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
+from wmfs.transport.errors import WorkerTransportError
 from wmfs.transport.native_worker import NativeWorkerSession, native_available
 from wmfs.transport.worker_process import WorkerSession
 
@@ -87,6 +88,9 @@ class IsolatedBackend:
         session = self._acquire_session(plugin_name)
         try:
             return session.environment()
+        except WorkerTransportError:
+            self._evict_session(plugin_name, session)
+            raise
         finally:
             with self._condition:
                 self._inflight -= 1
@@ -176,6 +180,9 @@ class IsolatedBackend:
         session = self._acquire_session(plugin_name)
         try:
             return session.invoke(operation, *args, out=out, **kwargs)
+        except WorkerTransportError:
+            self._evict_session(plugin_name, session)
+            raise
         finally:
             with self._condition:
                 self._inflight -= 1
@@ -268,3 +275,17 @@ class IsolatedBackend:
             expected,
             self._deadlines,
         )
+
+    def _evict_session(
+        self,
+        plugin_name: str,
+        session: WorkerSession | NativeWorkerSession,
+    ) -> None:
+        with self._condition:
+            if self._sessions.get(plugin_name) is session:
+                del self._sessions[plugin_name]
+                self._condition.notify_all()
+        try:
+            session.close()
+        except Exception:
+            pass

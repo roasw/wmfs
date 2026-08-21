@@ -257,17 +257,30 @@ struct Session::Impl {
             }
         }
 
-        void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
-                    const TensorDescriptors &inputs,
-                    const TensorDescriptors &outputs,
-                    const std::vector<ScalarArgument> &scalars) {
+        static InvocationOutcome
+        read_outcome(::InvocationOutcome::Reader outcome) {
+            if (outcome.isSuccess())
+                return {};
+            if (!outcome.isOperationError())
+                throw std::runtime_error("Worker returned an invalid outcome");
+            auto error = outcome.getOperationError();
+            return {error.getType(), error.getMessage()};
+        }
+
+        InvocationOutcome invoke(std::uint64_t invocation_id,
+                                 std::uint32_t operation_id,
+                                 const TensorDescriptors &inputs,
+                                 const TensorDescriptors &outputs,
+                                 const std::vector<ScalarArgument> &scalars) {
             auto request = plugin.invokeKnownRequest();
             write_invocation(request.initInvocation(), invocation_id,
                              operation_id, inputs, outputs, scalars);
-            io.provider->getTimer()
-                .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
-                              request.send())
-                .wait(io.waitScope);
+            auto response =
+                io.provider->getTimer()
+                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
+                                  request.send())
+                    .wait(io.waitScope);
+            return read_outcome(response.getOutcome());
         }
 
         InvocationProfile
@@ -290,6 +303,7 @@ struct Session::Impl {
                     .count();
             const auto worker = response.getMetrics();
             return InvocationProfile{
+                .outcome = read_outcome(response.getOutcome()),
                 .rpc_ns = static_cast<std::uint64_t>(rpc_ns),
                 .worker_input_views_ns = worker.getInputViewsNs(),
                 .worker_output_views_ns = worker.getOutputViewsNs(),
@@ -665,20 +679,23 @@ void Session::abort_invocation(std::uint64_t invocation_id) {
     impl_->abort_invocation(invocation_id);
 }
 
-void Session::invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
-                     const TensorDescriptors &inputs,
-                     const TensorDescriptors &outputs,
-                     const std::vector<ScalarArgument> &scalars) {
+InvocationOutcome Session::invoke(std::uint64_t invocation_id,
+                                  std::uint32_t operation_id,
+                                  const TensorDescriptors &inputs,
+                                  const TensorDescriptors &outputs,
+                                  const std::vector<ScalarArgument> &scalars) {
+    InvocationOutcome outcome;
     try {
         impl_->submit([&](Impl::Worker &worker) {
-            worker.invoke(invocation_id, operation_id, inputs, outputs,
-                          scalars);
+            outcome = worker.invoke(invocation_id, operation_id, inputs,
+                                    outputs, scalars);
         });
     } catch (...) {
         impl_->finish_invocation(invocation_id);
         throw;
     }
     impl_->finish_invocation(invocation_id);
+    return outcome;
 }
 
 InvocationProfile Session::invoke_profiled(
@@ -695,6 +712,7 @@ InvocationProfile Session::invoke_profiled(
                     .count());
             const auto worker_profile = worker.invoke_profiled(
                 invocation_id, operation_id, inputs, outputs, scalars);
+            profile.outcome = worker_profile.outcome;
             profile.rpc_ns = worker_profile.rpc_ns;
             profile.worker_input_views_ns =
                 worker_profile.worker_input_views_ns;

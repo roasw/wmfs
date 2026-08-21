@@ -5,7 +5,12 @@ import torch
 
 from wmfs_plugin import InvocationContext
 from wmfs_plugin.metadata import OperationMetadata, ScalarParameter, TensorParameter
-from wmfs_plugin.worker import _compile_operations, _decode_scalars, _invoke_known
+from wmfs_plugin.worker import (
+    _compile_operations,
+    _decode_scalars,
+    _invoke_known,
+    _OperationFailure,
+)
 
 
 class _ScalarArgument:
@@ -121,7 +126,8 @@ def test_invocation_cleanup_runs_when_handler_raises() -> None:
     )
     operations = _compile_operations((_metadata(),), {"operation": fail})
 
-    with pytest.raises(RuntimeError, match="handler failed"):
+    with pytest.raises(_OperationFailure, match="handler failed") as raised:
         _invoke_known(invocation, cache, operations, profiled=False)  # type: ignore[arg-type]
 
+    assert raised.value.error_type == "RuntimeError"
     assert cache.finished == [42]

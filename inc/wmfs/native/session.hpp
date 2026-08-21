@@ -49,8 +49,15 @@ struct ScalarArgument {
     std::string text_value;     ///< String value when kind is text.
 };
 
+/// @brief Recoverable outcome returned by an operation invocation.
+struct InvocationOutcome {
+    std::string error_type;    ///< Empty on success.
+    std::string error_message; ///< Worker-provided operation error text.
+};
+
 /// @brief Timing values returned by a profiled native invocation.
 struct InvocationProfile {
+    InvocationOutcome outcome;              ///< Recoverable operation result.
     std::uint64_t queue_wait_ns{};          ///< Client-side serialization wait.
     std::uint64_t rpc_ns{};                 ///< End-to-end RPC duration.
     std::uint64_t worker_input_views_ns{};  ///< Input view construction time.
@@ -89,10 +96,11 @@ class Session {
     /// @brief Release invocation-scoped mappings after pre-dispatch failure.
     void abort_invocation(std::uint64_t invocation_id);
     /// @brief Invoke an operation and wait for completion.
-    void invoke(std::uint64_t invocation_id, std::uint32_t operation_id,
-                const TensorDescriptors &inputs,
-                const TensorDescriptors &outputs,
-                const std::vector<ScalarArgument> &scalars);
+    InvocationOutcome invoke(std::uint64_t invocation_id,
+                             std::uint32_t operation_id,
+                             const TensorDescriptors &inputs,
+                             const TensorDescriptors &outputs,
+                             const std::vector<ScalarArgument> &scalars);
     /// @brief Invoke an operation and return native/worker timing metrics.
     InvocationProfile
     invoke_profiled(std::uint64_t invocation_id, std::uint32_t operation_id,

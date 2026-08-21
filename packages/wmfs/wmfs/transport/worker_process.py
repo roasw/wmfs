@@ -33,6 +33,7 @@ from wmfs.registry import (
     PluginMetadata,
 )
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
+from wmfs.transport.errors import OperationError, WorkerTransportError
 from wmfs.transport.fd_broker import FdSender
 from wmfs_plugin.metadata import metadata_from_reader
 from wmfs_plugin.schema import schema_root
@@ -337,16 +338,18 @@ class WorkerSession:
                     self._deadlines.request,
                 )
             else:
-                await asyncio.wait_for(
+                response = await asyncio.wait_for(
                     self._plugin.invokeKnown(invocation=wire_invocation),
                     self._deadlines.request,
                 )
-                response = None
             self._fd_sender.finish_invocation(invocation_id)
+            operation_error = _operation_error(response.outcome)
             completed = True
+            if operation_error is not None:
+                raise operation_error
             result = invocation_result(outputs)
             outputs.clear()
-            worker = response.metrics if response is not None else None
+            worker = response.metrics if collect_metrics else None
             return result, InvocationMetrics(
                 inputs=tuple(input_metrics or ()),
                 outputs=tuple(output_metrics or ()),
@@ -430,9 +433,16 @@ class WorkerSession:
                 )
                 try:
                     return future.result()
-                except Exception:
+                except Exception as error:
                     if self._invalidated:
-                        self.close()
+                        try:
+                            self.close()
+                        except Exception:
+                            pass
+                        raise WorkerTransportError(
+                            "Worker transport failed during invocation: "
+                            f"{type(error).__name__}: {error}"
+                        ) from error
                     raise
 
 
@@ -445,6 +455,16 @@ def _scalar_arguments(
             zip(metadata.scalar_parameters, scalars, strict=True)
         )
     ]
+
+
+def _operation_error(outcome: object) -> OperationError | None:
+    kind = outcome.which()
+    if kind == "success":
+        return None
+    if kind != "operationError":
+        raise ValueError(f"Worker returned an invalid invocation outcome {kind!r}")
+    error = outcome.operationError
+    return OperationError(str(error.type), str(error.message))
 
 
 def inspect_plugin(

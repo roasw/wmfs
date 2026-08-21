@@ -88,7 +88,7 @@ async def _serve(arguments: argparse.Namespace, mode: str) -> None:
         async def getProtocolVersion(
             self, _context: object, **_kwargs: object
         ) -> tuple[int]:
-            return (10 if mode == "wrong-protocol" else 9,)
+            return (11 if mode == "wrong-protocol" else 10,)
 
         async def getMetadata(self, _context: object, **_kwargs: object) -> object:
             return metadata

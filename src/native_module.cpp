@@ -12,6 +12,7 @@
 
 namespace nb = nanobind;
 using namespace nb::literals;
+using wmfs::native::InvocationOutcome;
 using wmfs::native::InvocationProfile;
 using wmfs::native::Mapping;
 using wmfs::native::ScalarArgument;
@@ -179,15 +180,27 @@ void retire_buffers(Session &session, const nb::list &buffers) {
     session.retire_buffers(mappings);
 }
 
-void invoke(Session &session, std::uint64_t invocation_id,
-            std::uint32_t operation_id, const nb::list &inputs,
-            const nb::list &outputs, const nb::list &scalars) {
+nb::dict outcome_dict(const InvocationOutcome &outcome) {
+    nb::dict result;
+    result["error_type"] = outcome.error_type;
+    result["error_message"] = outcome.error_message;
+    return result;
+}
+
+nb::dict invoke(Session &session, std::uint64_t invocation_id,
+                std::uint32_t operation_id, const nb::list &inputs,
+                const nb::list &outputs, const nb::list &scalars) {
     auto native_inputs = descriptors_from_list(inputs);
     auto native_outputs = descriptors_from_list(outputs);
     auto native_scalars = scalars_from_list(scalars);
-    nb::gil_scoped_release release;
-    session.invoke(invocation_id, operation_id, native_inputs.values,
-                   native_outputs.values, native_scalars);
+    InvocationOutcome outcome;
+    {
+        nb::gil_scoped_release release;
+        outcome =
+            session.invoke(invocation_id, operation_id, native_inputs.values,
+                           native_outputs.values, native_scalars);
+    }
+    return outcome_dict(outcome);
 }
 
 nb::dict invoke_profiled(Session &session, std::uint64_t invocation_id,
@@ -204,6 +217,8 @@ nb::dict invoke_profiled(Session &session, std::uint64_t invocation_id,
             native_outputs.values, native_scalars);
     }
     nb::dict result;
+    result["error_type"] = profile.outcome.error_type;
+    result["error_message"] = profile.outcome.error_message;
     result["queue_wait_ns"] = profile.queue_wait_ns;
     result["rpc_ns"] = profile.rpc_ns;
     result["worker_input_views_ns"] = profile.worker_input_views_ns;

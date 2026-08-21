@@ -11,6 +11,7 @@ from wmfs.backends.isolated import IsolatedBackend
 from wmfs.plugins import PluginManifest
 from wmfs.registry import OperationMetadata, OperationRegistry, PluginMetadata
 from wmfs.transport.deadlines import TransportDeadlines
+from wmfs.transport.errors import WorkerTransportError
 
 
 def _backend(
@@ -67,6 +68,39 @@ def test_concurrent_first_calls_create_one_plugin_session(
 
         assert results == (1,) * 8
         assert created == 1
+    finally:
+        backend.close()
+
+
+def test_fatal_transport_error_restarts_before_next_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions: list[object] = []
+
+    class Session:
+        def __init__(self, *_args: object) -> None:
+            self.calls = 0
+            self.closed = False
+            sessions.append(self)
+
+        def invoke(self, _operation: str, *_args: object, **_kwargs: object) -> int:
+            self.calls += 1
+            if len(sessions) == 1:
+                raise WorkerTransportError("disconnected")
+            return 7
+
+        def close(self) -> None:
+            self.closed = True
+
+    backend = _backend(monkeypatch, Session)
+    try:
+        with pytest.raises(WorkerTransportError, match="disconnected"):
+            backend.invoke("operation")
+
+        assert backend.invoke("operation") == 7
+        assert len(sessions) == 2
+        assert sessions[0].closed
+        assert sessions[0].calls == sessions[1].calls == 1
     finally:
         backend.close()
 

@@ -23,6 +23,7 @@ from wmfs.invocation import (
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
 from wmfs.registry import EnvironmentMetadata, OperationMetadata, PluginMetadata
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
+from wmfs.transport.errors import OperationError, WorkerTransportError
 from wmfs.transport.worker_process import (
     _load_runtime_schema,
     _start_worker,
@@ -285,14 +286,23 @@ class NativeWorkerSession:
                 if collect_metrics:
                     native_profile = self._ensure_open().invoke_profiled(*arguments)
                 else:
-                    self._ensure_open().invoke(*arguments)
-                    native_profile = None
+                    native_profile = self._ensure_open().invoke(*arguments)
                 native_call_ns = (
                     perf_counter_ns() - native_start if collect_metrics else 0
                 )
-            except Exception:
-                self.close()
-                raise
+            except Exception as error:
+                close_error = None
+                try:
+                    self.close()
+                except Exception as caught:
+                    close_error = caught
+                detail = f"{type(error).__name__}: {error}"
+                if close_error is not None:
+                    detail += f" ({close_error})"
+                raise WorkerTransportError(
+                    f"Worker transport failed during invocation: {detail}"
+                ) from error
+            _raise_operation_error(native_profile)
             result = invocation_result(outputs)
             outputs.clear()
             native_profile = native_profile or {}
@@ -332,9 +342,14 @@ class NativeWorkerSession:
                     invocation_id,
                 )
             )
-        except Exception:
-            self.close()
-            raise
+        except Exception as error:
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise WorkerTransportError(
+                f"Worker buffer transport failed: {type(error).__name__}: {error}"
+            ) from error
         for (item, _writable), mapped in zip(managed, transferred, strict=True):
             if mapped and not item.buffer.arena:
                 item.buffer.register_recipient(self)
@@ -374,3 +389,9 @@ class NativeWorkerSession:
             raise RuntimeError("Worker did not stop after native RPC closed")
         if process.returncode != 0:
             raise RuntimeError(f"Worker failed with exit status {process.returncode}")
+
+
+def _raise_operation_error(outcome: dict[str, object]) -> None:
+    error_type = str(outcome.get("error_type", ""))
+    if error_type:
+        raise OperationError(error_type, str(outcome.get("error_message", "")))

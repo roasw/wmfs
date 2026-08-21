@@ -144,22 +144,39 @@ def _make_server(
             invocation: object,
             _context: object,
             **_kwargs: object,
-        ) -> None:
-            _invoke_known(invocation, mapped_buffers, operations, profiled=False)
+        ) -> tuple[dict[str, object]]:
+            try:
+                _invoke_known(invocation, mapped_buffers, operations, profiled=False)
+            except _OperationFailure as error:
+                return ({"operationError": error.as_capnp()},)
+            return ({"success": None},)
 
         async def invokeKnownProfiled(
             self,
             invocation: object,
             _context: object,
             **_kwargs: object,
-        ) -> tuple[dict[str, int]]:
-            metrics = _invoke_known(
-                invocation, mapped_buffers, operations, profiled=True
-            )
+        ) -> tuple[dict[str, object], dict[str, int]]:
+            try:
+                metrics = _invoke_known(
+                    invocation, mapped_buffers, operations, profiled=True
+                )
+            except _OperationFailure as error:
+                return ({"operationError": error.as_capnp()}, {})
             assert metrics is not None
-            return (metrics,)
+            return ({"success": None}, metrics)
 
     return PluginServer()
+
+
+class _OperationFailure(Exception):
+    def __init__(self, error: Exception) -> None:
+        self.error_type = type(error).__name__
+        self.message = str(error)
+        super().__init__(self.message)
+
+    def as_capnp(self) -> dict[str, str]:
+        return {"type": self.error_type, "message": self.message}
 
 
 def _compile_operations(
@@ -246,7 +263,10 @@ def _invoke_known(
             scalars,
         )
         kernel_started = perf_counter_ns() if profiled else 0
-        operation.handler(context)
+        try:
+            operation.handler(context)
+        except Exception as error:
+            raise _OperationFailure(error) from error
         kernel_ns = perf_counter_ns() - kernel_started if profiled else 0
         elapsed_ns = perf_counter_ns() - started if profiled else 0
     finally:
