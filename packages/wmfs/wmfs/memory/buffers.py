@@ -388,30 +388,53 @@ class BufferManager:
             raise ValueError("Only CPU tensors can be moved into shared memory")
         if tensor.layout != torch.strided:
             raise ValueError("Only strided tensors can be moved into shared memory")
+        if any(stride < 0 for stride in tensor.stride()):
+            raise ValueError("Negative tensor strides are not supported")
         managed = self.empty(tuple(tensor.shape), dtype=tensor.dtype)
         managed.tensor.copy_(tensor)
         return managed
 
     def managed(self, tensor: torch.Tensor) -> ManagedTensor | None:
-        if tensor.device.type != "cpu" or not tensor.is_contiguous():
+        if tensor.device.type != "cpu" or tensor.layout != torch.strided:
             return None
         lease = getattr(tensor.untyped_storage(), "_wmfs_allocation", None)
         if not isinstance(lease, AllocationLease) or lease.manager is not self:
             return None
+        strides = tuple(tensor.stride())
+        if any(stride < 0 for stride in strides):
+            raise ValueError("Negative tensor strides are not supported")
         with self._lock:
             allocation = self._active.get(lease.allocation_id)
             if allocation is None:
                 return None
             item_size = tensor.element_size()
+            shape = tuple(tensor.shape)
+            byte_strides = tuple(stride * item_size for stride in strides)
+            byte_length = (
+                0
+                if tensor.numel() == 0
+                else item_size
+                + sum(
+                    (dimension - 1) * stride
+                    for dimension, stride in zip(shape, byte_strides, strict=True)
+                )
+            )
+            offset = allocation.buffer.offset + tensor.storage_offset() * item_size
+            allocation_end = allocation.buffer.offset + allocation.buffer.byte_length
+            if (
+                offset < allocation.buffer.offset
+                or offset + byte_length > allocation_end
+            ):
+                raise ValueError("Tensor view exceeds its managed allocation")
             descriptor = TensorDescriptor(
                 buffer_id=allocation.buffer.id,
                 generation=allocation.buffer.generation,
                 allocation_id=allocation.descriptor.allocation_id,
-                offset=allocation.buffer.offset + tensor.storage_offset() * item_size,
-                byte_length=tensor.numel() * item_size,
+                offset=offset,
+                byte_length=byte_length,
                 dtype=_DTYPE_NAMES[tensor.dtype],
-                shape=tuple(tensor.shape),
-                strides=tuple(stride * item_size for stride in tensor.stride()),
+                shape=shape,
+                strides=byte_strides,
             )
             return ManagedTensor(tensor, descriptor, allocation.buffer)
 

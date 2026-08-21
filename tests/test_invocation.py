@@ -135,3 +135,24 @@ def test_share_input_passes_noncontiguous_tensor_directly_to_buffer_manager(
         assert len(received) == 1
         assert received[0] is source
         torch.testing.assert_close(managed.tensor, source)
+
+
+def test_share_input_reuses_managed_positive_stride_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with BufferManager() as buffers:
+        base = buffers.empty((4, 6), dtype=torch.float64)
+        source = base.tensor[:, ::2]
+
+        def reject_copy(_tensor: torch.Tensor) -> ManagedTensor:
+            raise AssertionError("managed view was copied")
+
+        monkeypatch.setattr(buffers, "from_tensor", reject_copy)
+
+        managed, copy_ns = share_input(buffers, source, collect_metrics=False)
+
+        assert managed.tensor is source
+        assert copy_ns == 0
+        assert managed.descriptor.shape == (4, 3)
+        assert managed.descriptor.strides == (48, 16)
+        assert managed.descriptor.byte_length == 184

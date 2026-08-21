@@ -5,6 +5,7 @@ import threading
 import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
 
 import pytest
 import torch
@@ -63,6 +64,55 @@ def test_moves_noncontiguous_strided_tensor_into_contiguous_managed_memfd(
         assert managed.descriptor.shape == tuple(source.shape)
         assert managed.descriptor.strides == tuple(
             stride * source.element_size() for stride in managed.tensor.stride()
+        )
+
+
+@pytest.mark.parametrize(
+    ("view", "shape", "strides", "offset", "byte_length"),
+    [
+        (lambda tensor: tensor.T, (6, 4), (8, 48), 0, 192),
+        (lambda tensor: tensor[:, ::2], (4, 3), (48, 16), 0, 184),
+        (lambda tensor: tensor[1:, 1::2], (3, 3), (48, 16), 56, 136),
+    ],
+)
+def test_preserves_managed_positive_stride_views_without_copying(
+    view: Callable[[torch.Tensor], torch.Tensor],
+    shape: tuple[int, ...],
+    strides: tuple[int, ...],
+    offset: int,
+    byte_length: int,
+) -> None:
+    with BufferManager() as manager:
+        base = manager.empty((4, 6), dtype=torch.float64)
+        tensor = view(base.tensor)
+
+        managed = manager.managed(tensor)
+
+        assert managed is not None
+        assert managed.tensor is tensor
+        assert managed.descriptor.buffer_id == base.descriptor.buffer_id
+        assert managed.descriptor.allocation_id == base.descriptor.allocation_id
+        assert managed.descriptor.shape == shape
+        assert managed.descriptor.strides == strides
+        assert managed.descriptor.offset == base.descriptor.offset + offset
+        assert managed.descriptor.byte_length == byte_length
+
+
+def test_preserves_managed_stride_view_inside_arena_allocation() -> None:
+    with BufferManager(mode="arena", arena_bytes=4096) as manager:
+        first = manager.empty((8,), dtype=torch.float64)
+        base = manager.empty((4, 6), dtype=torch.float64)
+        tensor = base.tensor[1:, 1::2]
+
+        managed = manager.managed(tensor)
+
+        assert managed is not None
+        assert managed.descriptor.offset == base.descriptor.offset + 56
+        assert managed.descriptor.byte_length == 136
+        assert managed.descriptor.offset >= first.descriptor.byte_length
+        assert (
+            managed.descriptor.offset + managed.descriptor.byte_length
+            <= base.descriptor.offset + base.descriptor.byte_length
         )
 
 

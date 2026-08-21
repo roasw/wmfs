@@ -99,6 +99,37 @@ def test_isolated_constructors_avoid_invocation_ingress_copy(
         candidate.close()
 
 
+@pytest.mark.parametrize("control_mode", ["native", "python"])
+def test_isolated_managed_stride_views_are_zero_copy(
+    monkeypatch: pytest.MonkeyPatch, control_mode: str
+) -> None:
+    candidate = Runtime()
+    candidate.configure_control(control_mode)
+    candidate.discover_plugins(PLUGIN_DIRECTORY)
+    candidate.use_backend("isolated")
+    try:
+        source_base = candidate.ones(4, 6, dtype=torch.float64)
+        source = source_base[:, ::2]
+        output_base = candidate.empty(4, 6, dtype=torch.float64)
+        output_base.fill_(-1)
+        output = output_base[:, ::2]
+        backend = candidate._backends["isolated"]
+
+        def reject_copy(_tensor: torch.Tensor) -> None:
+            raise AssertionError("managed view unexpectedly used the copy path")
+
+        monkeypatch.setattr(backend._buffers, "from_tensor", reject_copy)
+
+        assert candidate.invoke("add_scalar", source, 1.5, out=output) is output
+
+        torch.testing.assert_close(output, torch.full((4, 3), 2.5, dtype=torch.float64))
+        torch.testing.assert_close(
+            output_base[:, 1::2], torch.full((4, 3), -1.0, dtype=torch.float64)
+        )
+    finally:
+        candidate.close()
+
+
 def test_isolated_constructor_rejects_non_cpu_device(isolated_runtime: None) -> None:
     with pytest.raises(ValueError, match="CPU"):
         runtime.zeros(2, device="cuda")
