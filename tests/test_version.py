@@ -85,5 +85,5 @@ def test_plugin_protocol_version_is_independent() -> None:
         ROOT / "plugins/reference/generated/reference_dispatch.inc"
     ).read_text()
     assert f'PLUGIN_VERSION = "{plugin_version}"' in generated_python
-    assert f'REFERENCE_PLUGIN_VERSION[] = "{plugin_version}"' in generated_cpp
+    assert f'WMFS_PLUGIN_VERSION[] = "{plugin_version}"' in generated_cpp
     assert PROTOCOL_VERSION > 0
