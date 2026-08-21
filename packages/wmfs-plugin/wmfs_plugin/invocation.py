@@ -6,6 +6,14 @@ from wmfs_plugin.metadata import OperationMetadata
 
 
 @dataclass(frozen=True)
+class OutputSpec:
+    """Shape and dtype requested for one runtime-owned dynamic output."""
+
+    shape: tuple[int, ...]
+    dtype: torch.dtype
+
+
+@dataclass(frozen=True)
 class InvocationContext:
     """Validated, operation-scoped values passed to a plugin handler.
 

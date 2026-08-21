@@ -15,6 +15,7 @@ using namespace nb::literals;
 using wmfs::native::InvocationOutcome;
 using wmfs::native::InvocationProfile;
 using wmfs::native::Mapping;
+using wmfs::native::OutputPlanningResult;
 using wmfs::native::ScalarArgument;
 using wmfs::native::ScalarKind;
 using wmfs::native::Session;
@@ -39,6 +40,20 @@ TensorDType dtype_from_object(nb::handle value) {
     if (name == "uint8")
         return TensorDType::uint8;
     throw std::invalid_argument("Unsupported tensor dtype: " + name);
+}
+
+const char *dtype_name(TensorDType dtype) {
+    switch (dtype) {
+    case TensorDType::float32:
+        return "float32";
+    case TensorDType::float64:
+        return "float64";
+    case TensorDType::int64:
+        return "int64";
+    case TensorDType::uint8:
+        return "uint8";
+    }
+    throw std::invalid_argument("Unsupported tensor dtype");
 }
 
 TensorDescriptor descriptor_from_object(nb::handle value) {
@@ -228,6 +243,26 @@ nb::dict invoke_profiled(Session &session, std::uint64_t invocation_id,
     return result;
 }
 
+nb::dict plan_outputs(Session &session, std::uint64_t invocation_id,
+                      std::uint32_t operation_id, const nb::list &inputs,
+                      const nb::list &scalars) {
+    auto native_inputs = descriptors_from_list(inputs);
+    auto native_scalars = scalars_from_list(scalars);
+    OutputPlanningResult planned;
+    {
+        nb::gil_scoped_release release;
+        planned = session.plan_outputs(invocation_id, operation_id,
+                                       native_inputs.values, native_scalars);
+    }
+    nb::dict result = outcome_dict(planned.outcome);
+    nb::list outputs;
+    for (const auto &item : planned.outputs)
+        outputs.append(
+            nb::make_tuple(item.output, item.shape, dtype_name(item.dtype)));
+    result["outputs"] = outputs;
+    return result;
+}
+
 nb::bytes metadata(Session &session) {
     auto value = session.metadata();
     return nb::bytes(reinterpret_cast<const char *>(value.data()),
@@ -264,6 +299,8 @@ NB_MODULE(_native, module) {
              "outputs"_a, "scalars"_a)
         .def("invoke_profiled", &invoke_profiled, "invocation_id"_a,
              "operation_id"_a, "inputs"_a, "outputs"_a, "scalars"_a)
+        .def("plan_outputs", &plan_outputs, "invocation_id"_a, "operation_id"_a,
+             "inputs"_a, "scalars"_a)
         .def("ping", &Session::ping, "nonce"_a,
              nb::call_guard<nb::gil_scoped_release>())
         .def_prop_ro("metadata", &metadata)

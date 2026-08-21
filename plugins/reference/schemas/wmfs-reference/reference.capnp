@@ -5,8 +5,8 @@ using Runtime = import "/wmfs/runtime.capnp";
 const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
-  protocolVersion = 10,
-  fingerprint = 0x7fc92b0fba941be2,
+  protocolVersion = 11,
+  fingerprint = 0x549fb18b7a4b6c75,
   operations = [
     (
       name = "matmul",
@@ -174,6 +174,13 @@ const pluginMetadata :Runtime.PluginMetadata = (
         ),
       ],
       internal = true,
+    ),
+    (
+      name = "nonzero",
+      tensorInputs = [(name = "a")],
+      tensorOutputs = [(name = "indices")],
+      operationId = 6,
+      outputPlans = [(name = "indices", dynamic = void)],
     ),
   ],
 );

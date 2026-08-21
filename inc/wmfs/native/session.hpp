@@ -55,6 +55,19 @@ struct InvocationOutcome {
     std::string error_message; ///< Worker-provided operation error text.
 };
 
+/// @brief One worker-planned dynamic output specification.
+struct PlannedOutput {
+    std::uint16_t output;
+    std::vector<std::uint64_t> shape;
+    TensorDType dtype;
+};
+
+/// @brief Recoverable result of dynamic output planning.
+struct OutputPlanningResult {
+    InvocationOutcome outcome;
+    std::vector<PlannedOutput> outputs;
+};
+
 /// @brief Timing values returned by a profiled native invocation.
 struct InvocationProfile {
     InvocationOutcome outcome;              ///< Recoverable operation result.
@@ -107,6 +120,11 @@ class Session {
                     const TensorDescriptors &inputs,
                     const TensorDescriptors &outputs,
                     const std::vector<ScalarArgument> &scalars);
+    /// @brief Ask the worker to determine data-dependent output metadata.
+    OutputPlanningResult
+    plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
+                 const TensorDescriptors &inputs,
+                 const std::vector<ScalarArgument> &scalars);
     /// @brief Verify RPC responsiveness with a nonce round trip.
     void ping(std::uint64_t nonce);
     /// @brief Return serialized plugin metadata obtained during startup.

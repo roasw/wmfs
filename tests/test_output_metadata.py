@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,18 +13,24 @@ from wmfs_plugin.metadata import metadata_from_reader, validate_operation_metada
 PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
 
 
-def test_dynamic_output_plans_are_rejected_during_discovery() -> None:
+def test_dynamic_output_plans_are_accepted_for_read_only_inputs() -> None:
     operation = OperationMetadata(
         name="dynamic",
-        tensor_inputs=(),
+        tensor_inputs=(TensorParameter(name="input", access="readOnly"),),
         tensor_outputs=(TensorParameter(name="result", access="readOnly"),),
         scalar_parameters=(),
         operation_id=1,
         output_plans=(OutputPlan(name="result", known=None),),
     )
 
-    with pytest.raises(ValueError, match="dynamic outputs.*not supported"):
-        validate_operation_metadata(operation)
+    validate_operation_metadata(operation)
+
+    mutable = replace(
+        operation,
+        tensor_inputs=(TensorParameter(name="input", access="readWrite"),),
+    )
+    with pytest.raises(ValueError, match="mutable inputs"):
+        validate_operation_metadata(mutable)
 
 
 def test_reference_output_plans_evaluate_rectangular_operations() -> None:
@@ -54,3 +61,4 @@ def test_reference_output_plans_evaluate_rectangular_operations() -> None:
         assert evaluate_outputs(operations["add_scalar"], (a,), (1.5,)) == (
             ((4, 3), "float32"),
         )
+        assert evaluate_outputs(operations["nonzero"], (a,), ()) == (None,)

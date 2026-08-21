@@ -28,6 +28,10 @@ def add_scalar(*args: object, **kwargs: object) -> object:
     return wmfs.add_scalar(*args, **kwargs)
 
 
+def nonzero(*args: object, **kwargs: object) -> object:
+    return wmfs.nonzero(*args, **kwargs)
+
+
 def test_matmul_matches_torch() -> None:
     a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     b = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
@@ -58,6 +62,12 @@ def test_add_scalar_matches_torch() -> None:
     a = torch.tensor([-1.0, 0.0, 2.0])
 
     torch.testing.assert_close(add_scalar(a, 1.5), torch.add(a, 1.5))
+
+
+def test_nonzero_matches_torch() -> None:
+    a = torch.tensor([[0.0, 2.0], [3.0, 0.0]])
+
+    torch.testing.assert_close(nonzero(a), torch.nonzero(a))
 
 
 def test_local_tensor_constructors_return_native_torch_tensors() -> None:

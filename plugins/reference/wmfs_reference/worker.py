@@ -1,6 +1,6 @@
 import torch
 
-from wmfs_plugin import worker_main
+from wmfs_plugin import InvocationContext, OutputSpec, worker_main
 from wmfs_reference import kernels
 from wmfs_reference._generated import bind_operations
 
@@ -42,6 +42,20 @@ def _add_scalar(a: torch.Tensor, value: float, result: torch.Tensor) -> None:
     kernels.add_scalar(a, value, out=result)
 
 
+def _nonzero(a: torch.Tensor, indices: torch.Tensor) -> None:
+    expected = (int(torch.count_nonzero(a)), a.ndim)
+    _validate_output(indices, expected, torch.int64)
+    kernels.nonzero(a, out=indices)
+
+
+def _plan_nonzero(context: InvocationContext) -> dict[str, OutputSpec]:
+    a = context.input("a")
+    count = int(torch.count_nonzero(a))
+    if count == 0:
+        raise ValueError("nonzero does not yet support an empty result")
+    return {"indices": OutputSpec((count, a.ndim), torch.int64)}
+
+
 def _matmul_vjp(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -77,8 +91,10 @@ def main() -> None:
                 "add_scalar": _add_scalar,
                 "matmul_vjp": _matmul_vjp,
                 "add_scalar_vjp": _add_scalar_vjp,
+                "nonzero": _nonzero,
             }
-        )
+        ),
+        output_planners={"nonzero": _plan_nonzero},
     )
 
 

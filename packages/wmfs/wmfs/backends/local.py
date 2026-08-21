@@ -26,9 +26,15 @@ def _svd(
     return torch.linalg.svd(a, full_matrices=full_matrices, out=out)
 
 
+def _nonzero(a: torch.Tensor, *, out: torch.Tensor | None = None) -> torch.Tensor:
+    result = torch.nonzero(a)
+    return result if out is None else out.copy_(result)
+
+
 _OPERATIONS = {
     "add_scalar": _add_scalar,
     "matmul": _matmul,
+    "nonzero": _nonzero,
     "svd": _svd,
 }
 

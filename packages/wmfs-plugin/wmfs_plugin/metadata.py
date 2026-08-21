@@ -196,10 +196,12 @@ def validate_operation_metadata(operation: OperationMetadata) -> None:
         )
     if len(operation.output_plans) > _MAX_OUTPUTS:
         raise ValueError(f"Operation {operation.name!r} declares too many outputs")
-    if any(plan.known is None for plan in operation.output_plans):
+    if any(plan.known is None for plan in operation.output_plans) and any(
+        parameter.access == "readWrite" for parameter in operation.tensor_inputs
+    ):
         raise ValueError(
-            f"Operation {operation.name!r} declares dynamic outputs, which are not "
-            "supported"
+            f"Operation {operation.name!r} cannot plan dynamic outputs from mutable "
+            "inputs"
         )
     for scalar in operation.scalar_parameters:
         if scalar.name == "out":
@@ -222,7 +224,8 @@ def validate_operation_metadata(operation: OperationMetadata) -> None:
                 f"Operation {operation.name!r} output plan {plan.name!r} does not "
                 f"match {parameter.name!r}"
             )
-        _validate_known_output(plan, operation)
+        if plan.known is not None:
+            _validate_known_output(plan, operation)
 
 
 def _operation_from_reader(operation: object) -> OperationMetadata:

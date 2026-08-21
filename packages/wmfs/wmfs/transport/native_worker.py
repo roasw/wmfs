@@ -220,12 +220,25 @@ class NativeWorkerSession:
         outputs: list[ManagedTensor] = []
         dispatched = False
         try:
-            output_plan = plan_outputs(
-                self._buffers,
-                invocation,
-                tuple(inputs),
-                collect_metrics=collect_metrics,
-            )
+            dynamic = self._plan_dynamic_outputs(invocation, inputs, invocation_id)
+            try:
+                output_plan = plan_outputs(
+                    self._buffers,
+                    invocation,
+                    tuple(inputs),
+                    collect_metrics=collect_metrics,
+                    dynamic=dynamic,
+                )
+            except ValueError as error:
+                if dynamic:
+                    try:
+                        self.close()
+                    except Exception:
+                        pass
+                    raise WorkerTransportError(
+                        f"Worker returned an invalid output plan: {error}"
+                    ) from error
+                raise
             allocation_metrics: list[tuple[int, int]] = []
             for index in range(len(output_plan.specs)):
                 service_start = perf_counter_ns() if collect_metrics else 0
@@ -354,6 +367,45 @@ class NativeWorkerSession:
             if mapped and not item.buffer.arena:
                 item.buffer.register_recipient(self)
         return transferred
+
+    def _plan_dynamic_outputs(
+        self,
+        invocation: BoundInvocation,
+        inputs: list[ManagedTensor],
+        invocation_id: int,
+    ) -> tuple[tuple[int, tuple[int, ...], str], ...]:
+        if not any(plan.known is None for plan in invocation.operation.output_plans):
+            return ()
+        scalars = [
+            (index, parameter.kind, value)
+            for index, (parameter, value) in enumerate(
+                zip(
+                    invocation.operation.scalar_parameters,
+                    invocation.scalars,
+                    strict=True,
+                )
+            )
+        ]
+        try:
+            response = self._ensure_open().plan_outputs(
+                invocation_id,
+                invocation.operation.operation_id,
+                [self._native_descriptor(item) for item in inputs],
+                scalars,
+            )
+        except Exception as error:
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise WorkerTransportError(
+                f"Worker output planning failed: {type(error).__name__}: {error}"
+            ) from error
+        _raise_operation_error(response)
+        return tuple(
+            (int(index), tuple(int(item) for item in shape), str(dtype))
+            for index, shape, dtype in response["outputs"]
+        )
 
     def _ensure_open(self) -> object:
         if self._session is None:

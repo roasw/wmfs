@@ -1,6 +1,7 @@
 #include "wmfs/reference/kernels.hpp"
 #include "wmfs/reference/mapped_buffers.hpp"
 
+#include <ATen/ops/count_nonzero.h>
 #include <c10/core/InferenceMode.h>
 #include <capnp/rpc-twoparty.h>
 #include <gnu/libc-version.h>
@@ -185,6 +186,45 @@ class ReferenceServer final : public ReferencePlugin::Server {
                 result.setType(error.type);
                 result.setMessage(error.what());
             }
+        });
+    }
+
+    kj::Promise<void> planOutputs(PlanOutputsContext context) override {
+        return translate_errors([&] {
+            auto invocation = context.getParams().getInvocation();
+            require(invocation.getOperationId() == 6,
+                    "Operation has no dynamic output planner");
+            require(invocation.getInputs().size() == 1,
+                    "Output planning has an invalid input count");
+            auto invocation_id = invocation.getInvocationId();
+            auto input =
+                buffers_.tensor(invocation.getInputs()[0], invocation_id);
+            auto outcome = context.getResults().initOutcome();
+            std::int64_t count;
+            try {
+                count = at::count_nonzero(input.tensor()).item<std::int64_t>();
+                if (count == 0)
+                    throw OperationFailure(
+                        "ValueError",
+                        "nonzero does not yet support an empty result");
+            } catch (const OperationFailure &error) {
+                auto result = outcome.initOperationError();
+                result.setType(error.type);
+                result.setMessage(error.what());
+                return;
+            } catch (const c10::Error &error) {
+                auto result = outcome.initOperationError();
+                result.setType("RuntimeError");
+                result.setMessage(error.what_without_backtrace());
+                return;
+            }
+            outcome.setSuccess();
+            auto outputs = context.getResults().initOutputs(1);
+            outputs[0].setOutput(0);
+            auto shape = outputs[0].initShape(2);
+            shape.set(0, static_cast<std::uint64_t>(count));
+            shape.set(1, static_cast<std::uint64_t>(input.tensor().dim()));
+            outputs[0].setDtype(DType::INT64);
         });
     }
 

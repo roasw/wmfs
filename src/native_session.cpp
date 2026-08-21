@@ -108,6 +108,20 @@ void set_socket_timeout(int fd, std::chrono::nanoseconds duration) {
     throw std::invalid_argument("Unsupported native tensor dtype");
 }
 
+TensorDType dtype_to_native(::DType dtype) {
+    switch (dtype) {
+    case ::DType::FLOAT32:
+        return TensorDType::float32;
+    case ::DType::FLOAT64:
+        return TensorDType::float64;
+    case ::DType::INT64:
+        return TensorDType::int64;
+    case ::DType::UINT8:
+        return TensorDType::uint8;
+    }
+    throw std::runtime_error("Worker planned an unsupported tensor dtype");
+}
+
 void write_descriptor(::TensorDescriptor::Builder target,
                       const TensorDescriptor &source) {
     target.setBufferId(source.buffer_id);
@@ -310,6 +324,56 @@ struct Session::Impl {
                 .worker_dispatch_ns = worker.getDispatchNs(),
                 .worker_kernel_ns = worker.getKernelNs(),
             };
+        }
+
+        OutputPlanningResult
+        plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
+                     const TensorDescriptors &inputs,
+                     const std::vector<ScalarArgument> &scalars) {
+            auto request = plugin.planOutputsRequest();
+            auto invocation = request.initInvocation();
+            invocation.setInvocationId(invocation_id);
+            invocation.setOperationId(operation_id);
+            auto input_builders = invocation.initInputs(inputs.size());
+            for (std::size_t index = 0; index < inputs.size(); ++index)
+                write_descriptor(input_builders[index], *inputs[index]);
+            auto scalar_builders = invocation.initScalars(scalars.size());
+            for (std::size_t index = 0; index < scalars.size(); ++index) {
+                const auto &source = scalars[index];
+                auto target = scalar_builders[index];
+                target.setParameter(source.parameter);
+                switch (source.kind) {
+                case ScalarKind::boolean:
+                    target.setBoolean(source.boolean_value);
+                    break;
+                case ScalarKind::float64:
+                    target.setFloat64(source.float64_value);
+                    break;
+                case ScalarKind::int64:
+                    target.setInt64(source.int64_value);
+                    break;
+                case ScalarKind::text:
+                    target.setText(source.text_value);
+                    break;
+                }
+            }
+            auto response =
+                io.provider->getTimer()
+                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
+                                  request.send())
+                    .wait(io.waitScope);
+            OutputPlanningResult result;
+            result.outcome = read_outcome(response.getOutcome());
+            if (!result.outcome.error_type.empty())
+                return result;
+            for (auto item : response.getOutputs()) {
+                std::vector<std::uint64_t> shape;
+                for (auto dimension : item.getShape())
+                    shape.push_back(dimension);
+                result.outputs.push_back({item.getOutput(), std::move(shape),
+                                          dtype_to_native(item.getDtype())});
+            }
+            return result;
         }
 
         void send_control(capnp::MessageBuilder &message,
@@ -727,6 +791,18 @@ InvocationProfile Session::invoke_profiled(
     }
     impl_->finish_invocation(invocation_id);
     return profile;
+}
+
+OutputPlanningResult
+Session::plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
+                      const TensorDescriptors &inputs,
+                      const std::vector<ScalarArgument> &scalars) {
+    OutputPlanningResult result;
+    impl_->submit([&](Impl::Worker &worker) {
+        result =
+            worker.plan_outputs(invocation_id, operation_id, inputs, scalars);
+    });
+    return result;
 }
 
 void Session::ping(std::uint64_t nonce) {

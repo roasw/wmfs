@@ -4,7 +4,11 @@ from time import perf_counter_ns
 import torch
 
 from wmfs.memory.buffers import BufferAccessLease, BufferManager, ManagedTensor
-from wmfs.output_metadata import bind_reusable_outputs, evaluate_outputs
+from wmfs.output_metadata import (
+    bind_reusable_outputs,
+    complete_outputs,
+    evaluate_outputs,
+)
 from wmfs.registry import OperationMetadata, ScalarParameter
 
 
@@ -140,9 +144,11 @@ def plan_outputs(
     inputs: tuple[ManagedTensor, ...],
     *,
     collect_metrics: bool,
+    dynamic: tuple[tuple[int, tuple[int, ...], str], ...] = (),
 ) -> InvocationOutputPlan:
     plan_start = perf_counter_ns() if collect_metrics else 0
-    specs = evaluate_outputs(invocation.operation, inputs, invocation.scalars)
+    known = evaluate_outputs(invocation.operation, inputs, invocation.scalars)
+    specs = complete_outputs(invocation.operation, known, dynamic)
     output_plan_ns = perf_counter_ns() - plan_start if collect_metrics else 0
     reusable_outputs = (
         bind_reusable_outputs(

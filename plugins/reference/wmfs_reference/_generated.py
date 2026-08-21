@@ -54,6 +54,13 @@ def _adapt_add_scalar_vjp(implementation: Implementation) -> OperationHandler:
     return handler
 
 
+def _adapt_nonzero(implementation: Implementation) -> OperationHandler:
+    def handler(context: InvocationContext) -> None:
+        implementation(context.inputs[0], context.outputs[0])
+
+    return handler
+
+
 _OPERATION_NAMES = frozenset(
     {
         "matmul",
@@ -61,6 +68,7 @@ _OPERATION_NAMES = frozenset(
         "add_scalar",
         "matmul_vjp",
         "add_scalar_vjp",
+        "nonzero",
     }
 )
 
@@ -81,4 +89,5 @@ def bind_operations(
         "add_scalar": _adapt_add_scalar(implementations["add_scalar"]),
         "matmul_vjp": _adapt_matmul_vjp(implementations["matmul_vjp"]),
         "add_scalar_vjp": _adapt_add_scalar_vjp(implementations["add_scalar_vjp"]),
+        "nonzero": _adapt_nonzero(implementations["nonzero"]),
     }

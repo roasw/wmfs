@@ -17,11 +17,12 @@ def evaluate_outputs(
     operation: OperationMetadata,
     inputs: Sequence[ManagedTensor],
     scalars: Sequence[object],
-) -> tuple[tuple[tuple[int, ...], str], ...]:
-    results: list[tuple[tuple[int, ...], str]] = []
+) -> tuple[tuple[tuple[int, ...], str] | None, ...]:
+    results: list[tuple[tuple[int, ...], str] | None] = []
     for plan in operation.output_plans:
         if plan.known is None:
-            raise ValueError(f"Operation {operation.name!r} has dynamic outputs")
+            results.append(None)
+            continue
         known = plan.known
         if known.shape_kind == "sameShapeAsInput":
             shape = inputs[int(known.shape)].descriptor.shape
@@ -33,6 +34,25 @@ def evaluate_outputs(
             raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
         results.append((shape, _evaluate_dtype(known.dtype, inputs, scalars)))
     return tuple(results)
+
+
+def complete_outputs(
+    operation: OperationMetadata,
+    known: Sequence[tuple[tuple[int, ...], str] | None],
+    planned: Sequence[tuple[int, tuple[int, ...], str]],
+) -> tuple[tuple[tuple[int, ...], str], ...]:
+    results = list(known)
+    for index, shape, dtype in planned:
+        if index >= len(results) or results[index] is not None:
+            raise ValueError("Worker planned an unknown or statically known output")
+        if not shape or len(shape) > _MAX_RANK or any(item <= 0 for item in shape):
+            raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
+        if dtype not in {"float32", "float64", "int64", "uint8"}:
+            raise ValueError(f"Operation {operation.name!r} produced an invalid dtype")
+        results[index] = (shape, dtype)
+    if any(item is None for item in results):
+        raise ValueError("Worker did not plan every dynamic output")
+    return tuple(item for item in results if item is not None)
 
 
 def bind_reusable_outputs(

@@ -29,8 +29,8 @@ def test_discovers_operations_over_rpc() -> None:
     registry = discover_plugins([PLUGIN_DIRECTORY])
 
     assert registry.plugin_names == ("reference",)
-    assert registry.operation_names == ("add_scalar", "matmul", "svd")
-    assert registry.plugin("reference").protocol_version == 9
+    assert registry.operation_names == ("add_scalar", "matmul", "nonzero", "svd")
+    assert registry.plugin("reference").protocol_version == 11
     assert registry.plugin("reference").fingerprint != 0
 
     svd_metadata = registry.operation("svd")
@@ -59,7 +59,12 @@ def test_runtime_registers_discovered_operations() -> None:
 
     discovered_runtime.discover_plugins(PLUGIN_DIRECTORY)
 
-    assert discovered_runtime.operation_names == ("add_scalar", "matmul", "svd")
+    assert discovered_runtime.operation_names == (
+        "add_scalar",
+        "matmul",
+        "nonzero",
+        "svd",
+    )
     assert discovered_runtime.operation_metadata("add_scalar").name == "add_scalar"
     discovered_runtime.close()
 
@@ -76,7 +81,7 @@ def test_discovery_publishes_dynamic_module_operations() -> None:
             "full_matrices",
             "out",
         )
-        assert {"add_scalar", "matmul", "svd"} <= set(dir(wmfs))
+        assert {"add_scalar", "matmul", "nonzero", "svd"} <= set(dir(wmfs))
         with pytest.raises(RuntimeError, match="No execution backend"):
             wmfs.matmul(torch.ones((1, 1)), torch.ones((1, 1)))
 

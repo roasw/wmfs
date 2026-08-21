@@ -3,6 +3,7 @@
 #include <ATen/ops/add.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/matmul.h>
+#include <ATen/ops/nonzero.h>
 #include <ATen/ops/result_type.h>
 
 #include <algorithm>
@@ -77,6 +78,12 @@ at::Tensor &add_scalar_out(const at::Tensor &a, double value, at::Tensor &out) {
     auto scalar = at::Scalar(value);
     validate_output(out, a.sizes(), at::result_type(a, scalar));
     return at::add_out(out, a, scalar, at::Scalar(1));
+}
+
+at::Tensor &nonzero_out(const at::Tensor &a, at::Tensor &out) {
+    auto result = at::nonzero(a);
+    validate_output(out, result.sizes(), at::ScalarType::Long);
+    return out.copy_(result);
 }
 
 std::tuple<at::Tensor, at::Tensor>

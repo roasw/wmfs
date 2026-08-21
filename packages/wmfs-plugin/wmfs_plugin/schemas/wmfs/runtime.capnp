@@ -2,7 +2,7 @@
 
 using Tensor = import "/wmfs/tensor.capnp";
 
-const protocolVersion :UInt16 = 10;
+const protocolVersion :UInt16 = 11;
 
 enum TensorAccess {
   readOnly @0;
@@ -152,6 +152,19 @@ struct KnownInvocation {
   scalars @4 :List(ScalarArgument);
 }
 
+struct OutputPlanningInvocation {
+  invocationId @0 :UInt64;
+  operationId @1 :UInt32;
+  inputs @2 :List(Tensor.TensorDescriptor);
+  scalars @3 :List(ScalarArgument);
+}
+
+struct PlannedOutput {
+  output @0 :UInt16;
+  shape @1 :List(UInt64);
+  dtype @2 :Tensor.DType;
+}
+
 struct WorkerInvocationMetrics {
   inputViewsNs @0 :UInt64;
   outputViewsNs @1 :UInt64;
@@ -179,4 +192,6 @@ interface Plugin {
   invokeKnown @4 (invocation :KnownInvocation) -> (outcome :InvocationOutcome);
   invokeKnownProfiled @5 (invocation :KnownInvocation) ->
       (outcome :InvocationOutcome, metrics :WorkerInvocationMetrics);
+  planOutputs @6 (invocation :OutputPlanningInvocation) ->
+      (outcome :InvocationOutcome, outputs :List(PlannedOutput));
 }

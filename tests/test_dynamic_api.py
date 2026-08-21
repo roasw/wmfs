@@ -30,8 +30,8 @@ def test_operations_are_absent_before_discovery_or_backend_selection() -> None:
 def test_selecting_local_backend_publishes_its_operations() -> None:
     wmfs.runtime.use_backend("local")
 
-    assert wmfs.runtime.operation_names == ("add_scalar", "matmul", "svd")
-    assert {"add_scalar", "matmul", "svd"} <= set(dir(wmfs))
+    assert wmfs.runtime.operation_names == ("add_scalar", "matmul", "nonzero", "svd")
+    assert {"add_scalar", "matmul", "nonzero", "svd"} <= set(dir(wmfs))
     namespace: dict[str, object] = {}
     exec("from wmfs import matmul", namespace)
     assert namespace["matmul"] is wmfs.matmul

@@ -237,9 +237,10 @@ runtime.discover_plugins(Path("plugins"))
 Output plans may reference input axes, minimum dimensions, Boolean scalar
 selection, input dtypes, and tensor/scalar dtype promotion. The runtime
 validates these plans during discovery, preallocates every output, and passes
-its writable descriptor in the operation request. Dynamic output plans are
-reserved by the protocol but rejected until a generic allocator invocation is
-implemented for both control paths.
+its writable descriptor in the operation request. Operations with dynamic
+plans first ask the worker for indexed shape and dtype metadata, then the
+runtime validates and allocates those outputs before the ordinary operation
+request. Known outputs retain the single-request fast path.
 
 Plugins may advertise an internal vector-Jacobian product (VJP) operation for a
 public operation. Its metadata identifies the forward inputs and outputs that

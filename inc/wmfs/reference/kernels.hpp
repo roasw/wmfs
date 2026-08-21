@@ -25,6 +25,9 @@ at::Tensor add_scalar(const at::Tensor &a, double value);
 /// @brief Add a scalar into runtime-owned storage.
 at::Tensor &add_scalar_out(const at::Tensor &a, double value, at::Tensor &out);
 
+/// @brief Return nonzero indices in runtime-owned dynamic storage.
+at::Tensor &nonzero_out(const at::Tensor &a, at::Tensor &out);
+
 /// @brief Compute the first-order vector-Jacobian product for matrix multiply.
 std::tuple<at::Tensor, at::Tensor>
 matmul_vjp_out(const at::Tensor &a, const at::Tensor &b,

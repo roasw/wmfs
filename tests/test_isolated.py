@@ -22,6 +22,10 @@ def add_scalar(*args: object, **kwargs: object) -> object:
     return wmfs.add_scalar(*args, **kwargs)
 
 
+def nonzero(*args: object, **kwargs: object) -> object:
+    return wmfs.nonzero(*args, **kwargs)
+
+
 @pytest.fixture
 def isolated_runtime() -> None:
     runtime.discover_plugins(PLUGIN_DIRECTORY)
@@ -144,6 +148,35 @@ def test_isolated_add_scalar_matches_dtype_promotion(isolated_runtime: None) -> 
 
     torch.testing.assert_close(result, source + 0.5)
     assert result.dtype == torch.float32
+
+
+@pytest.mark.parametrize("control_mode", ["native", "python"])
+def test_isolated_nonzero_allocates_data_dependent_output(control_mode: str) -> None:
+    candidate = Runtime()
+    candidate.configure_control(control_mode)
+    candidate.discover_plugins(PLUGIN_DIRECTORY)
+    candidate.use_backend("isolated")
+    try:
+        source = torch.tensor([[0.0, 2.0, 0.0], [3.0, 4.0, 0.0]])
+
+        result = candidate.invoke("nonzero", source)
+
+        torch.testing.assert_close(result, torch.nonzero(source))
+        assert result.shape == (3, 2)
+        assert result.dtype == torch.int64
+        assert hasattr(result.untyped_storage(), "_wmfs_allocation")
+
+        reusable = candidate.empty(3, 2, dtype=torch.int64)
+        assert candidate.invoke("nonzero", source, out=reusable) is reusable
+        torch.testing.assert_close(reusable, torch.nonzero(source))
+
+        with pytest.raises(Exception, match="empty result"):
+            candidate.invoke("nonzero", torch.zeros((2, 2)))
+        torch.testing.assert_close(
+            candidate.invoke("add_scalar", source, 1.0), source + 1.0
+        )
+    finally:
+        candidate.close()
 
 
 def test_isolated_operations_accept_noncontiguous_inputs(

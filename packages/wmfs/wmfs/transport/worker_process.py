@@ -271,12 +271,23 @@ class WorkerSession:
         dispatched = False
         completed = False
         try:
-            output_plan = plan_outputs(
-                self._buffers,
-                invocation,
-                tuple(inputs),
-                collect_metrics=collect_metrics,
+            dynamic = await self._plan_dynamic_outputs(
+                invocation, inputs, invocation_id
             )
+            try:
+                output_plan = plan_outputs(
+                    self._buffers,
+                    invocation,
+                    tuple(inputs),
+                    collect_metrics=collect_metrics,
+                    dynamic=dynamic,
+                )
+            except ValueError:
+                if dynamic:
+                    self._invalidated = True
+                    if self._shutdown is not None:
+                        self._shutdown.set()
+                raise
             allocation_metrics: list[tuple[int, int]] = []
             for index in range(len(output_plan.specs)):
                 service_start = perf_counter_ns() if collect_metrics else 0
@@ -379,6 +390,44 @@ class WorkerSession:
                 self._invalidated = True
                 if self._shutdown is not None:
                     self._shutdown.set()
+
+    async def _plan_dynamic_outputs(
+        self,
+        invocation: BoundInvocation,
+        inputs: list[ManagedTensor],
+        invocation_id: int,
+    ) -> tuple[tuple[int, tuple[int, ...], str], ...]:
+        if self._plugin is None:
+            raise RuntimeError("Worker session is not ready")
+        if not any(plan.known is None for plan in invocation.operation.output_plans):
+            return ()
+        wire_invocation = {
+            "invocationId": invocation_id,
+            "operationId": invocation.operation.operation_id,
+            "inputs": [item.descriptor.as_capnp() for item in inputs],
+            "scalars": _scalar_arguments(invocation.operation, invocation.scalars),
+        }
+        try:
+            response = await asyncio.wait_for(
+                self._plugin.planOutputs(invocation=wire_invocation),
+                self._deadlines.request,
+            )
+        except Exception:
+            self._invalidated = True
+            if self._shutdown is not None:
+                self._shutdown.set()
+            raise
+        operation_error = _operation_error(response.outcome)
+        if operation_error is not None:
+            raise operation_error
+        return tuple(
+            (
+                int(item.output),
+                tuple(int(dimension) for dimension in item.shape),
+                str(item.dtype),
+            )
+            for item in response.outputs
+        )
 
     async def _ping(self) -> None:
         if self._invoke_lock is None or self._plugin is None:

@@ -11,6 +11,6 @@ def test_protocol_schemas_are_packaged_and_loadable() -> None:
 
     assert (root / "wmfs" / "runtime.capnp").is_file()
     assert (root / "wmfs" / "tensor.capnp").is_file()
-    assert PROTOCOL_VERSION == 10
+    assert PROTOCOL_VERSION == 11
     assert int(load_runtime_schema().protocolVersion) == PROTOCOL_VERSION
     assert load_tensor_schema().TensorDescriptor is not None

@@ -14,11 +14,12 @@ import capnp
 import torch
 
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
-from wmfs_plugin.invocation import InvocationContext
+from wmfs_plugin.invocation import InvocationContext, OutputSpec
 from wmfs_plugin.metadata import OperationMetadata, metadata_from_reader
 from wmfs_plugin.schema import PROTOCOL_VERSION, load_tensor_schema, schema_root
 
 OperationHandler: TypeAlias = Callable[[InvocationContext], None]
+OutputPlanner: TypeAlias = Callable[[InvocationContext], Mapping[str, OutputSpec]]
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,11 @@ class _Operation:
     scalar_kinds: tuple[str, ...]
 
 
-def worker_main(operations: Mapping[str, OperationHandler]) -> None:
+def worker_main(
+    operations: Mapping[str, OperationHandler],
+    *,
+    output_planners: Mapping[str, OutputPlanner] | None = None,
+) -> None:
     """Run a metadata-driven plugin worker on inherited transport descriptors.
 
     Args:
@@ -58,6 +63,7 @@ def worker_main(operations: Mapping[str, OperationHandler]) -> None:
                 arguments.schema_import,
                 arguments.interface,
                 operations,
+                output_planners or {},
             )
         )
     )
@@ -70,6 +76,7 @@ async def _serve(
     schema_import_paths: list[Path],
     interface_name: str,
     operations: Mapping[str, OperationHandler],
+    output_planners: Mapping[str, OutputPlanner],
 ) -> None:
     imports = [schema_root(), *schema_import_paths]
     plugin_schema = capnp.load(
@@ -89,6 +96,7 @@ async def _serve(
             interface_name,
             mapped_buffers,
             operations,
+            output_planners,
         ),
     )
     try:
@@ -105,12 +113,14 @@ def _make_server(
     interface_name: str,
     mapped_buffers: MappedBufferCache,
     handlers: Mapping[str, OperationHandler],
+    output_planners: Mapping[str, OutputPlanner] | None = None,
 ) -> object:
     metadata = plugin_schema.pluginMetadata
     if int(metadata.protocolVersion) != PROTOCOL_VERSION:
         raise RuntimeError("Worker schema does not match its protocol version")
     parsed_metadata = metadata_from_reader(metadata)
     operations = _compile_operations(parsed_metadata.operations, handlers)
+    planners = _compile_planners(parsed_metadata.operations, output_planners or {})
     interface = getattr(plugin_schema, interface_name)
 
     class PluginServer(interface.Server):
@@ -166,6 +176,20 @@ def _make_server(
             assert metrics is not None
             return ({"success": None}, metrics)
 
+        async def planOutputs(
+            self,
+            invocation: object,
+            _context: object,
+            **_kwargs: object,
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            try:
+                outputs = _plan_outputs(
+                    invocation, mapped_buffers, operations, planners
+                )
+            except _OperationFailure as error:
+                return ({"operationError": error.as_capnp()}, [])
+            return ({"success": None}, outputs)
+
     return PluginServer()
 
 
@@ -205,6 +229,71 @@ def _compile_operations(
             f"Handlers are not declared in plugin metadata: {sorted(unknown)}"
         )
     return compiled
+
+
+def _compile_planners(
+    metadata_operations: tuple[OperationMetadata, ...],
+    planners: Mapping[str, OutputPlanner],
+) -> dict[int, OutputPlanner]:
+    dynamic = {
+        operation.name: operation
+        for operation in metadata_operations
+        if any(plan.known is None for plan in operation.output_plans)
+    }
+    if set(planners) != set(dynamic):
+        raise ValueError(
+            "Dynamic output planners do not match metadata: "
+            f"expected {sorted(dynamic)}, received {sorted(planners)}"
+        )
+    return {
+        operation.operation_id: planners[name] for name, operation in dynamic.items()
+    }
+
+
+def _plan_outputs(
+    invocation: object,
+    mapped_buffers: MappedBufferCache,
+    operations: Mapping[int, _Operation],
+    planners: Mapping[int, OutputPlanner],
+) -> list[dict[str, object]]:
+    invocation_id = int(invocation.invocationId)
+    operation_id = int(invocation.operationId)
+    try:
+        operation = operations[operation_id]
+        planner = planners[operation_id]
+    except KeyError:
+        raise ValueError(
+            f"Operation ID {operation_id} has no dynamic planner"
+        ) from None
+    if len(invocation.inputs) != len(operation.input_accesses):
+        raise ValueError("Output planning has an invalid input count")
+    inputs = tuple(
+        mapped_buffers.tensor(descriptor, invocation_id=invocation_id)
+        for descriptor in invocation.inputs
+    )
+    scalars = _decode_scalars(invocation.scalars, operation.scalar_kinds)
+    context = InvocationContext(operation.metadata, invocation_id, inputs, (), scalars)
+    try:
+        planned = planner(context)
+    except Exception as error:
+        raise _OperationFailure(error) from error
+    indices = {
+        parameter.name: index
+        for index, parameter in enumerate(operation.metadata.tensor_outputs)
+        if operation.metadata.output_plans[index].known is None
+    }
+    if set(planned) != set(indices):
+        raise _OperationFailure(
+            ValueError("Planner returned the wrong dynamic outputs")
+        )
+    return [
+        {
+            "output": indices[name],
+            "shape": list(spec.shape),
+            "dtype": str(spec.dtype).removeprefix("torch."),
+        }
+        for name, spec in planned.items()
+    ]
 
 
 def _invoke_known(
