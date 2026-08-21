@@ -36,12 +36,17 @@ def test_registry_rejects_duplicate_plugin() -> None:
         registry.register(_plugin("example", "second"))
 
 
-def test_registry_rejects_duplicate_operation() -> None:
+def test_registry_namespaces_duplicate_operations() -> None:
     registry = OperationRegistry()
     registry.register(_plugin("first", "shared"))
+    registry.register(_plugin("second", "shared"))
 
-    with pytest.raises(ValueError, match="Operation 'shared' is already registered"):
-        registry.register(_plugin("second", "shared"))
+    assert registry.operation_names == ()
+    assert registry.qualified_operation_names == ("first.shared", "second.shared")
+    assert registry.plugin_for_operation("first.shared") == "first"
+    assert registry.plugin_for_operation("second.shared") == "second"
+    with pytest.raises(KeyError, match="ambiguous.*first.shared.*second.shared"):
+        registry.operation("shared")
 
 
 def test_registry_reports_missing_operation() -> None:
@@ -56,6 +61,7 @@ def test_registry_reports_operation_owner() -> None:
     registry.register(_plugin("example", "operation"))
 
     assert registry.plugin_for_operation("operation") == "example"
+    assert registry.plugin_for_operation("example.operation") == "example"
 
 
 def test_registry_resolves_internal_vjp_by_plugin_operation_id() -> None:

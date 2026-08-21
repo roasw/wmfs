@@ -212,8 +212,11 @@ runtime.discover_plugins(Path("plugins"))
 print(runtime.operation_names)
 ```
 
-Discovery publishes each plugin's public operation names as attributes of the
-`wmfs` module. Internal operations remain available only to runtime machinery.
+Discovery publishes canonical plugin-qualified operations such as
+`wmfs.ops.reference.matmul`. An unqualified attribute such as `wmfs.matmul`
+remains available only while exactly one plugin provides that name; collisions
+make the unqualified name ambiguous without preventing either plugin from
+registering. Internal operations remain available only to runtime machinery.
 Import or access dynamic operations after discovery; importing `wmfs.matmul`
 before discovery or explicit local/bundled selection fails.
 

@@ -41,8 +41,8 @@ def create_operation(
             **scalar_kwargs,
         )
 
-    operation.__name__ = name
-    operation.__qualname__ = name
+    operation.__name__ = name.rsplit(".", 1)[-1]
+    operation.__qualname__ = f"ops.{name}" if "." in name else name
     operation.__module__ = "wmfs"
     operation.__doc__ = f"Invoke the dynamically registered {name!r} operation."
     if signature is not None:

@@ -133,7 +133,7 @@ class IsolatedBackend:
                 args,
                 kwargs,
             )
-        return self._invoke_plugin(plugin_name, operation, *args, out=out, **kwargs)
+        return self._invoke_plugin(plugin_name, metadata.name, *args, out=out, **kwargs)
 
     def construct_tensor(
         self,

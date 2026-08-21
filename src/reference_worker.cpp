@@ -124,7 +124,7 @@ class ReferenceServer final : public ReferencePlugin::Server {
   protected:
     kj::Promise<void> getMetadata(GetMetadataContext context) override {
         if (PLUGIN_METADATA.get().getFingerprint() !=
-            REFERENCE_METADATA_FINGERPRINT) {
+            WMFS_METADATA_FINGERPRINT) {
             throw std::logic_error(
                 "Reference schema and generated dispatch fingerprints differ");
         }

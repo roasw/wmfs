@@ -66,6 +66,15 @@ def test_runtime_registers_discovered_operations() -> None:
         "svd",
     )
     assert discovered_runtime.operation_metadata("add_scalar").name == "add_scalar"
+    assert discovered_runtime.operation_metadata("reference.add_scalar").name == (
+        "add_scalar"
+    )
+    assert discovered_runtime.qualified_operation_names == (
+        "reference.add_scalar",
+        "reference.matmul",
+        "reference.nonzero",
+        "reference.svd",
+    )
     discovered_runtime.close()
 
 
@@ -76,6 +85,10 @@ def test_discovery_publishes_dynamic_module_operations() -> None:
 
         assert wmfs.runtime.backend_name is None
         assert wmfs.matmul.__name__ == "matmul"
+        assert wmfs.ops.reference.matmul.__name__ == "matmul"
+        assert wmfs.ops.reference.matmul.__qualname__ == "ops.reference.matmul"
+        assert "reference" in dir(wmfs.ops)
+        assert "svd" in dir(wmfs.ops.reference)
         assert tuple(signature(wmfs.svd).parameters) == (
             "a",
             "full_matrices",
@@ -88,6 +101,10 @@ def test_discovery_publishes_dynamic_module_operations() -> None:
         wmfs.runtime.use_backend("isolated")
         result = wmfs.matmul(a=torch.ones((1, 1)), b=torch.full((1, 1), 2.0))
         torch.testing.assert_close(result, torch.full((1, 1), 2.0))
+        qualified = wmfs.ops.reference.matmul(
+            a=torch.ones((1, 1)), b=torch.full((1, 1), 3.0)
+        )
+        torch.testing.assert_close(qualified, torch.full((1, 1), 3.0))
     finally:
         wmfs.runtime.close()
 

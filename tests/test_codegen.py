@@ -38,6 +38,7 @@ def test_generated_python_adapter_uses_metadata_order() -> None:
             "add_scalar",
             "matmul_vjp",
             "add_scalar_vjp",
+            "nonzero",
         )
     }
     context = InvocationContext(
@@ -80,6 +81,15 @@ def test_codegen_check_rejects_stale_artifact_and_fingerprint(tmp_path: Path) ->
 def test_generated_binding_rejects_metadata_drift() -> None:
     with pytest.raises(ValueError, match="missing=.*svd"):
         bind_operations({"matmul": lambda *_arguments: None})
+
+
+def test_generated_metadata_exposes_stable_plugin_contract() -> None:
+    assert _GENERATED.PLUGIN_NAME == "reference"
+    assert _GENERATED.API_NAMESPACE == "reference"
+    assert _GENERATED.PROTOCOL_VERSION == 11
+    assert _GENERATED.METADATA_FINGERPRINT > 0
+    assert _GENERATED.OPERATIONS_BY_NAME["nonzero"].operation_id == 6
+    assert _GENERATED.OPERATIONS_BY_NAME["nonzero"].dynamic_outputs == ("indices",)
 
 
 def _run_codegen(

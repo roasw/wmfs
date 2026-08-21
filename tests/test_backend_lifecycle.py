@@ -272,7 +272,10 @@ def test_discovery_failure_closes_all_partial_sessions_and_buffers(
     class Session:
         def __init__(self, manifest: PluginManifest, *_args: object) -> None:
             self.name = manifest.name
-            self.metadata = metadata(manifest.name, "duplicate")
+            self.metadata = metadata(
+                "first" if manifest.name == "second" else manifest.name,
+                "duplicate",
+            )
 
         def close(self) -> None:
             closed.append(self.name)
@@ -291,7 +294,7 @@ def test_discovery_failure_closes_all_partial_sessions_and_buffers(
     monkeypatch.setattr(isolated_module, "WorkerSession", Session)
     monkeypatch.setattr(isolated_module, "BufferManager", Buffers)
 
-    with pytest.raises(ValueError, match="already registered"):
+    with pytest.raises(ValueError, match="manifest names.*worker reports"):
         IsolatedBackend.discover(manifests, control_mode="python")
 
     assert closed == ["first", "second", "buffers"]

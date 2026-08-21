@@ -88,11 +88,25 @@ class Runtime:
             self._condition.wait_for(lambda: self._state == "open")
             return self._operation_names_locked()
 
+    @property
+    def plugin_names(self) -> tuple[str, ...]:
+        """Return discovered plugin API namespaces."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            return self._registry.plugin_names
+
+    @property
+    def qualified_operation_names(self) -> tuple[str, ...]:
+        """Return canonical plugin-qualified public operation names."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            return self._registry.qualified_operation_names
+
     def resolve_operation(self, name: str) -> tuple[int, OperationMetadata | None]:
         """Resolve a visible operation and its discovered metadata."""
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
-            if name not in self._operation_names_locked():
+            if name not in self._visible_operation_names_locked():
                 raise KeyError(f"Operation {name!r} is not registered")
             try:
                 metadata = self._registry.operation(name)
@@ -328,7 +342,8 @@ class Runtime:
                 self._condition.notify_all()
                 raise
         try:
-            return backend.invoke(operation, *args, out=out, **kwargs)
+            backend_operation = self._backend_operation(operation, backend)
+            return backend.invoke(backend_operation, *args, out=out, **kwargs)
         finally:
             self._finish_work()
 
@@ -350,7 +365,7 @@ class Runtime:
                 raise RuntimeError(
                     f"Operation {operation!r} belongs to a stale plugin catalog"
                 )
-            if operation not in self._operation_names_locked():
+            if operation not in self._visible_operation_names_locked():
                 self._active_work -= 1
                 self._condition.notify_all()
                 raise RuntimeError(f"Operation {operation!r} is no longer registered")
@@ -361,7 +376,8 @@ class Runtime:
                 self._condition.notify_all()
                 raise
         try:
-            return backend.invoke(operation, *args, out=out, **kwargs)
+            backend_operation = self._backend_operation(operation, backend)
+            return backend.invoke(backend_operation, *args, out=out, **kwargs)
         finally:
             self._finish_work()
 
@@ -457,6 +473,22 @@ class Runtime:
             names.update(self._backends[self._backend_name].operation_names)
         return tuple(sorted(names))
 
+    def _visible_operation_names_locked(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                set(self._operation_names_locked())
+                | set(self._registry.qualified_operation_names)
+            )
+        )
+
+    def _backend_operation(self, operation: str, backend: Backend) -> str:
+        if backend is self._backends.get("isolated"):
+            return operation
+        try:
+            return self._registry.operation(operation).name
+        except KeyError:
+            return operation
+
     def _selected_backend_locked(self) -> Backend:
         if self._backend_name is None:
             raise RuntimeError(
@@ -477,6 +509,7 @@ _RESERVED_OPERATION_NAMES = {
     "api",
     "empty",
     "ones",
+    "ops",
     "randn",
     "runtime",
     "zeros",
@@ -484,15 +517,25 @@ _RESERVED_OPERATION_NAMES = {
 
 
 def _validate_public_operations(registry: OperationRegistry) -> None:
-    for name in registry.operation_names:
+    for plugin_name in registry.plugin_names:
+        if (
+            not plugin_name.isidentifier()
+            or keyword.iskeyword(plugin_name)
+            or plugin_name.startswith("_")
+        ):
+            raise ValueError(
+                f"Plugin name {plugin_name!r} cannot be used as an API namespace"
+            )
+    for qualified_name in registry.qualified_operation_names:
+        _plugin_name, name = qualified_name.split(".", 1)
         if (
             not name.isidentifier()
             or keyword.iskeyword(name)
             or name.startswith("_")
-            or name in _RESERVED_OPERATION_NAMES
+            or (name in _RESERVED_OPERATION_NAMES and name in registry.operation_names)
         ):
             raise ValueError(f"Plugin operation name {name!r} cannot be published")
-        operation = registry.operation(name)
+        operation = registry.operation(qualified_name)
         parameter_names = [
             python_parameter_name(parameter.name)
             for parameter in (*operation.tensor_inputs, *operation.scalar_parameters)
