@@ -6,6 +6,7 @@
 let
   version = versions.python;
   workers = import ./reference-workers.nix { inherit pkgs source versions; };
+  wmfsTool = import ./wmfs-tool.nix { inherit pkgs source version; };
   failureWorker = ../tests/integration/fixtures/failure_worker.py;
   buildRuntime =
     {
@@ -102,5 +103,6 @@ workers
   default = buildRuntime { };
   bundled = bundledRuntime;
   bundled-check = bundledCheck;
+  wmfs-tool = wmfsTool;
   inherit benchmark;
 }

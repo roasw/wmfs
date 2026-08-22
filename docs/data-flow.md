@@ -1,9 +1,8 @@
 # Data Flow And Reading Guide
 
 This guide follows the `matmul(a, b)` call in the introductory script through
-the native isolated path. The Python-control worker follows the same planning
-and memory model, but performs Cap'n Proto calls with pycapnp instead of the
-native session extension.
+the native isolated path. The Python-control worker follows the same planning,
+ring, and memory model with a Python ring dispatcher.
 
 ## End-To-End Flow
 
@@ -16,8 +15,8 @@ user script
   -> bind_invocation / BufferManager
   -> NativeWorkerSession or WorkerSession
   -> batched SCM_RIGHTS mapping control
-  -> Cap'n Proto invokeKnown RPC
-  -> ReferenceServer::run_known
+  -> command ring publication + eventfd
+  -> reference worker ring consumer
   -> MappedBufferCache tensor views
   -> generated operation adapter
   -> reference numerical kernel
@@ -62,7 +61,7 @@ Read next:
 - `packages/wmfs/wmfs/backends/isolated.py`: plugin/session ownership and
   concurrent close behavior.
 - `packages/wmfs/wmfs/autograd.py`, `invoke_with_vjp`: the custom PyTorch
-  autograd edge and backward RPC.
+  autograd edge and backward ring invocation.
 - `packages/wmfs-plugin/wmfs_plugin/metadata.py`: canonical operation and VJP
   declarations, validation, and fingerprints.
 
@@ -108,24 +107,27 @@ Read next:
 - `BufferManager.collect`: grouped worker retirement, generation advancement,
   pooling, and reclamation instrumentation.
 
-### 5. Mapping And RPC Dispatch
+### 5. Mapping And Ring Dispatch
 
-The selected session batches all required mappings. Cap'n Proto carries buffer
-IDs, generations, tensor metadata, operation IDs, and scalar values. Tensor
-payload bytes never enter the RPC message.
+The selected session batches all required mappings over the FD-control socket,
+then publishes a fixed-width command containing capabilities, tensor metadata,
+operation ID, and scalar values. Tensor payload bytes never enter a ring or
+Cap'n Proto message. Cap'n Proto handles startup metadata/environment and the
+versioned ring handshake only.
 
 Important implementations:
 
 - `packages/wmfs/wmfs/transport/native_worker.py`, `NativeWorkerSession`:
   Python orchestration around the nanobind native control path.
-- `src/native_session.cpp`, `Session::map_buffers` and `Session::invoke`:
-  synchronous KJ RPC and batched `SCM_RIGHTS` control.
+- `packages/wmfs/wmfs/transport/worker_process.py`, `_RingClient`: asynchronous
+  submission/completion dispatch and benchmark timing boundaries.
+- `src/ring.cpp`: native SPSC publication, backpressure, and eventfd waits.
 - `packages/wmfs/wmfs/transport/worker_process.py`, `WorkerSession`: equivalent
-  Python/pycapnp control path.
+  Python orchestration around the same ring protocol.
 - `packages/wmfs/wmfs/transport/fd_broker.py`, `FdSender.ensure_mapped_many`:
   Python batched FD sender.
-- `packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp`: operation RPC
-  and metadata protocol.
+- `packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp`: startup/control
+  metadata protocol.
 - `packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/tensor.capnp`: tensor and
   batched buffer-transfer descriptors.
 
@@ -133,14 +135,14 @@ Important implementations:
 
 The C++ worker receives FDs on its control socket and caches mappings by buffer
 generation. ATen storage captures shared mapped-region ownership, so retained
-tensor aliases remain valid after cache retirement. The RPC thread constructs
+tensor aliases remain valid after cache retirement. The ring worker constructs
 views, invokes a generated transport adapter, and calls handwritten numerical
 kernels.
 
 Read in this order:
 
-1. `src/reference_worker.cpp`, `ReferenceServer::run_known`: RPC request scope,
-   view construction, profiling, and dispatch.
+1. `src/reference_worker.cpp`, `run_ring`: command scope, view construction,
+   profiling, completion, and dispatch.
 1. `src/reference_mapped_buffers.cpp`, `MappedBufferCache::tensor`: descriptor
    validation and zero-copy ATen views.
 1. `plugins/reference/generated/reference_dispatch.inc`: generated operation ID
@@ -158,7 +160,7 @@ The Python worker equivalents are:
 ### 7. Return And Reclamation
 
 The worker writes directly into output mappings allocated by the runtime. The
-RPC response contains only completion status and optional metrics. Python
+completion record contains only status and optional metrics. Python
 returns the preallocated managed Torch tensor. Releasing its last storage alias
 queues the allocation for later collection. Collection retires worker mappings
 in batches. In pooled mode it resets the whole region, advances its generation,
@@ -168,8 +170,8 @@ the allocation's subrange without recycling the arena mapping.
 ## Local And Bundled Differences
 
 - `LocalBackend.invoke` calls PyTorch directly and bypasses shared memory and
-  RPC.
+  rings.
 - `BundledBackend.invoke` calls the same C++ reference kernels in process through
-  `wmfs._bundled`, bypassing shared memory and RPC.
+  `wmfs._bundled`, bypassing shared memory and rings.
 - Comparing isolated against bundled in `wmfs-benchmark` most directly measures
   process-isolation overhead for the same native kernels.

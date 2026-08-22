@@ -104,7 +104,11 @@ test-release:
 
 # Build all packaged Release artifacts without creating result symlinks.
 package:
-    nix build .#default .#bundled .#benchmark .#wmfs-plugin .#reference-worker .#reference-python-worker --no-link
+    nix build .#default .#bundled .#benchmark .#wmfs-plugin .#wmfs-tool .#reference-worker .#reference-python-worker --no-link
+
+# Build only the independent interface compiler package.
+package-tool:
+    nix build .#wmfs-tool --no-link
 
 # Configure and build the unified CMake documentation target.
 doc profile=build_type:

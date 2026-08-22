@@ -10,6 +10,12 @@ pkgs.python3Packages.buildPythonPackage {
   src = source + "/packages/wmfs-plugin";
   SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_PLUGIN = version;
 
+  postPatch = ''
+    substituteInPlace wmfs_plugin/ring.py \
+      --replace-fail 'find_library("atomic")' \
+      '"${pkgs.stdenv.cc.cc.lib}/lib/libatomic.so.1"'
+  '';
+
   build-system = [
     pkgs.python3Packages.setuptools
     pkgs.python3Packages.setuptools-scm

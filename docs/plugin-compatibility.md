@@ -18,3 +18,10 @@ The immutable v1 snapshot under
 no source interface and must not be regenerated or compared to current live
 generated files. Compatibility tests consume the manifest, Python metadata and
 stub, C ABI header, and C++11 wrapper/stub directly from that snapshot.
+
+Additive source-interface changes require regeneration and a format/ABI policy
+that explicitly permits the new fields. Incompatible record or plugin ABI
+changes require a new major version and a startup diagnostic. Cap'n Proto is not
+part of the stable per-operation ABI: it is currently a startup/control
+implementation detail. The stable operation boundary is the generated plugin
+ABI plus the fixed-width ring format.

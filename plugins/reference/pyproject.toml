@@ -17,7 +17,21 @@ wmfs-reference-worker = "wmfs_reference.worker:main"
 include = ["wmfs_reference*"]
 
 [tool.setuptools.data-files]
-"share/wmfs/plugins/reference/generated" = ["generated/manifest.json"]
+"share/wmfs/plugins/reference/generated/include/wmfs" = [
+    "generated/include/wmfs/plugin_abi.h",
+    "generated/include/wmfs/reference_plugin.hpp",
+]
+"share/wmfs/plugins/reference/generated/python/wmfs_reference" = [
+    "generated/python/wmfs_reference/interface.py",
+    "generated/python/wmfs_reference/interface.pyi",
+]
+"share/wmfs/plugins/reference/generated/src" = [
+    "generated/src/reference_plugin_stub.cpp",
+]
+"share/wmfs/plugins/reference/generated" = [
+    "generated/manifest.json",
+    "generated/reference_dispatch.inc",
+]
 "share/wmfs/plugins/reference/schemas/wmfs-reference" = [
     "schemas/wmfs-reference/reference.capnp",
 ]

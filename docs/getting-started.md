@@ -1,7 +1,9 @@
 # Getting Started
 
-The public API does not expose RPC requests, workers, or shared-memory handles.
-The same functions are used for every backend.
+The public API does not expose requests, rings, workers, futures, or shared-memory
+handles. Calls are synchronous even though the isolated runtime supports
+multiple asynchronous submissions internally. The same functions are used for
+every backend.
 
 ```python
 from pathlib import Path

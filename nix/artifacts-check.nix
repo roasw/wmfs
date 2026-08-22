@@ -24,6 +24,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
   {
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS = releaseVersion;
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_PLUGIN = releaseVersion;
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_TOOL = releaseVersion;
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_REFERENCE = releaseVersion;
     WMFS_GIT_VERSION = versions.git;
     nativeBuildInputs = [
@@ -46,6 +47,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     mkdir -p "$work/source" "$work/sdist" "$work/wheel" "$work/run"
     cp -R ${source}/. "$work/source/runtime"
     cp -R ${source}/packages/wmfs-plugin "$work/source/plugin"
+    cp -R ${source}/packages/wmfs-tool "$work/source/tool"
     cp -R ${source}/plugins/reference "$work/source/reference"
     chmod -R u+w "$work/source"
 
@@ -53,6 +55,8 @@ pkgs.runCommand "wmfs-python-artifacts-check"
       --outdir "$work/sdist/runtime" "$work/source/runtime"
     python -m build --no-isolation --sdist \
       --outdir "$work/sdist/plugin" "$work/source/plugin"
+    python -m build --no-isolation --sdist \
+      --outdir "$work/sdist/tool" "$work/source/tool"
     python -m build --no-isolation --sdist \
       --outdir "$work/sdist/reference" "$work/source/reference"
 
@@ -84,10 +88,20 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "wmfs_plugin/schemas/wmfs/runtime.capnp",
             "wmfs_plugin/schemas/wmfs/tensor.capnp",
         },
+        "tool": {
+            "README.md",
+            "pyproject.toml",
+            "wmfs_tool/__init__.py",
+            "wmfs_tool/cli.py",
+            "wmfs_tool/generator.py",
+        },
         "reference": {
             "MANIFEST.in",
             "README.md",
             "generated/manifest.json",
+            "generated/include/wmfs/plugin_abi.h",
+            "generated/python/wmfs_reference/interface.py",
+            "generated/src/reference_plugin_stub.cpp",
             "pyproject.toml",
             "schemas/wmfs-reference/reference.capnp",
             "wmfs_reference/worker.py",
@@ -104,7 +118,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         assert "Version: ${releaseVersion}\n" in pkg_info
     PY
 
-    for distribution in runtime plugin reference; do
+    for distribution in runtime plugin tool reference; do
       mkdir -p "$work/extracted/$distribution"
       tar -xf "$work"/sdist/"$distribution"/*.tar.gz \
         -C "$work/extracted/$distribution" --strip-components=1
@@ -112,6 +126,8 @@ pkgs.runCommand "wmfs-python-artifacts-check"
 
     python -m build --no-isolation --wheel \
       --outdir "$work/wheel/plugin" "$work/extracted/plugin"
+    python -m build --no-isolation --wheel \
+      --outdir "$work/wheel/tool" "$work/extracted/tool"
     python -m build --no-isolation --wheel \
       --outdir "$work/wheel/reference" "$work/extracted/reference"
     CMAKE_ARGS=-DWMFS_VERSION=${versions.git} \
@@ -132,9 +148,15 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "wmfs_plugin/schemas/wmfs/runtime.capnp",
             "wmfs_plugin-${releaseVersion}.dist-info/entry_points.txt",
         ),
+        "tool": (
+            "wmfs_tool/cli.py",
+            "wmfs_tool-${releaseVersion}.dist-info/entry_points.txt",
+        ),
         "reference": (
             "wmfs_reference/worker.py",
             "share/wmfs/plugins/reference/generated/manifest.json",
+            "share/wmfs/plugins/reference/generated/include/wmfs/plugin_abi.h",
+            "share/wmfs/plugins/reference/generated/python/wmfs_reference/interface.py",
             "share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp",
             "wmfs_reference-${releaseVersion}.dist-info/entry_points.txt",
         ),
@@ -159,6 +181,19 @@ pkgs.runCommand "wmfs-python-artifacts-check"
       "$work/venv-$environment/bin/python" -m pip install \
         --no-index --no-deps "$work"/wheel/plugin/*.whl
     done
+    python -m venv --system-site-packages "$work/venv-tool"
+    "$work/venv-tool/bin/python" -m pip install \
+      --no-index --no-deps "$work"/wheel/tool/*.whl
+    env -u PYTHONPATH "$work/venv-tool/bin/python" - <<'PY'
+    import importlib.metadata
+
+    distribution = importlib.metadata.distribution("wmfs-tool")
+    assert not distribution.requires
+    assert any(
+        entry.name == "wmfs-tool" and entry.value == "wmfs_tool.cli:main"
+        for entry in distribution.entry_points
+    )
+    PY
     "$work/venv-runtime/bin/python" -m pip install --no-index --no-deps \
       "$work"/wheel/reference/*.whl "$work"/wheel/runtime/*.whl
     "$work/venv-bundled/bin/python" -m pip install --no-index --no-deps \

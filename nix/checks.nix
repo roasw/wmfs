@@ -69,6 +69,21 @@ in
   bundled-package = packages.bundled-check;
   benchmark-package = benchmark;
   plugin-package = packages.wmfs-plugin;
+  tool-package = packages.wmfs-tool;
+  tool-tests =
+    pkgs.runCommand "wmfs-tool-tests"
+      {
+        nativeBuildInputs = [
+          packages.wmfs-tool
+          pkgs.python3Packages.pytest
+          pkgs.stdenv.cc
+        ];
+      }
+      ''
+            cd ${source}
+        pytest -p no:cacheprovider -q packages/wmfs-tool/tests
+            touch $out
+      '';
   python-worker-package = packages.reference-python-worker;
   python-artifacts = import ./artifacts-check.nix {
     inherit pkgs source versions;
@@ -186,12 +201,11 @@ in
   '';
 
   generated =
-    pkgs.runCommand "wmfs-generated-check" { nativeBuildInputs = [ packages.wmfs-plugin ]; }
+    pkgs.runCommand "wmfs-generated-check" { nativeBuildInputs = [ packages.wmfs-tool ]; }
       ''
-        wmfs-plugin-codegen --check \
-          --schema ${source}/plugins/reference/schemas/wmfs-reference/reference.capnp \
-          --python-output ${source}/plugins/reference/wmfs_reference/_generated.py \
-          --cpp-output ${source}/plugins/reference/generated/reference_dispatch.inc
+        wmfs-tool generate --check \
+          --interface ${source}/plugins/reference/interface.toml \
+          --output ${source}/plugins/reference/generated
         touch $out
       '';
 

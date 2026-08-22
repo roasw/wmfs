@@ -512,14 +512,14 @@ Implementation status:
 - [x] Milestone 5: verified execution in a separately pinned glibc/toolchain
   environment.
 - [x] Milestone 6: local-versus-isolated benchmarking.
-- [ ] Milestone 7: `wmfs-tool` interface compiler and stable generated plugin
+- [x] Milestone 7: `wmfs-tool` interface compiler and stable generated plugin
   ABI.
-- [ ] Milestone 8: startup-only registration and versioned ring handshake.
-- [ ] Milestone 9: asynchronous command/completion ring hot path.
-- [ ] Milestone 10: dynamic allocation and recoverable errors over rings.
-- [ ] Milestone 11: compatibility fixtures built from older generated plugin
+- [x] Milestone 8: startup-only registration and versioned ring handshake.
+- [x] Milestone 9: asynchronous command/completion ring hot path.
+- [x] Milestone 10: dynamic allocation and recoverable errors over rings.
+- [x] Milestone 11: compatibility fixtures built from older generated plugin
   artifacts.
-- [ ] Milestone 12: ring-versus-RPC benchmark and removal of per-call RPC.
+- [x] Milestone 12: ring-versus-RPC benchmark and removal of per-call RPC.
 
 ### Milestone 1
 

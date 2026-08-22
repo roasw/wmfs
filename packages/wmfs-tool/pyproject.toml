@@ -15,6 +15,7 @@ wmfs-tool = "wmfs_tool.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["wmfs_tool*"]
+exclude = ["wmfs_tool.__pycache__"]
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0+gunknown"

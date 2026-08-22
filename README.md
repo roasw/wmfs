@@ -4,9 +4,10 @@ Documentation: <https://roasw.github.io/wmfs/>
 
 `wmfs` is a prototype scientific-computing runtime for transparently running
 selected Python function calls in isolated worker processes. Its low-latency
-path uses a C++20 runtime bound with nanobind, Cap'n Proto C++ RPC, shared CPU
-tensors, and an independently deployed C++ worker linked to its own LibTorch
-environment.
+path uses startup-only Cap'n Proto control, asynchronous command/completion
+rings, shared CPU tensors, and an independently deployed C++ worker linked to
+its own LibTorch environment. Ordinary Python calls remain synchronous and
+return tensor results; asynchronous submissions are private runtime machinery.
 
 ## Development Build
 
@@ -64,9 +65,14 @@ builds.
 `just test` and `just test-all` build once and run every test layer. Use
 `just test-unit`, `just test-contract`, `just test-integration`, `just test-sdk`,
 `just test-native`, or `just test-package` to run one layer independently.
+Package unit tests live beside their distribution under `packages/*/tests`;
+cross-package and worker-process tests live in `tests/integration`; native C++
+tests live in `tests/cpp` and run through CTest. `just test-tool` tests the
+independent compiler, while `just package-tool` builds only its Nix package.
 
-The worker is normally launched by the runtime with private RPC and FD-passing
-descriptors; `--help` only verifies the executable outside an invocation.
+The worker is normally launched by the runtime with private startup/control,
+ring, and FD-passing descriptors; `--help` only verifies the executable outside
+an invocation.
 
 ## Documentation
 
@@ -198,10 +204,17 @@ kernels do not receive runtime object-store, mapping-cache, RPC, memfd, or
 allocator internals. The reference Python worker under `plugins/reference`
 demonstrates the complete adapter.
 
-Plugin deployment metadata identifies a worker module and its Cap'n Proto
-schema. Operation signatures, numeric IDs, and known output shape/dtype
-expressions are declared once in the schema and discovered over RPC when the
-plugin is registered:
+Plugin authors declare operation signatures, numeric IDs, access, and output
+shape/dtype expressions in `interface.toml`, then commit deterministic artifacts:
+
+```console
+wmfs-tool generate --interface interface.toml --output generated
+wmfs-tool generate --interface interface.toml --output generated --check
+```
+
+The generated manifest is read before worker launch. Startup validates metadata,
+the ring handshake, and the worker environment once; operation calls use rings,
+not per-operation Cap'n Proto discovery or RPC:
 
 ```python
 from pathlib import Path
@@ -257,8 +270,8 @@ operations participate in registration and validation but are omitted from
 
 The runtime can move a contiguous CPU tensor into runtime-owned memfd storage.
 Workers receive a read-only descriptor through `SCM_RIGHTS`, map it once, and
-construct a Torch view from the mapped memory. Cap'n Proto carries only tensor
-metadata; numerical payload bytes never enter the RPC message.
+construct a Torch view from the mapped memory. Fixed-width ring descriptors
+carry tensor metadata; numerical payload bytes never enter the control plane.
 
 Use `wmfs.empty`, `wmfs.zeros`, `wmfs.ones`, or `wmfs.randn` after selecting the
 isolated backend to allocate and initialize inputs directly in shared storage.
@@ -341,10 +354,12 @@ runtime.configure_control("native")  # or "python"
 runtime.discover_plugins(Path("plugins"))
 ```
 
-The native session owns synchronous Cap'n Proto/KJ dispatch and SCM_RIGHTS
-mapping control on a dedicated C++ thread. The Python layer remains the public
-Torch API and evaluates output metadata. Neither the native extension nor the
-main process loads the worker or links against the worker's Torch runtime.
+Cap'n Proto is restricted to startup metadata, environment, compatibility, and
+shutdown control. The native session submits operations asynchronously to the
+command ring and consumes completion records on a dedicated dispatcher; the
+Python layer waits internally and preserves the synchronous Torch API. FD
+mapping control remains on the `SCM_RIGHTS` channel. Neither the native extension
+nor the main process loads the worker or links against the worker's Torch runtime.
 Selecting isolated execution does not load the optional bundled extension;
 applications that previously invoked bundled code have already opted out of
 process-level plugin isolation for that code.
@@ -358,8 +373,8 @@ package for comparison and fallback testing.
 
 `matmul`, `svd`, and `add_scalar` expose the same public API in local and
 isolated modes. The current prototype supports contiguous CPU tensors and
-serializes calls within each worker. Repeated calls reuse the persistent RPC
-connection and cached arena or read-only pooled mappings.
+supports multiple in-flight ring submissions per worker. Repeated calls reuse
+the established rings and cached arena or read-only pooled mappings.
 
 Like PyTorch, these operations accept an optional `out=` argument. Local mode
 accepts an ordinary compatible Torch tensor. Isolated mode requires a live
@@ -399,8 +414,8 @@ nix flake check ./environments/nixos-25.05
 ```
 
 The check confirms the runtime and worker report different glibc versions and
-then executes an isolated tensor operation through Cap'n Proto and shared
-memory. It also verifies that plugin modules and native libraries from the old
+then executes an isolated tensor operation through the rings and shared memory.
+It also verifies that plugin modules and native libraries from the old
 worker closure are not loaded into the main process. Enter the old worker
 development shell with:
 
@@ -441,7 +456,8 @@ cleanup-inclusive throughput includes per-call result destruction and
 reclamation when outputs are not reused. These are deliberately distinct
 boundaries and neither measurement is batched.
 
-Separate diagnostics report worker startup, RPC-only round trips, shared-memory
+Separate diagnostics report worker startup, ring round trips, the retained
+Cap'n Proto startup/control ping baseline, shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
 cached mapping checks, and runtime-owned output allocation. Input preparation
 includes memfd allocation, the runtime mapping and Torch view, and the ingress
@@ -456,9 +472,10 @@ associated invocation, so adding components does not reconstruct end-to-end
 time.
 
 Profiled invocations additionally separate scalar binding, output-plan
-evaluation, C++ queue wait, RPC, worker input/output view construction, worker
-dispatch, and kernel execution. The JSON report groups diagnostics by
-provenance: Python frontend, RPC/control, mapping/transport, allocation,
+evaluation, local submission queue and enqueue, capacity backpressure, worker
+wakeup and queue, input/output view construction, kernel execution, completion
+wakeup, and result materialization. The JSON report groups diagnostics by
+provenance: Python frontend, ring/control, mapping/transport, allocation,
 reclamation, or kernel. Remaining Python work, including access reservation,
 descriptor assembly, reusable-output validation, and result wrapping, stays in
 isolated call latency but has no synthetic "bookkeeping" timer: the nested
@@ -469,12 +486,11 @@ cache of validated tensor views. Moving the worker control plane and view
 construction to C++ reduced the remaining Python worker scheduling overhead.
 Ordinary calls leave profiling disabled.
 
-Protocol v7 uses separate ordinary and profiled RPC methods, so ordinary calls
-carry no metrics result. The native session caches value-only tensor descriptors
-and uses an allocation-free synchronous handoff to its thread-affine KJ event
-loop. At this point process scheduling and the required RPC completion dominate
-cheap calls; larger improvements require output reuse, batching, or changing the
-eager execution model.
+Ring profiling is enabled only on benchmark/profile records, so ordinary calls
+do not populate timestamps. The native session caches value-only tensor
+descriptors. Process scheduling and ring wakeups dominate cheap calls; larger
+improvements require output reuse, batching, or changing the eager execution
+model.
 
 Use the three backends as controlled comparisons on the same machine, build,
 dtype, thread count, operation shape, warmup, and iteration count. Local versus
@@ -491,7 +507,7 @@ C++ merely because it is on the call path. Move one only after an opt-in profile
 repeatedly identifies that named boundary as material to end-to-end latency for
 a representative workload and a prototype demonstrates improvement beyond
 run-to-run spread. Treat already-small components as a reason to stop: optimize
-mapping, allocation/reclamation, RPC scheduling, output reuse, or kernels when
+mapping, allocation/reclamation, ring scheduling, output reuse, or kernels when
 their own measurements dominate. There is intentionally no absolute or
 percentage latency gate; reports inform a deployment tradeoff rather than a
 pass/fail performance test.
@@ -514,10 +530,10 @@ all underlying options. Packaged reference benchmarks require bundled plugin
 support and fail with a direct error when it is absent; source-tree smoke tests
 must explicitly inject a substitute backend or skip. The output allocation
 service metric measures
-metadata-driven runtime allocation and output mapping before the single
-operation RPC. Lazy page faults remain part of isolated end-to-end time.
+metadata-driven runtime allocation and output mapping before command-ring
+publication. Lazy page faults remain part of isolated end-to-end time.
 The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) and
-[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 9 report shape
+[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 10 report shape
 but contain no fabricated samples until the packaged reference benchmark is
 rerun. [`benchmarks/README.md`](benchmarks/README.md) links the retained schema 5
 measurements and summarizes their historical primary results.

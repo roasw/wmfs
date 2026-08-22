@@ -295,7 +295,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     COMPONENT reference-worker
   )
   install(
-    FILES plugins/reference/generated/manifest.json
+    DIRECTORY plugins/reference/generated/
     DESTINATION share/wmfs/plugins/reference/generated
     COMPONENT reference-worker
   )

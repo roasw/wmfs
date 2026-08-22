@@ -29,13 +29,33 @@
         inherit self;
         lib = nixpkgs.lib;
       };
+      source = builtins.path {
+        path = ./.;
+        name = "wmfs-source";
+        filter =
+          path: type:
+          let
+            name = baseNameOf path;
+          in
+          !(
+            type == "directory"
+            && builtins.elem name [
+              ".git"
+              ".pytest_cache"
+              "__pycache__"
+              "build"
+              "output"
+            ]
+          )
+          && !(type == "regular" && nixpkgs.lib.hasSuffix ".pyc" name);
+      };
     in
     {
       packages = forSystems (
         system:
         import ./nix/packages.nix {
           pkgs = pkgsFactory system nixpkgs;
-          source = ./.;
+          inherit source;
           inherit versions;
         }
       );
@@ -46,7 +66,7 @@
           gitHooks = git-hooks.lib.${system};
           packages = self.packages.${system};
           pkgs = pkgsFactory system nixpkgs;
-          source = ./.;
+          inherit source;
           inherit versions;
         }
       );
@@ -79,6 +99,7 @@
               !(builtins.elem (pkgs.lib.getName dependency) [
                 "wmfs"
                 "wmfs-plugin"
+                "wmfs-tool"
                 "wmfs-reference"
               ])
             ) dependencies;
@@ -122,11 +143,12 @@
               python_version="0.0.0+g$revision''${dirty_suffix:+.dirty}"
               export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS="$python_version"
               export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_PLUGIN="$python_version"
+              export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_TOOL="$python_version"
               export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS_REFERENCE="$python_version"
               export WMFS_BUILD_TYPE="''${WMFS_BUILD_TYPE:-Debug}"
               development_output="$repo_root/output/$WMFS_BUILD_TYPE"
               export PATH="$development_output/bin:$PATH"
-              export PYTHONPATH="$development_output:$repo_root/packages/wmfs:$repo_root/packages/wmfs-plugin''${PYTHONPATH:+:$PYTHONPATH}"
+              export PYTHONPATH="$development_output:$repo_root/packages/wmfs:$repo_root/packages/wmfs-plugin:$repo_root/packages/wmfs-tool''${PYTHONPATH:+:$PYTHONPATH}"
             '';
           };
         }
