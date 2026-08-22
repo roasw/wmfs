@@ -164,9 +164,11 @@ async def _serve(
     finally:
         server.close()
         stream.close()
+        command_ring.interrupt()
+        completion_ring.interrupt()
+        ring_thread.join(timeout=5)
         command_ring.close()
         completion_ring.close()
-        ring_thread.join(timeout=5)
         fd_receiver.close()
         mapped_buffers.close()
 
