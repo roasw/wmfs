@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Contributing Documentation &#8212; WMFS ce493f132d49</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <script src="_static/documentation_options.js?v=cbf29fbe"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="C++ API Reference" href="api/cpp.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="contributing-documentation">
+<h1>Contributing Documentation<a class="headerlink" href="#contributing-documentation" title="Link to this heading">¶</a></h1>
+<p>WMFS uses one documentation pipeline and two source-comment conventions.</p>
+<section id="python">
+<h2>Python<a class="headerlink" href="#python" title="Link to this heading">¶</a></h2>
+<p>Write Google-style docstrings on public modules, classes, methods, and functions.
+Describe behavior and ownership constraints rather than restating type hints.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">operation</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">enabled</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Apply the operation.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        value: Input tensor. The function does not mutate it.</span>
+<span class="sd">        enabled: Whether to apply the transformation.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        The transformed tensor.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        ValueError: If the input shape is unsupported.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="c">
+<h2>C++<a class="headerlink" href="#c" title="Link to this heading">¶</a></h2>
+<p>Write Doxygen comments on public declarations under <code class="docutils literal notranslate"><span class="pre">inc/wmfs</span></code>. Use <code class="docutils literal notranslate"><span class="pre">&#64;brief</span></code>,
+<code class="docutils literal notranslate"><span class="pre">&#64;param</span></code>, <code class="docutils literal notranslate"><span class="pre">&#64;return</span></code>, and <code class="docutils literal notranslate"><span class="pre">&#64;throws</span></code> where they add information. Ownership and
+thread-safety guarantees belong in the class or function comment.</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">/// @brief Duplicate the descriptor with close-on-exec enabled.</span>
+<span class="c1">/// @param minimum Lowest descriptor number accepted by `fcntl`.</span>
+<span class="c1">/// @return An owning descriptor.</span>
+<span class="c1">/// @throws std::system_error if duplication fails.</span>
+<span class="n">UniqueFd</span><span class="w"> </span><span class="nf">duplicate_cloexec</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">minimum</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+</pre></div>
+</div>
+</section>
+<section id="architecture-guides">
+<h2>Architecture Guides<a class="headerlink" href="#architecture-guides" title="Link to this heading">¶</a></h2>
+<p>Use MyST Markdown under <code class="docutils literal notranslate"><span class="pre">docs</span></code>. Prefer <code class="docutils literal notranslate"><span class="pre">literalinclude</span></code> for implementation
+snippets so examples stay synchronized with source code. Run <code class="docutils literal notranslate"><span class="pre">just</span> <span class="pre">doc</span></code>; Sphinx
+warnings and Doxygen documentation errors fail the build.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data-flow.html">Data Flow And Reading Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/python.html">Python API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/cpp.html">C++ API Reference</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Contributing Documentation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#python">Python</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#c">C++</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#architecture-guides">Architecture Guides</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="api/cpp.html" title="previous chapter">C++ API Reference</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/contributing-docs.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

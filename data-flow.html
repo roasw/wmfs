@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Data Flow And Reading Guide &#8212; WMFS ce493f132d49</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <script src="_static/documentation_options.js?v=cbf29fbe"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Python API Reference" href="api/python.html" />
+    <link rel="prev" title="Getting Started" href="getting-started.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="data-flow-and-reading-guide">
+<h1>Data Flow And Reading Guide<a class="headerlink" href="#data-flow-and-reading-guide" title="Link to this heading">¶</a></h1>
+<p>This guide follows the <code class="docutils literal notranslate"><span class="pre">matmul(a,</span> <span class="pre">b)</span></code> call in the introductory script through
+the native isolated path. The Python-control worker follows the same planning
+and memory model, but performs Cap’n Proto calls with pycapnp instead of the
+native session extension.</p>
+<section id="end-to-end-flow">
+<h2>End-To-End Flow<a class="headerlink" href="#end-to-end-flow" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>user script
+  -&gt; wmfs.__getattr__(&quot;matmul&quot;)
+  -&gt; generation-bound operation callable
+  -&gt; Runtime.invoke
+  -&gt; IsolatedBackend.invoke
+  -&gt; bind_invocation / BufferManager
+  -&gt; NativeWorkerSession or WorkerSession
+  -&gt; batched SCM_RIGHTS mapping control
+  -&gt; Cap&#39;n Proto invokeKnown RPC
+  -&gt; ReferenceServer::run_known
+  -&gt; MappedBufferCache tensor views
+  -&gt; generated operation adapter
+  -&gt; reference numerical kernel
+  -&gt; shared output tensor returned to Python
+</pre></div>
+</div>
+<section id="public-call">
+<h3>1. Public Call<a class="headerlink" href="#public-call" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">wmfs.__getattr__</span></code> publishes only operations present in the live runtime
+catalog. The returned function records the catalog generation and forwards
+ordinary Python arguments to the selected runtime.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="fm">__getattr__</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;__version__&quot;</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">importlib.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">version</span>
+
+        <span class="k">return</span> <span class="n">version</span><span class="p">(</span><span class="s2">&quot;wmfs&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_resolve_dynamic_operation</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;module </span><span class="si">{</span><span class="vm">__name__</span><span class="si">!r}</span><span class="s2"> has no attribute </span><span class="si">{</span><span class="n">name</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Read next:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/__init__.py</span></code>: dynamic operation publication.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/api.py</span></code>: static backend-aware tensor constructors.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/runtime.py</span></code>, <code class="docutils literal notranslate"><span class="pre">Runtime.invoke</span></code>: lifecycle-safe backend
+selection and accepted-work accounting.</p></li>
+</ul>
+</section>
+<section id="backend-and-autograd-routing">
+<h3>2. Backend And Autograd Routing<a class="headerlink" href="#backend-and-autograd-routing" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">IsolatedBackend.invoke</span></code> resolves the operation’s plugin metadata. Calls that
+need gradients are wrapped by the generic VJP bridge; other calls dispatch
+directly to the retained plugin session.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>    <span class="k">def</span><span class="w"> </span><span class="nf">invoke</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">operation</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="o">/</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="nb">object</span><span class="p">,</span>
+        <span class="n">out</span><span class="p">:</span> <span class="nb">object</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="nb">object</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">plugin_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_registry</span><span class="o">.</span><span class="n">plugin_for_operation</span><span class="p">(</span><span class="n">operation</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown operation </span><span class="si">{</span><span class="n">operation</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="kc">None</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_registry</span><span class="o">.</span><span class="n">operation</span><span class="p">(</span><span class="n">operation</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">metadata</span><span class="o">.</span><span class="n">internal</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Operation </span><span class="si">{</span><span class="n">operation</span><span class="si">!r}</span><span class="s2"> is internal to its plugin&quot;</span><span class="p">)</span>
+        <span class="n">tensor_inputs</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">item</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">args</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">))</span>
+        <span class="n">autograd_requested</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_grad_enabled</span><span class="p">()</span> <span class="ow">and</span> <span class="nb">any</span><span class="p">(</span>
+            <span class="n">item</span><span class="o">.</span><span class="n">requires_grad</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">tensor_inputs</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">autograd_requested</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">out</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Isolated out does not support autograd inputs&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">metadata</span><span class="o">.</span><span class="n">vjp</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Isolated operation </span><span class="si">{</span><span class="n">operation</span><span class="si">!r}</span><span class="s2"> does not advertise a VJP&quot;</span>
+                <span class="p">)</span>
+            <span class="n">vjp_operation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_registry</span><span class="o">.</span><span class="n">operation_by_id</span><span class="p">(</span>
+                <span class="n">plugin_name</span><span class="p">,</span> <span class="n">metadata</span><span class="o">.</span><span class="n">vjp</span><span class="o">.</span><span class="n">operation_id</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="n">invoke_with_vjp</span><span class="p">(</span>
+                <span class="bp">self</span><span class="p">,</span>
+                <span class="n">plugin_name</span><span class="p">,</span>
+                <span class="n">metadata</span><span class="p">,</span>
+                <span class="n">vjp_operation</span><span class="p">,</span>
+                <span class="n">args</span><span class="p">,</span>
+                <span class="n">kwargs</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_invoke_plugin</span><span class="p">(</span><span class="n">plugin_name</span><span class="p">,</span> <span class="n">metadata</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="n">out</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Read next:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/backends/isolated.py</span></code>: plugin/session ownership and
+concurrent close behavior.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/autograd.py</span></code>, <code class="docutils literal notranslate"><span class="pre">invoke_with_vjp</span></code>: the custom PyTorch
+autograd edge and backward RPC.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/wmfs_plugin/metadata.py</span></code>: canonical operation and VJP
+declarations, validation, and fingerprints.</p></li>
+</ul>
+</section>
+<section id="invocation-planning">
+<h3>3. Invocation Planning<a class="headerlink" href="#invocation-planning" title="Link to this heading">¶</a></h3>
+<p>The transport-neutral planner binds tensor and scalar arguments, applies access
+metadata, computes output shape/dtype plans, and validates reusable <code class="docutils literal notranslate"><span class="pre">out=</span></code>
+tensors. Python and native control paths consume the same plan.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">bind_invocation</span><span class="p">(</span>
+    <span class="n">operation</span><span class="p">:</span> <span class="n">OperationMetadata</span><span class="p">,</span>
+    <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">],</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">object</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">collect_metrics</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BoundInvocation</span><span class="p">:</span>
+    <span class="n">tensors</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">item</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">args</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">tensors</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">operation</span><span class="o">.</span><span class="n">tensor_inputs</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Operation </span><span class="si">{</span><span class="n">operation</span><span class="o">.</span><span class="n">name</span><span class="si">!r}</span><span class="s2"> expected &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">operation</span><span class="o">.</span><span class="n">tensor_inputs</span><span class="p">)</span><span class="si">}</span><span class="s2"> tensor inputs&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="p">(</span>
+        <span class="n">out</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="ow">and</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_grad_enabled</span><span class="p">()</span>
+        <span class="ow">and</span> <span class="nb">any</span><span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">requires_grad</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">tensors</span><span class="p">)</span>
+    <span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Isolated out does not support autograd inputs&quot;</span><span class="p">)</span>
+    <span class="n">scalar_start</span> <span class="o">=</span> <span class="n">perf_counter_ns</span><span class="p">()</span> <span class="k">if</span> <span class="n">collect_metrics</span> <span class="k">else</span> <span class="mi">0</span>
+    <span class="n">scalars</span> <span class="o">=</span> <span class="n">bind_scalars</span><span class="p">(</span><span class="n">operation</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">scalar_binding_ns</span> <span class="o">=</span> <span class="n">perf_counter_ns</span><span class="p">()</span> <span class="o">-</span> <span class="n">scalar_start</span> <span class="k">if</span> <span class="n">collect_metrics</span> <span class="k">else</span> <span class="mi">0</span>
+    <span class="k">return</span> <span class="n">BoundInvocation</span><span class="p">(</span>
+        <span class="n">operation</span><span class="o">=</span><span class="n">operation</span><span class="p">,</span>
+        <span class="n">tensor_inputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span>
+            <span class="n">BoundTensorInput</span><span class="p">(</span><span class="n">tensor</span><span class="p">,</span> <span class="n">parameter</span><span class="o">.</span><span class="n">access</span> <span class="o">==</span> <span class="s2">&quot;readWrite&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">parameter</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">tensors</span><span class="p">,</span> <span class="n">operation</span><span class="o">.</span><span class="n">tensor_inputs</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="p">),</span>
+        <span class="n">scalars</span><span class="o">=</span><span class="n">scalars</span><span class="p">,</span>
+        <span class="n">out</span><span class="o">=</span><span class="n">out</span><span class="p">,</span>
+        <span class="n">scalar_binding_ns</span><span class="o">=</span><span class="n">scalar_binding_ns</span><span class="p">,</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+<p>Read next:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/invocation.py</span></code>: binding, access reservation, ingress
+sharing, output planning, and common metrics.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/output_metadata.py</span></code>: evaluates schema-derived output
+shape and dtype expressions.</p></li>
+</ul>
+</section>
+<section id="runtime-owned-shared-memory">
+<h3>4. Runtime-Owned Shared Memory<a class="headerlink" href="#runtime-owned-shared-memory" title="Link to this heading">¶</a></h3>
+<p>WMFS tensor constructors and known outputs call <code class="docutils literal notranslate"><span class="pre">BufferManager.empty</span></code> to
+allocate either a pooled <code class="docutils literal notranslate"><span class="pre">memfd</span></code> region or an arena subrange, then create a Torch
+view directly over that storage. Unmanaged CPU tensors from ordinary Torch
+constructors are copied once into the same runtime-owned contiguous storage.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>    <span class="k">def</span><span class="w"> </span><span class="nf">from_tensor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ManagedTensor</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">tensor</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">type</span> <span class="o">!=</span> <span class="s2">&quot;cpu&quot;</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Only CPU tensors can be moved into shared memory&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">tensor</span><span class="o">.</span><span class="n">layout</span> <span class="o">!=</span> <span class="n">torch</span><span class="o">.</span><span class="n">strided</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Only strided tensors can be moved into shared memory&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">stride</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="k">for</span> <span class="n">stride</span> <span class="ow">in</span> <span class="n">tensor</span><span class="o">.</span><span class="n">stride</span><span class="p">()):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Negative tensor strides are not supported&quot;</span><span class="p">)</span>
+        <span class="n">managed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">tensor</span><span class="o">.</span><span class="n">shape</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">tensor</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">managed</span><span class="o">.</span><span class="n">tensor</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span><span class="n">tensor</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">managed</span>
+</pre></div>
+</div>
+<p>Read next:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/memory/buffers.py</span></code>, <code class="docutils literal notranslate"><span class="pre">BufferManager.empty</span></code>: allocation,
+storage leases, generations, and pool ownership.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BufferManager.reserve_access</span></code>: read/write scheduling for aliases.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BufferManager.collect</span></code>: grouped worker retirement, generation advancement,
+pooling, and reclamation instrumentation.</p></li>
+</ul>
+</section>
+<section id="mapping-and-rpc-dispatch">
+<h3>5. Mapping And RPC Dispatch<a class="headerlink" href="#mapping-and-rpc-dispatch" title="Link to this heading">¶</a></h3>
+<p>The selected session batches all required mappings. Cap’n Proto carries buffer
+IDs, generations, tensor metadata, operation IDs, and scalar values. Tensor
+payload bytes never enter the RPC message.</p>
+<p>Important implementations:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/native_worker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">NativeWorkerSession</span></code>:
+Python orchestration around the nanobind native control path.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">Session::map_buffers</span></code> and <code class="docutils literal notranslate"><span class="pre">Session::invoke</span></code>:
+synchronous KJ RPC and batched <code class="docutils literal notranslate"><span class="pre">SCM_RIGHTS</span></code> control.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/worker_process.py</span></code>, <code class="docutils literal notranslate"><span class="pre">WorkerSession</span></code>: equivalent
+Python/pycapnp control path.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/fd_broker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">FdSender.ensure_mapped_many</span></code>:
+Python batched FD sender.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp</span></code>: operation RPC
+and metadata protocol.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/tensor.capnp</span></code>: tensor and
+batched buffer-transfer descriptors.</p></li>
+</ul>
+</section>
+<section id="worker-views-and-kernel-dispatch">
+<h3>6. Worker Views And Kernel Dispatch<a class="headerlink" href="#worker-views-and-kernel-dispatch" title="Link to this heading">¶</a></h3>
+<p>The C++ worker receives FDs on its control socket and caches mappings by buffer
+generation. ATen storage captures shared mapped-region ownership, so retained
+tensor aliases remain valid after cache retirement. The RPC thread constructs
+views, invokes a generated transport adapter, and calls handwritten numerical
+kernels.</p>
+<p>Read in this order:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/reference_worker.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">ReferenceServer::run_known</span></code>: RPC request scope,
+view construction, profiling, and dispatch.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/reference_mapped_buffers.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">MappedBufferCache::tensor</span></code>: descriptor
+validation and zero-copy ATen views.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">plugins/reference/generated/reference_dispatch.inc</span></code>: generated operation ID
+and scalar adaptation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/reference_kernels.cpp</span></code>: transport-independent numerical kernels.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">inc/wmfs/reference/kernels.hpp</span></code>: documented native kernel API.</p></li>
+</ol>
+<p>The Python worker equivalents are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/wmfs_plugin/worker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">_invoke_known</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/wmfs_plugin/invocation.py</span></code>, <code class="docutils literal notranslate"><span class="pre">InvocationContext</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">plugins/reference/wmfs_reference/_generated.py</span></code>: generated adapters.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">plugins/reference/wmfs_reference/kernels.py</span></code>: ordinary Torch kernels.</p></li>
+</ul>
+</section>
+<section id="return-and-reclamation">
+<h3>7. Return And Reclamation<a class="headerlink" href="#return-and-reclamation" title="Link to this heading">¶</a></h3>
+<p>The worker writes directly into output mappings allocated by the runtime. The
+RPC response contains only completion status and optional metrics. Python
+returns the preallocated managed Torch tensor. Releasing its last storage alias
+queues the allocation for later collection. Collection retires worker mappings
+in batches. In pooled mode it resets the whole region, advances its generation,
+and places it in the size-matched pool; in arena mode it returns and coalesces
+the allocation’s subrange without recycling the arena mapping.</p>
+</section>
+</section>
+<section id="local-and-bundled-differences">
+<h2>Local And Bundled Differences<a class="headerlink" href="#local-and-bundled-differences" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LocalBackend.invoke</span></code> calls PyTorch directly and bypasses shared memory and
+RPC.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BundledBackend.invoke</span></code> calls the same C++ reference kernels in process through
+<code class="docutils literal notranslate"><span class="pre">wmfs._bundled</span></code>, bypassing shared memory and RPC.</p></li>
+<li><p>Comparing isolated against bundled in <code class="docutils literal notranslate"><span class="pre">wmfs-benchmark</span></code> most directly measures
+process-isolation overhead for the same native kernels.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Data Flow And Reading Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#end-to-end-flow">End-To-End Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#local-and-bundled-differences">Local And Bundled Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/python.html">Python API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/cpp.html">C++ API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing-docs.html">Contributing Documentation</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="getting-started.html" title="previous chapter">Getting Started</a></li>
+      <li>Next: <a href="api/python.html" title="next chapter">Python API Reference</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/data-flow.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

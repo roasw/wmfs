@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Python API Reference &#8212; WMFS ce493f132d49</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <script src="../_static/documentation_options.js?v=cbf29fbe"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="C++ API Reference" href="cpp.html" />
+    <link rel="prev" title="Data Flow And Reading Guide" href="../data-flow.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="python-api-reference">
+<h1>Python API Reference<a class="headerlink" href="#python-api-reference" title="Link to this heading">¶</a></h1>
+<p>Python documentation is generated from source docstrings with Sphinx autodoc.
+Public docstrings use Google-style parameter and return sections.</p>
+<section id="user-api">
+<h2>User API<a class="headerlink" href="#user-api" title="Link to this heading">¶</a></h2>
+<p>Tensor constructors are static API members:</p>
+<dl class="py function" id="module-wmfs.api">
+<dt class="sig sig-object py" id="wmfs.api.empty">
+<span class="sig-prename descclassname"><span class="pre">wmfs.api.</span></span><span class="sig-name descname"><span class="pre">empty</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.api.empty" title="Link to this definition">¶</a></dt>
+<dd><p>Create an uninitialized tensor for the selected backend.</p>
+<p>Isolated execution allocates directly in runtime-owned shared memory.
+Local and bundled execution return ordinary Torch tensors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs.api.zeros">
+<span class="sig-prename descclassname"><span class="pre">wmfs.api.</span></span><span class="sig-name descname"><span class="pre">zeros</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.api.zeros" title="Link to this definition">¶</a></dt>
+<dd><p>Create a zero-filled tensor for the selected backend.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs.api.ones">
+<span class="sig-prename descclassname"><span class="pre">wmfs.api.</span></span><span class="sig-name descname"><span class="pre">ones</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.api.ones" title="Link to this definition">¶</a></dt>
+<dd><p>Create a one-filled tensor for the selected backend.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs.api.randn">
+<span class="sig-prename descclassname"><span class="pre">wmfs.api.</span></span><span class="sig-name descname"><span class="pre">randn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">generator</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.api.randn" title="Link to this definition">¶</a></dt>
+<dd><p>Create a normal random tensor for the selected backend.</p>
+<p>Isolated execution initializes the tensor directly in shared storage,
+avoiding the ingress copy required for an ordinary Torch allocation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+<li><p><strong>generator</strong> (<em>Generator</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Plugin operations are dynamic attributes of <code class="docutils literal notranslate"><span class="pre">wmfs</span></code>. They become available only
+after <code class="docutils literal notranslate"><span class="pre">Runtime.discover_plugins</span></code> publishes worker metadata or after an
+in-process backend is explicitly selected. The reference plugin publishes:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">wmfs</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">svd</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">add_scalar</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Other plugins publish their own schema-declared operation names; internal
+operations are never exposed as module attributes.</p>
+</section>
+<section id="runtime">
+<h2>Runtime<a class="headerlink" href="#runtime" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs.runtime.</span></span><span class="sig-name descname"><span class="pre">Runtime</span></span><a class="headerlink" href="#wmfs.runtime.Runtime" title="Link to this definition">¶</a></dt>
+<dd><p>Discover plugins and dispatch operations to an execution backend.</p>
+<p><code class="docutils literal notranslate"><span class="pre">close()</span></code> waits for invocations and discovery accepted before closing,
+rejects invocations while closing, and then restores constructor defaults.
+The runtime can be configured and used again after close returns.</p>
+<p>Returned managed tensors remain valid after close until their final Torch
+storage alias is released.</p>
+<dl class="field-list simple">
+</dl>
+<dl class="py property">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.backend_name">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">backend_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#wmfs.runtime.Runtime.backend_name" title="Link to this definition">¶</a></dt>
+<dd><p>Return the currently selected execution backend.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.operation_names">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">operation_names</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#wmfs.runtime.Runtime.operation_names" title="Link to this definition">¶</a></dt>
+<dd><p>Return operations published by discovery or the selected backend.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.plugin_names">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">plugin_names</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#wmfs.runtime.Runtime.plugin_names" title="Link to this definition">¶</a></dt>
+<dd><p>Return discovered plugin API namespaces.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.qualified_operation_names">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">qualified_operation_names</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#wmfs.runtime.Runtime.qualified_operation_names" title="Link to this definition">¶</a></dt>
+<dd><p>Return canonical plugin-qualified public operation names.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.resolve_operation">
+<span class="sig-name descname"><span class="pre">resolve_operation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.resolve_operation" title="Link to this definition">¶</a></dt>
+<dd><p>Resolve a visible operation and its discovered metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<em>str</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple[int, <a class="reference internal" href="#wmfs_plugin.metadata.OperationMetadata" title="wmfs_plugin.metadata.OperationMetadata"><em>OperationMetadata</em></a> | None]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.operation_metadata">
+<span class="sig-name descname"><span class="pre">operation_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.operation_metadata" title="Link to this definition">¶</a></dt>
+<dd><p>Return registered metadata for an operation name.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<em>str</em>) – Registered operation name.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>KeyError</strong> – If no operation with <code class="docutils literal notranslate"><span class="pre">name</span></code> is registered.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#wmfs_plugin.metadata.OperationMetadata" title="wmfs_plugin.metadata.OperationMetadata"><em>OperationMetadata</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.discover_plugins">
+<span class="sig-name descname"><span class="pre">discover_plugins</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">plugin_directories</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.discover_plugins" title="Link to this definition">¶</a></dt>
+<dd><p>Discover plugins and retain one validated worker session per plugin.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>*plugin_directories</strong> (<em>Path</em>) – Directories containing plugin manifests or
+subdirectories with manifests.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError</strong> – If metadata or a manifest is inconsistent.</p></li>
+<li><p><strong>RuntimeError</strong> – If the runtime is closing or a worker cannot start.</p></li>
+</ul>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.configure_memory">
+<span class="sig-name descname"><span class="pre">configure_memory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'pooled'</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">arena_bytes</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.configure_memory" title="Link to this definition">¶</a></dt>
+<dd><p>Configure isolated shared memory before plugin discovery.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>mode</strong> (<em>str</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;pooled&quot;</span></code> for per-buffer capabilities or <code class="docutils literal notranslate"><span class="pre">&quot;arena&quot;</span></code> for
+one trusted persistent mapping.</p></li>
+<li><p><strong>arena_bytes</strong> (<em>int</em><em> | </em><em>None</em>) – Arena capacity. Ignored in pooled mode.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.configure_control">
+<span class="sig-name descname"><span class="pre">configure_control</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'auto'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.configure_control" title="Link to this definition">¶</a></dt>
+<dd><p>Select the isolated control path before plugin discovery.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>mode</strong> (<em>str</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;native&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;python&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;auto&quot;</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.configure_deadlines">
+<span class="sig-name descname"><span class="pre">configure_deadlines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">startup</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">request</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fd_transfer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shutdown</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kill_grace</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">30.0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.configure_deadlines" title="Link to this definition">¶</a></dt>
+<dd><p>Configure isolated transport deadlines before plugin discovery.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>startup</strong> (<em>float</em>) – Worker startup and handshake timeout in seconds.</p></li>
+<li><p><strong>request</strong> (<em>float</em>) – Operation RPC timeout in seconds.</p></li>
+<li><p><strong>fd_transfer</strong> (<em>float</em>) – Buffer-control acknowledgement timeout in seconds.</p></li>
+<li><p><strong>shutdown</strong> (<em>float</em>) – Graceful worker shutdown timeout in seconds.</p></li>
+<li><p><strong>kill_grace</strong> (<em>float</em>) – Timeout after termination before forcing a kill.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.use_backend">
+<span class="sig-name descname"><span class="pre">use_backend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.use_backend" title="Link to this definition">¶</a></dt>
+<dd><p>Select an available execution backend.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<em>str</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;local&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;bundled&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;isolated&quot;</span></code> when
+available.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.empty">
+<span class="sig-name descname"><span class="pre">empty</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.empty" title="Link to this definition">¶</a></dt>
+<dd><p>Create an uninitialized tensor using backend-appropriate storage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.zeros">
+<span class="sig-name descname"><span class="pre">zeros</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.zeros" title="Link to this definition">¶</a></dt>
+<dd><p>Create a zero-filled tensor using backend-appropriate storage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.ones">
+<span class="sig-name descname"><span class="pre">ones</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.ones" title="Link to this definition">¶</a></dt>
+<dd><p>Create a one-filled tensor using backend-appropriate storage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.randn">
+<span class="sig-name descname"><span class="pre">randn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">generator</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.randn" title="Link to this definition">¶</a></dt>
+<dd><p>Create a normal random tensor using backend-appropriate storage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>size</strong> (<em>int</em><em> | </em><em>Sequence</em><em>[</em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>dtype</strong> (<em>dtype</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em>)</p></li>
+<li><p><strong>generator</strong> (<em>Generator</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.invoke">
+<span class="sig-name descname"><span class="pre">invoke</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">operation</span></span></em>, <em class="sig-param"><span class="positional-only-separator o"><abbr title="Positional-only parameter separator (PEP 570)"><span class="pre">/</span></abbr></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.invoke" title="Link to this definition">¶</a></dt>
+<dd><p>Invoke an operation through the selected backend.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>operation</strong> (<em>str</em>) – Registered operation name.</p></li>
+<li><p><strong>*args</strong> (<em>object</em>) – Tensor and scalar operation arguments.</p></li>
+<li><p><strong>out</strong> (<em>object</em><em> | </em><em>None</em>) – Optional reusable output tensor or tuple.</p></li>
+<li><p><strong>**kwargs</strong> (<em>object</em>) – Named scalar operation arguments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A tensor or tuple of tensors declared by the operation metadata.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>object</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.invoke_registered">
+<span class="sig-name descname"><span class="pre">invoke_registered</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">operation</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">generation</span></span></em>, <em class="sig-param"><span class="positional-only-separator o"><abbr title="Positional-only parameter separator (PEP 570)"><span class="pre">/</span></abbr></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.invoke_registered" title="Link to this definition">¶</a></dt>
+<dd><p>Invoke a generation-bound dynamically published operation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>operation</strong> (<em>str</em>)</p></li>
+<li><p><strong>generation</strong> (<em>int</em>)</p></li>
+<li><p><strong>args</strong> (<em>object</em>)</p></li>
+<li><p><strong>out</strong> (<em>object</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>kwargs</strong> (<em>object</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>object</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.close">
+<span class="sig-name descname"><span class="pre">close</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.close" title="Link to this definition">¶</a></dt>
+<dd><p>Finish accepted work, release runtime resources, and reset state.</p>
+<p>The method is idempotent. It attempts every backend cleanup and raises
+the first cleanup failure after restoring constructor-equivalent state.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs.transport.deadlines.TransportDeadlines">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs.transport.deadlines.</span></span><span class="sig-name descname"><span class="pre">TransportDeadlines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">startup</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">request</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fd_transfer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">5.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shutdown</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kill_grace</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">30.0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.transport.deadlines.TransportDeadlines" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>startup</strong> (<em>float</em>)</p></li>
+<li><p><strong>request</strong> (<em>float</em>)</p></li>
+<li><p><strong>fd_transfer</strong> (<em>float</em>)</p></li>
+<li><p><strong>shutdown</strong> (<em>float</em>)</p></li>
+<li><p><strong>kill_grace</strong> (<em>float</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="plugin-sdk">
+<h2>Plugin SDK<a class="headerlink" href="#plugin-sdk" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.invocation.</span></span><span class="sig-name descname"><span class="pre">InvocationContext</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">operation</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">invocation_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outputs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scalars</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext" title="Link to this definition">¶</a></dt>
+<dd><p>Validated, operation-scoped values passed to a plugin handler.</p>
+<p>The context exposes only tensors and scalar values authorized by the
+operation metadata. It does not expose FDs, mappings, or the worker’s full
+buffer cache.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>operation</strong> (<a class="reference internal" href="#wmfs_plugin.metadata.OperationMetadata" title="wmfs_plugin.metadata.OperationMetadata"><em>OperationMetadata</em></a>)</p></li>
+<li><p><strong>invocation_id</strong> (<em>int</em>)</p></li>
+<li><p><strong>inputs</strong> (<em>tuple</em><em>[</em><em>Tensor</em><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>outputs</strong> (<em>tuple</em><em>[</em><em>Tensor</em><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>scalars</strong> (<em>tuple</em><em>[</em><em>object</em><em>, </em><em>...</em><em>]</em>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.operation">
+<span class="sig-name descname"><span class="pre">operation</span></span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.operation" title="Link to this definition">¶</a></dt>
+<dd><p>Canonical operation metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#wmfs_plugin.metadata.OperationMetadata" title="wmfs_plugin.metadata.OperationMetadata">wmfs_plugin.metadata.OperationMetadata</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.invocation_id">
+<span class="sig-name descname"><span class="pre">invocation_id</span></span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.invocation_id" title="Link to this definition">¶</a></dt>
+<dd><p>Runtime-generated invocation identifier.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.inputs">
+<span class="sig-name descname"><span class="pre">inputs</span></span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.inputs" title="Link to this definition">¶</a></dt>
+<dd><p>Ordered input tensor views.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[torch.Tensor, …]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.outputs">
+<span class="sig-name descname"><span class="pre">outputs</span></span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.outputs" title="Link to this definition">¶</a></dt>
+<dd><p>Ordered writable, runtime-owned output tensor views.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[torch.Tensor, …]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.scalars">
+<span class="sig-name descname"><span class="pre">scalars</span></span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.scalars" title="Link to this definition">¶</a></dt>
+<dd><p>Ordered decoded scalar arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple[object, …]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.input">
+<span class="sig-name descname"><span class="pre">input</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_or_index</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.input" title="Link to this definition">¶</a></dt>
+<dd><p>Return an input tensor by metadata name or positional index.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name_or_index</strong> (<em>str</em><em> | </em><em>int</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.output">
+<span class="sig-name descname"><span class="pre">output</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_or_index</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.output" title="Link to this definition">¶</a></dt>
+<dd><p>Return an output tensor by metadata name or positional index.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name_or_index</strong> (<em>str</em><em> | </em><em>int</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="wmfs_plugin.invocation.InvocationContext.scalar">
+<span class="sig-name descname"><span class="pre">scalar</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_or_index</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.invocation.InvocationContext.scalar" title="Link to this definition">¶</a></dt>
+<dd><p>Return a scalar argument by metadata name or positional index.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name_or_index</strong> (<em>str</em><em> | </em><em>int</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>object</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs_plugin.worker.worker_main">
+<span class="sig-prename descclassname"><span class="pre">wmfs_plugin.worker.</span></span><span class="sig-name descname"><span class="pre">worker_main</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">operations</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_planners</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.worker.worker_main" title="Link to this definition">¶</a></dt>
+<dd><p>Run a metadata-driven plugin worker on inherited transport descriptors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>operations</strong> (<em>Mapping</em><em>[</em><em>str</em><em>, </em><em>Callable</em><em>[</em><em>[</em><a class="reference internal" href="#wmfs_plugin.invocation.InvocationContext" title="wmfs_plugin.invocation.InvocationContext"><em>InvocationContext</em></a><em>]</em><em>, </em><em>None</em><em>]</em><em>]</em>) – Mapping from every declared operation name, including
+internal VJP operations, to an invocation-context handler.</p></li>
+<li><p><strong>output_planners</strong> (<em>Mapping</em><em>[</em><em>str</em><em>, </em><em>Callable</em><em>[</em><em>[</em><a class="reference internal" href="#wmfs_plugin.invocation.InvocationContext" title="wmfs_plugin.invocation.InvocationContext"><em>InvocationContext</em></a><em>]</em><em>, </em><em>Mapping</em><em>[</em><em>str</em><em>, </em><em>OutputSpec</em><em>]</em><em>]</em><em>] </em><em>| </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The worker entry point is launched by WMFS and receives its RPC socket,
+FD-control socket, schema, and interface through command-line options.</p>
+</div>
+</dd></dl>
+
+<dl class="py class" id="module-wmfs_plugin.metadata">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.TensorParameter">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">TensorParameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">access</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.TensorParameter" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<em>str</em>)</p></li>
+<li><p><strong>access</strong> (<em>str</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.ScalarParameter">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">ScalarParameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kind</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">required</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">default</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.ScalarParameter" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<em>str</em>)</p></li>
+<li><p><strong>kind</strong> (<em>str</em>)</p></li>
+<li><p><strong>required</strong> (<em>bool</em>)</p></li>
+<li><p><strong>default</strong> (<em>bool</em><em> | </em><em>float</em><em> | </em><em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.OutputPlan">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">OutputPlan</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">known</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">wmfs_plugin.metadata.KnownOutput</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.OutputPlan" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<em>str</em>)</p></li>
+<li><p><strong>known</strong> (<em>KnownOutput</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.VjpMetadata">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">VjpMetadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">operation_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">saved_inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">saved_outputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_cotangents</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_gradients</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scalar_parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.VjpMetadata" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>operation_id</strong> (<em>int</em>)</p></li>
+<li><p><strong>saved_inputs</strong> (<em>tuple</em><em>[</em><em>int</em><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>saved_outputs</strong> (<em>tuple</em><em>[</em><em>int</em><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>output_cotangents</strong> (<em>tuple</em><em>[</em><em>int</em><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>input_gradients</strong> (<em>tuple</em><em>[</em><em>int</em><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>scalar_parameters</strong> (<em>tuple</em><em>[</em><em>int</em><em>, </em><em>...</em><em>]</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.OperationMetadata">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">OperationMetadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tensor_inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#wmfs_plugin.metadata.TensorParameter" title="wmfs_plugin.metadata.TensorParameter"><span class="pre">wmfs_plugin.metadata.TensorParameter</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tensor_outputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#wmfs_plugin.metadata.TensorParameter" title="wmfs_plugin.metadata.TensorParameter"><span class="pre">wmfs_plugin.metadata.TensorParameter</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scalar_parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#wmfs_plugin.metadata.ScalarParameter" title="wmfs_plugin.metadata.ScalarParameter"><span class="pre">wmfs_plugin.metadata.ScalarParameter</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">operation_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_plans</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#wmfs_plugin.metadata.OutputPlan" title="wmfs_plugin.metadata.OutputPlan"><span class="pre">wmfs_plugin.metadata.OutputPlan</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vjp</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#wmfs_plugin.metadata.VjpMetadata" title="wmfs_plugin.metadata.VjpMetadata"><span class="pre">wmfs_plugin.metadata.VjpMetadata</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">internal</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.OperationMetadata" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<em>str</em>)</p></li>
+<li><p><strong>tensor_inputs</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#wmfs_plugin.metadata.TensorParameter" title="wmfs_plugin.metadata.TensorParameter"><em>TensorParameter</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>tensor_outputs</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#wmfs_plugin.metadata.TensorParameter" title="wmfs_plugin.metadata.TensorParameter"><em>TensorParameter</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>scalar_parameters</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#wmfs_plugin.metadata.ScalarParameter" title="wmfs_plugin.metadata.ScalarParameter"><em>ScalarParameter</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>operation_id</strong> (<em>int</em>)</p></li>
+<li><p><strong>output_plans</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#wmfs_plugin.metadata.OutputPlan" title="wmfs_plugin.metadata.OutputPlan"><em>OutputPlan</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>vjp</strong> (<a class="reference internal" href="#wmfs_plugin.metadata.VjpMetadata" title="wmfs_plugin.metadata.VjpMetadata"><em>VjpMetadata</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>internal</strong> (<em>bool</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.PluginMetadata">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">PluginMetadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">protocol_version</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">operations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#wmfs_plugin.metadata.OperationMetadata" title="wmfs_plugin.metadata.OperationMetadata"><span class="pre">wmfs_plugin.metadata.OperationMetadata</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fingerprint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.PluginMetadata" title="Link to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<em>str</em>)</p></li>
+<li><p><strong>version</strong> (<em>str</em>)</p></li>
+<li><p><strong>protocol_version</strong> (<em>int</em>)</p></li>
+<li><p><strong>operations</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#wmfs_plugin.metadata.OperationMetadata" title="wmfs_plugin.metadata.OperationMetadata"><em>OperationMetadata</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
+<li><p><strong>fingerprint</strong> (<em>int</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.metadata_from_reader">
+<span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">metadata_from_reader</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">metadata</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">validate_fingerprint</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.metadata_from_reader" title="Link to this definition">¶</a></dt>
+<dd><p>Decode and validate plugin metadata from a Cap’n Proto reader.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>metadata</strong> (<em>object</em>) – Reader exposing the <code class="docutils literal notranslate"><span class="pre">PluginMetadata</span></code> schema fields.</p></li>
+<li><p><strong>validate_fingerprint</strong> (<em>bool</em>) – Whether to verify the declared metadata fingerprint.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Immutable Python metadata used by runtime invocation planning.</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – If the metadata contract or fingerprint is invalid.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#wmfs_plugin.metadata.PluginMetadata" title="wmfs_plugin.metadata.PluginMetadata"><em>PluginMetadata</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.metadata_fingerprint">
+<span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">metadata_fingerprint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">plugin</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.metadata_fingerprint" title="Link to this definition">¶</a></dt>
+<dd><p>Return the deterministic 64-bit fingerprint for plugin metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>plugin</strong> (<a class="reference internal" href="#wmfs_plugin.metadata.PluginMetadata" title="wmfs_plugin.metadata.PluginMetadata"><em>PluginMetadata</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="wmfs_plugin.metadata.validate_plugin_metadata">
+<span class="sig-prename descclassname"><span class="pre">wmfs_plugin.metadata.</span></span><span class="sig-name descname"><span class="pre">validate_plugin_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">plugin</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">validate_fingerprint</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs_plugin.metadata.validate_plugin_metadata" title="Link to this definition">¶</a></dt>
+<dd><p>Validate operation IDs, names, plans, VJPs, and the fingerprint.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>plugin</strong> (<a class="reference internal" href="#wmfs_plugin.metadata.PluginMetadata" title="wmfs_plugin.metadata.PluginMetadata"><em>PluginMetadata</em></a>) – Decoded plugin metadata to validate.</p></li>
+<li><p><strong>validate_fingerprint</strong> (<em>bool</em>) – Whether to verify the declared fingerprint.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If any metadata invariant is violated.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../data-flow.html">Data Flow And Reading Guide</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Python API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#user-api">User API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#runtime">Runtime</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#plugin-sdk">Plugin SDK</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cpp.html">C++ API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../contributing-docs.html">Contributing Documentation</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../data-flow.html" title="previous chapter">Data Flow And Reading Guide</a></li>
+      <li>Next: <a href="cpp.html" title="next chapter">C++ API Reference</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/api/python.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

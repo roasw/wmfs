@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>C++ API Reference &#8212; WMFS ce493f132d49</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <script src="../_static/documentation_options.js?v=cbf29fbe"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Contributing Documentation" href="../contributing-docs.html" />
+    <link rel="prev" title="Python API Reference" href="python.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="c-api-reference">
+<h1>C++ API Reference<a class="headerlink" href="#c-api-reference" title="Link to this heading">¶</a></h1>
+<p>C++ documentation is generated from Doxygen comments in <code class="docutils literal notranslate"><span class="pre">inc/wmfs</span></code> and rendered
+inside this Sphinx site through Breathe.</p>
+<section id="native-control-session">
+<h2>Native Control Session<a class="headerlink" href="#native-control-session" title="Link to this heading">¶</a></h2>
+<dl class="cpp enum-class">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native11TensorDTypeE">
+<span id="_CPPv3N4wmfs6native11TensorDTypeE"></span><span id="_CPPv2N4wmfs6native11TensorDTypeE"></span><span class="target" id="session_8hpp_1ac0ca1bd6f39a3bed6392163b2447ff51"></span><span class="k"><span class="pre">enum</span></span><span class="w"> </span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">native</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">TensorDType</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native11TensorDTypeE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Tensor element types supported by the native control path. </p>
+<p><em>Values:</em></p>
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native11TensorDType7float32E">
+<span id="_CPPv3N4wmfs6native11TensorDType7float32E"></span><span id="_CPPv2N4wmfs6native11TensorDType7float32E"></span><span class="target" id="session_8hpp_1ac0ca1bd6f39a3bed6392163b2447ff51ad33ec2b0bbea6d471a4706cea030e1e3"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">float32</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native11TensorDType7float32E" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native11TensorDType7float64E">
+<span id="_CPPv3N4wmfs6native11TensorDType7float64E"></span><span id="_CPPv2N4wmfs6native11TensorDType7float64E"></span><span class="target" id="session_8hpp_1ac0ca1bd6f39a3bed6392163b2447ff51afb7fa22ede616c04c68a7663d0f81e92"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">float64</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native11TensorDType7float64E" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native11TensorDType5int64E">
+<span id="_CPPv3N4wmfs6native11TensorDType5int64E"></span><span id="_CPPv2N4wmfs6native11TensorDType5int64E"></span><span class="target" id="session_8hpp_1ac0ca1bd6f39a3bed6392163b2447ff51aff9b3f96d37353c528517bc3656a00a8"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">int64</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native11TensorDType5int64E" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native11TensorDType5uint8E">
+<span id="_CPPv3N4wmfs6native11TensorDType5uint8E"></span><span id="_CPPv2N4wmfs6native11TensorDType5uint8E"></span><span class="target" id="session_8hpp_1ac0ca1bd6f39a3bed6392163b2447ff51a5f423e669d0a8f4ab7c4c3e6da27161a"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">uint8</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native11TensorDType5uint8E" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="cpp enum-class">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native10ScalarKindE">
+<span id="_CPPv3N4wmfs6native10ScalarKindE"></span><span id="_CPPv2N4wmfs6native10ScalarKindE"></span><span class="target" id="session_8hpp_1a8971085e188eb6461032fd963ce06a88"></span><span class="k"><span class="pre">enum</span></span><span class="w"> </span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">native</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">ScalarKind</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native10ScalarKindE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Scalar argument types represented by the invocation protocol. </p>
+<p><em>Values:</em></p>
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native10ScalarKind7booleanE">
+<span id="_CPPv3N4wmfs6native10ScalarKind7booleanE"></span><span id="_CPPv2N4wmfs6native10ScalarKind7booleanE"></span><span class="target" id="session_8hpp_1a8971085e188eb6461032fd963ce06a88a84e2c64f38f78ba3ea5c905ab5a2da27"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">boolean</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native10ScalarKind7booleanE" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native10ScalarKind7float64E">
+<span id="_CPPv3N4wmfs6native10ScalarKind7float64E"></span><span id="_CPPv2N4wmfs6native10ScalarKind7float64E"></span><span class="target" id="session_8hpp_1a8971085e188eb6461032fd963ce06a88afb7fa22ede616c04c68a7663d0f81e92"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">float64</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native10ScalarKind7float64E" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native10ScalarKind5int64E">
+<span id="_CPPv3N4wmfs6native10ScalarKind5int64E"></span><span id="_CPPv2N4wmfs6native10ScalarKind5int64E"></span><span class="target" id="session_8hpp_1a8971085e188eb6461032fd963ce06a88aff9b3f96d37353c528517bc3656a00a8"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">int64</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native10ScalarKind5int64E" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native10ScalarKind4textE">
+<span id="_CPPv3N4wmfs6native10ScalarKind4textE"></span><span id="_CPPv2N4wmfs6native10ScalarKind4textE"></span><span class="target" id="session_8hpp_1a8971085e188eb6461032fd963ce06a88a1cb251ec0d568de6a929b520c4aed8d1"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">text</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native10ScalarKind4textE" title="Link to this definition">¶</a><br /></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7SessionE">
+<span id="_CPPv3N4wmfs6native7SessionE"></span><span id="_CPPv2N4wmfs6native7SessionE"></span><span id="wmfs::native::Session"></span><span class="target" id="classwmfs_1_1native_1_1Session"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">Session</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7SessionE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Synchronous native client for worker RPC and FD-control traffic. </p>
+<p><a class="reference internal" href="#classwmfs_1_1native_1_1Session"><span class="std std-ref">Session</span></a> serializes KJ RPC work on its implementation thread. The Python runtime owns process lifecycle and must call close before releasing the worker process. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session7SessionEiiNSt8uint64_tEddd">
+<span id="_CPPv3N4wmfs6native7Session7SessionEiiNSt8uint64_tEddd"></span><span id="_CPPv2N4wmfs6native7Session7SessionEiiNSt8uint64_tEddd"></span><span id="wmfs::native::Session::Session__i.i.std::uint64_t.double.double.double"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a4d3f6d514c98d8ba5ba22eb1cc489da3"></span><span class="sig-name descname"><span class="n"><span class="pre">Session</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">rpc_fd</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">control_fd</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">expected_fingerprint</span></span>, <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">startup_timeout_seconds</span></span>, <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">request_timeout_seconds</span></span>, <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">fd_transfer_timeout_seconds</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session7SessionEiiNSt8uint64_tEddd" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Adopt connected RPC/control sockets and validate the worker. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs6native7Session16mapping_requiredERK7Mapping">
+<span id="_CPPv3NK4wmfs6native7Session16mapping_requiredERK7Mapping"></span><span id="_CPPv2NK4wmfs6native7Session16mapping_requiredERK7Mapping"></span><span id="wmfs::native::Session::mapping_required__MappingCRC"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a19f1be1366d5f877289b6b7590811d96"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">mapping_required</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4N4wmfs6native7MappingE" title="wmfs::native::Mapping"><span class="n"><span class="pre">Mapping</span></span></a><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">mapping</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK4wmfs6native7Session16mapping_requiredERK7Mapping" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return whether the worker needs this mapping generation. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session10map_bufferERK7Mappingi">
+<span id="_CPPv3N4wmfs6native7Session10map_bufferERK7Mappingi"></span><span id="_CPPv2N4wmfs6native7Session10map_bufferERK7Mappingi"></span><span id="wmfs::native::Session::map_buffer__MappingCR.i"></span><span class="target" id="classwmfs_1_1native_1_1Session_1ad188f4dbc47ddf62aff850cce8f75ed3"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">map_buffer</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4N4wmfs6native7MappingE" title="wmfs::native::Mapping"><span class="n"><span class="pre">Mapping</span></span></a><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">mapping</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">fd</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session10map_bufferERK7Mappingi" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Transfer and map one buffer. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session11map_buffersENSt6vectorINSt4pairI7MappingiEEEE">
+<span id="_CPPv3N4wmfs6native7Session11map_buffersENSt6vectorINSt4pairI7MappingiEEEE"></span><span id="_CPPv2N4wmfs6native7Session11map_buffersENSt6vectorINSt4pairI7MappingiEEEE"></span><span id="wmfs::native::Session::map_buffers__std::vector:std::pair:Mapping.i::"></span><span class="target" id="classwmfs_1_1native_1_1Session_1aa2890879ac6032b5ffb855f1a9d2b5ad"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="kt"><span class="pre">bool</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">map_buffers</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">pair</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv4N4wmfs6native7MappingE" title="wmfs::native::Mapping"><span class="n"><span class="pre">Mapping</span></span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="p"><span class="pre">&gt;</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">mappings</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session11map_buffersENSt6vectorINSt4pairI7MappingiEEEE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Transfer multiple buffers in one acknowledged control batch. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session13retire_bufferERK7Mapping">
+<span id="_CPPv3N4wmfs6native7Session13retire_bufferERK7Mapping"></span><span id="_CPPv2N4wmfs6native7Session13retire_bufferERK7Mapping"></span><span id="wmfs::native::Session::retire_buffer__MappingCR"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a207fb23b9a897d51b35a379557959e57"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">retire_buffer</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4N4wmfs6native7MappingE" title="wmfs::native::Mapping"><span class="n"><span class="pre">Mapping</span></span></a><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">mapping</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session13retire_bufferERK7Mapping" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Retire one worker mapping. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session14retire_buffersERKNSt6vectorI7MappingEE">
+<span id="_CPPv3N4wmfs6native7Session14retire_buffersERKNSt6vectorI7MappingEE"></span><span id="_CPPv2N4wmfs6native7Session14retire_buffersERKNSt6vectorI7MappingEE"></span><span id="wmfs::native::Session::retire_buffers__std::vector:Mapping:CR"></span><span class="target" id="classwmfs_1_1native_1_1Session_1ad20b28e8266aa6c07bf473e0c997027d"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">retire_buffers</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv4N4wmfs6native7MappingE" title="wmfs::native::Mapping"><span class="n"><span class="pre">Mapping</span></span></a><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">mappings</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session14retire_buffersERKNSt6vectorI7MappingEE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Retire multiple mappings in one acknowledged control batch. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session16abort_invocationENSt8uint64_tE">
+<span id="_CPPv3N4wmfs6native7Session16abort_invocationENSt8uint64_tE"></span><span id="_CPPv2N4wmfs6native7Session16abort_invocationENSt8uint64_tE"></span><span id="wmfs::native::Session::abort_invocation__std::uint64_t"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a7a50177d54fc35747d4ccfede849ad0a"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">abort_invocation</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">invocation_id</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session16abort_invocationENSt8uint64_tE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Release invocation-scoped mappings after pre-dispatch failure. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session6invokeENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE">
+<span id="_CPPv3N4wmfs6native7Session6invokeENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE"></span><span id="_CPPv2N4wmfs6native7Session6invokeENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE"></span><span id="wmfs::native::Session::invoke__std::uint64_t.std::uint32_t.TensorDescriptorsCR.TensorDescriptorsCR.std::vector:ScalarArgument:CR"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a89b140376d5aaf9626e0736f21de9de1"></span><span class="n"><span class="pre">InvocationOutcome</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">invoke</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">invocation_id</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">operation_id</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">TensorDescriptors</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">inputs</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">TensorDescriptors</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">outputs</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv4N4wmfs6native14ScalarArgumentE" title="wmfs::native::ScalarArgument"><span class="n"><span class="pre">ScalarArgument</span></span></a><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">scalars</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session6invokeENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Invoke an operation and wait for completion. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session15invoke_profiledENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE">
+<span id="_CPPv3N4wmfs6native7Session15invoke_profiledENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE"></span><span id="_CPPv2N4wmfs6native7Session15invoke_profiledENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE"></span><span id="wmfs::native::Session::invoke_profiled__std::uint64_t.std::uint32_t.TensorDescriptorsCR.TensorDescriptorsCR.std::vector:ScalarArgument:CR"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a8fd82f0e1ff18842429f28001d845e6d"></span><a class="reference internal" href="#_CPPv4N4wmfs6native17InvocationProfileE" title="wmfs::native::InvocationProfile"><span class="n"><span class="pre">InvocationProfile</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">invoke_profiled</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">invocation_id</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">operation_id</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">TensorDescriptors</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">inputs</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">TensorDescriptors</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">outputs</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv4N4wmfs6native14ScalarArgumentE" title="wmfs::native::ScalarArgument"><span class="n"><span class="pre">ScalarArgument</span></span></a><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">scalars</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session15invoke_profiledENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Invoke an operation and return native/worker timing metrics. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session12plan_outputsENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE">
+<span id="_CPPv3N4wmfs6native7Session12plan_outputsENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE"></span><span id="_CPPv2N4wmfs6native7Session12plan_outputsENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE"></span><span id="wmfs::native::Session::plan_outputs__std::uint64_t.std::uint32_t.TensorDescriptorsCR.std::vector:ScalarArgument:CR"></span><span class="target" id="classwmfs_1_1native_1_1Session_1af838a80ae88e879d046a8d1dc75323e1"></span><span class="n"><span class="pre">OutputPlanningResult</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">plan_outputs</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">invocation_id</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">operation_id</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">TensorDescriptors</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">inputs</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv4N4wmfs6native14ScalarArgumentE" title="wmfs::native::ScalarArgument"><span class="n"><span class="pre">ScalarArgument</span></span></a><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">scalars</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session12plan_outputsENSt8uint64_tENSt8uint32_tERK17TensorDescriptorsRKNSt6vectorI14ScalarArgumentEE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Ask the worker to determine data-dependent output metadata. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session4pingENSt8uint64_tE">
+<span id="_CPPv3N4wmfs6native7Session4pingENSt8uint64_tE"></span><span id="_CPPv2N4wmfs6native7Session4pingENSt8uint64_tE"></span><span id="wmfs::native::Session::ping__std::uint64_t"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a464813ea17bec942d7fc6949230c1967"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ping</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">nonce</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session4pingENSt8uint64_tE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Verify RPC responsiveness with a nonce round trip. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session8metadataEv">
+<span id="_CPPv3N4wmfs6native7Session8metadataEv"></span><span id="_CPPv2N4wmfs6native7Session8metadataEv"></span><span id="wmfs::native::Session::metadata"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a9e685c9f8b4463b9d4199a5c481a88af"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint8_t</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">metadata</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session8metadataEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return serialized plugin metadata obtained during startup. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session11environmentEv">
+<span id="_CPPv3N4wmfs6native7Session11environmentEv"></span><span id="_CPPv2N4wmfs6native7Session11environmentEv"></span><span id="wmfs::native::Session::environment"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a8d0cfa1e4f79e17c5633231d9495c935"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint8_t</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">environment</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session11environmentEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return serialized worker environment metadata. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Session5closeEv">
+<span id="_CPPv3N4wmfs6native7Session5closeEv"></span><span id="_CPPv2N4wmfs6native7Session5closeEv"></span><span id="wmfs::native::Session::close"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a0762ab60c15f3ddf638316b3f4a0221f"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">close</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs6native7Session5closeEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Close RPC/control resources. Safe to call repeatedly. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs6native7Session14transfer_countEv">
+<span id="_CPPv3NK4wmfs6native7Session14transfer_countEv"></span><span id="_CPPv2NK4wmfs6native7Session14transfer_countEv"></span><span id="wmfs::native::Session::transfer_countC"></span><span class="target" id="classwmfs_1_1native_1_1Session_1aa0a98aa749b9ea7a96a0ff228bc4dd0c"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">transfer_count</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK4wmfs6native7Session14transfer_countEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the number of transferred mapping descriptors. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs6native7Session19mapping_batch_countEv">
+<span id="_CPPv3NK4wmfs6native7Session19mapping_batch_countEv"></span><span id="_CPPv2NK4wmfs6native7Session19mapping_batch_countEv"></span><span id="wmfs::native::Session::mapping_batch_countC"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a582f4a220162fde6676028dc0aae99c6"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">mapping_batch_count</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK4wmfs6native7Session19mapping_batch_countEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the number of acknowledged mapping batches. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs6native7Session16retirement_countEv">
+<span id="_CPPv3NK4wmfs6native7Session16retirement_countEv"></span><span id="_CPPv2NK4wmfs6native7Session16retirement_countEv"></span><span id="wmfs::native::Session::retirement_countC"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a4e04b0face32a6739b1e5987d4b0b324"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">retirement_count</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK4wmfs6native7Session16retirement_countEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the number of retired mapping descriptors. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs6native7Session22retirement_batch_countEv">
+<span id="_CPPv3NK4wmfs6native7Session22retirement_batch_countEv"></span><span id="_CPPv2NK4wmfs6native7Session22retirement_batch_countEv"></span><span id="wmfs::native::Session::retirement_batch_countC"></span><span class="target" id="classwmfs_1_1native_1_1Session_1a6365bc5eebf25677989b1cd67722d310"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">retirement_batch_count</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK4wmfs6native7Session22retirement_batch_countEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the number of acknowledged retirement batches. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7MappingE">
+<span id="_CPPv3N4wmfs6native7MappingE"></span><span id="_CPPv2N4wmfs6native7MappingE"></span><span id="wmfs::native::Mapping"></span><span class="target" id="structwmfs_1_1native_1_1Mapping"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">Mapping</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7MappingE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Metadata required to map one runtime-owned shared buffer. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping9buffer_idE">
+<span id="_CPPv3N4wmfs6native7Mapping9buffer_idE"></span><span id="_CPPv2N4wmfs6native7Mapping9buffer_idE"></span><span id="wmfs::native::Mapping::buffer_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1a5c125a54b715f3a50c3e5621b88f1e9a"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">buffer_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping9buffer_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Runtime buffer capability identifier. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping10generationE">
+<span id="_CPPv3N4wmfs6native7Mapping10generationE"></span><span id="_CPPv2N4wmfs6native7Mapping10generationE"></span><span id="wmfs::native::Mapping::generation__std::uint32_t"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1a513e545fc85df05fd1728d955492840d"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">generation</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping10generationE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Reuse generation of the backing region. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping13allocation_idE">
+<span id="_CPPv3N4wmfs6native7Mapping13allocation_idE"></span><span id="_CPPv2N4wmfs6native7Mapping13allocation_idE"></span><span id="wmfs::native::Mapping::allocation_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1a8840f0fb06733b6d45733328c4165527"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">allocation_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping13allocation_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Logical allocation within the region. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping11byte_lengthE">
+<span id="_CPPv3N4wmfs6native7Mapping11byte_lengthE"></span><span id="_CPPv2N4wmfs6native7Mapping11byte_lengthE"></span><span id="wmfs::native::Mapping::byte_length__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1ace3655bc2d89a0709a481c586b229b5c"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">byte_length</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping11byte_lengthE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Number of mapped bytes. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping8writableE">
+<span id="_CPPv3N4wmfs6native7Mapping8writableE"></span><span id="_CPPv2N4wmfs6native7Mapping8writableE"></span><span id="wmfs::native::Mapping::writable__b"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1ab0c0cae3943ef59c0ef449cc43cbe25a"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">writable</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping8writableE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Whether the worker may modify the mapping. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping5arenaE">
+<span id="_CPPv3N4wmfs6native7Mapping5arenaE"></span><span id="_CPPv2N4wmfs6native7Mapping5arenaE"></span><span id="wmfs::native::Mapping::arena__b"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1aefeaf88f4677007941aeee9a5e9553d5"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">arena</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping5arenaE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Whether the mapping belongs to an arena. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native7Mapping13invocation_idE">
+<span id="_CPPv3N4wmfs6native7Mapping13invocation_idE"></span><span id="_CPPv2N4wmfs6native7Mapping13invocation_idE"></span><span id="wmfs::native::Mapping::invocation_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1Mapping_1a221d7b084957df3d72b1fd99268e88c3"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">invocation_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native7Mapping13invocation_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Invocation owning a writable mapping. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptorE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptorE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptorE"></span><span id="wmfs::native::TensorDescriptor"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">TensorDescriptor</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Process-independent tensor view metadata. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor9buffer_idE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor9buffer_idE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor9buffer_idE"></span><span id="wmfs::native::TensorDescriptor::buffer_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1a3b70f83906dd4dada1e5546b4603eba0"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">buffer_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor9buffer_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Runtime buffer capability identifier. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor10generationE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor10generationE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor10generationE"></span><span id="wmfs::native::TensorDescriptor::generation__std::uint32_t"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1a6296326e9ffbc80fa44eb04329ce3cab"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">generation</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor10generationE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Reuse generation of the backing region. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor13allocation_idE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor13allocation_idE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor13allocation_idE"></span><span id="wmfs::native::TensorDescriptor::allocation_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1ac1480b76d15fcf03f92da049186da5d9"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">allocation_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor13allocation_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Logical allocation within the region. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor6offsetE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor6offsetE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor6offsetE"></span><span id="wmfs::native::TensorDescriptor::offset__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1a999578bcc74b951a1ad104a35ae5ae6e"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">offset</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor6offsetE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Byte offset from the mapped region start. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor11byte_lengthE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor11byte_lengthE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor11byte_lengthE"></span><span id="wmfs::native::TensorDescriptor::byte_length__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1ae93824f5dc73547d470f1d42a15edb38"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">byte_length</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor11byte_lengthE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Number of bytes visible to the tensor. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor5dtypeE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor5dtypeE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor5dtypeE"></span><span id="wmfs::native::TensorDescriptor::dtype__TensorDType"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1a670317d32c6f2678c51416e6326aa0e7"></span><a class="reference internal" href="#_CPPv4N4wmfs6native11TensorDTypeE" title="wmfs::native::TensorDType"><span class="n"><span class="pre">TensorDType</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">dtype</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor5dtypeE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Element type. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor5shapeE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor5shapeE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor5shapeE"></span><span id="wmfs::native::TensorDescriptor::shape__std::vector:std::uint64_t:"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1ad2e485991429592a09d49bb85b3c3f66"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">shape</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor5shapeE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Tensor dimensions. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native16TensorDescriptor7stridesE">
+<span id="_CPPv3N4wmfs6native16TensorDescriptor7stridesE"></span><span id="_CPPv2N4wmfs6native16TensorDescriptor7stridesE"></span><span id="wmfs::native::TensorDescriptor::strides__std::vector:std::int64_t:"></span><span class="target" id="structwmfs_1_1native_1_1TensorDescriptor_1a2f386eeabe5d4581f93fcd172a3d9667"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">int64_t</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">strides</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native16TensorDescriptor7stridesE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Element strides. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgumentE">
+<span id="_CPPv3N4wmfs6native14ScalarArgumentE"></span><span id="_CPPv2N4wmfs6native14ScalarArgumentE"></span><span id="wmfs::native::ScalarArgument"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ScalarArgument</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgumentE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>One indexed scalar argument for an operation invocation. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgument9parameterE">
+<span id="_CPPv3N4wmfs6native14ScalarArgument9parameterE"></span><span id="_CPPv2N4wmfs6native14ScalarArgument9parameterE"></span><span id="wmfs::native::ScalarArgument::parameter__std::uint16_t"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument_1a0521f0fbe7547cef19adb486c6663cf9"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint16_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">parameter</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgument9parameterE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Scalar parameter index in operation metadata. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgument4kindE">
+<span id="_CPPv3N4wmfs6native14ScalarArgument4kindE"></span><span id="_CPPv2N4wmfs6native14ScalarArgument4kindE"></span><span id="wmfs::native::ScalarArgument::kind__ScalarKind"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument_1a02d9f1d55e3179c05fe048109c778a06"></span><a class="reference internal" href="#_CPPv4N4wmfs6native10ScalarKindE" title="wmfs::native::ScalarKind"><span class="n"><span class="pre">ScalarKind</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">kind</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgument4kindE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Active scalar representation. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgument13boolean_valueE">
+<span id="_CPPv3N4wmfs6native14ScalarArgument13boolean_valueE"></span><span id="_CPPv2N4wmfs6native14ScalarArgument13boolean_valueE"></span><span id="wmfs::native::ScalarArgument::boolean_value__b"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument_1acfd034f84da90c081ed902518965e166"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">boolean_value</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgument13boolean_valueE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Boolean value when kind is boolean. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgument13float64_valueE">
+<span id="_CPPv3N4wmfs6native14ScalarArgument13float64_valueE"></span><span id="_CPPv2N4wmfs6native14ScalarArgument13float64_valueE"></span><span id="wmfs::native::ScalarArgument::float64_value__double"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument_1a2482ccf413881e77026d598979060a4d"></span><span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">float64_value</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgument13float64_valueE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Floating-point value when kind is float64. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgument11int64_valueE">
+<span id="_CPPv3N4wmfs6native14ScalarArgument11int64_valueE"></span><span id="_CPPv2N4wmfs6native14ScalarArgument11int64_valueE"></span><span id="wmfs::native::ScalarArgument::int64_value__std::int64_t"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument_1ab60468ad6909f051aed3f741fac88593"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">int64_value</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgument11int64_valueE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Integer value when kind is int64. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native14ScalarArgument10text_valueE">
+<span id="_CPPv3N4wmfs6native14ScalarArgument10text_valueE"></span><span id="_CPPv2N4wmfs6native14ScalarArgument10text_valueE"></span><span id="wmfs::native::ScalarArgument::text_value__ss"></span><span class="target" id="structwmfs_1_1native_1_1ScalarArgument_1aa3d6a7ba0dd3a90d57cb0fd88b0bba7d"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">string</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">text_value</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native14ScalarArgument10text_valueE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>String value when kind is text. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfileE">
+<span id="_CPPv3N4wmfs6native17InvocationProfileE"></span><span id="_CPPv2N4wmfs6native17InvocationProfileE"></span><span id="wmfs::native::InvocationProfile"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">InvocationProfile</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfileE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Timing values returned by a profiled native invocation. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile7outcomeE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile7outcomeE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile7outcomeE"></span><span id="wmfs::native::InvocationProfile::outcome__InvocationOutcome"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1a61db557df6087a4a8a7369945a94f5f9"></span><span class="n"><span class="pre">InvocationOutcome</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">outcome</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile7outcomeE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Recoverable operation result. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile13queue_wait_nsE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile13queue_wait_nsE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile13queue_wait_nsE"></span><span id="wmfs::native::InvocationProfile::queue_wait_ns__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1a3c2f507c620f7e46e51a9174899ad64e"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">queue_wait_ns</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile13queue_wait_nsE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Client-side serialization wait. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile6rpc_nsE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile6rpc_nsE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile6rpc_nsE"></span><span id="wmfs::native::InvocationProfile::rpc_ns__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1ac1b3b9613ddbb167156eb236df599531"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">rpc_ns</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile6rpc_nsE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>End-to-end RPC duration. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile21worker_input_views_nsE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile21worker_input_views_nsE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile21worker_input_views_nsE"></span><span id="wmfs::native::InvocationProfile::worker_input_views_ns__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1a634129339959acfcc92337a52131ded6"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">worker_input_views_ns</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile21worker_input_views_nsE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Input view construction time. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile22worker_output_views_nsE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile22worker_output_views_nsE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile22worker_output_views_nsE"></span><span id="wmfs::native::InvocationProfile::worker_output_views_ns__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1a7f14fa7bb4ad571f5e1bc9ce7f02e617"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">worker_output_views_ns</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile22worker_output_views_nsE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Output view construction time. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile18worker_dispatch_nsE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile18worker_dispatch_nsE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile18worker_dispatch_nsE"></span><span id="wmfs::native::InvocationProfile::worker_dispatch_ns__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1add3803989a03abd6f2ced01a8c3846a4"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">worker_dispatch_ns</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile18worker_dispatch_nsE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Worker adapter dispatch time. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs6native17InvocationProfile16worker_kernel_nsE">
+<span id="_CPPv3N4wmfs6native17InvocationProfile16worker_kernel_nsE"></span><span id="_CPPv2N4wmfs6native17InvocationProfile16worker_kernel_nsE"></span><span id="wmfs::native::InvocationProfile::worker_kernel_ns__std::uint64_t"></span><span class="target" id="structwmfs_1_1native_1_1InvocationProfile_1a137b0492be4b7ae71b70c7fa338555f4"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">worker_kernel_ns</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">{</span></span><span class="p"><span class="pre">}</span></span><a class="headerlink" href="#_CPPv4N4wmfs6native17InvocationProfile16worker_kernel_nsE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Numerical kernel time. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+</section>
+<section id="worker-mapping-api">
+<h2>Worker Mapping API<a class="headerlink" href="#worker-mapping-api" title="Link to this heading">¶</a></h2>
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpecE">
+<span id="_CPPv3N4wmfs9reference11MappingSpecE"></span><span id="_CPPv2N4wmfs9reference11MappingSpecE"></span><span id="wmfs::reference::MappingSpec"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">MappingSpec</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpecE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Worker-side mapping metadata received from the runtime. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec9buffer_idE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec9buffer_idE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec9buffer_idE"></span><span id="wmfs::reference::MappingSpec::buffer_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1a6605e8eb7fa2ccda59b1a3eefe4079c8"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">buffer_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec9buffer_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Runtime buffer capability identifier. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec10generationE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec10generationE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec10generationE"></span><span id="wmfs::reference::MappingSpec::generation__std::uint32_t"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1a293c6967de80d9b9b2c0deb3bf3d1993"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">generation</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec10generationE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Reuse generation of the backing region. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec13allocation_idE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec13allocation_idE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec13allocation_idE"></span><span id="wmfs::reference::MappingSpec::allocation_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1af8dcf5efe887cb882b3aae91e31e4ddd"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">allocation_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec13allocation_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Logical allocation within the region. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec11byte_lengthE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec11byte_lengthE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec11byte_lengthE"></span><span id="wmfs::reference::MappingSpec::byte_length__std::uint64_t"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1a3366b0fa1cda80661079d88213f77a60"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">byte_length</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec11byte_lengthE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Number of mapped bytes. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec13invocation_idE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec13invocation_idE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec13invocation_idE"></span><span id="wmfs::reference::MappingSpec::invocation_id__std::uint64_t"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1a7bee63617784f21c14188776d3b1be28"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">invocation_id</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec13invocation_idE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Invocation owning writable access. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec8writableE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec8writableE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec8writableE"></span><span id="wmfs::reference::MappingSpec::writable__b"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1aafe13e388ef49ca5a8bff2647d546a67"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">writable</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec8writableE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Whether the worker may modify the mapping. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11MappingSpec5arenaE">
+<span id="_CPPv3N4wmfs9reference11MappingSpec5arenaE"></span><span id="_CPPv2N4wmfs9reference11MappingSpec5arenaE"></span><span id="wmfs::reference::MappingSpec::arena__b"></span><span class="target" id="structwmfs_1_1reference_1_1MappingSpec_1afcd37cd9c92b6318e3f61773a6b87350"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">arena</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11MappingSpec5arenaE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Whether the mapping belongs to an arena. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference17MappedBufferCacheE">
+<span id="_CPPv3N4wmfs9reference17MappedBufferCacheE"></span><span id="_CPPv2N4wmfs9reference17MappedBufferCacheE"></span><span id="wmfs::reference::MappedBufferCache"></span><span class="target" id="classwmfs_1_1reference_1_1MappedBufferCache"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">MappedBufferCache</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference17MappedBufferCacheE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Validate descriptors and construct zero-copy ATen views over mappings. </p>
+<p>Cache mutation is thread-safe. Retiring a cache entry does not unmap a region while retained ATen storage aliases still reference it. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference17MappedBufferCache3mapE11MappingSpeci">
+<span id="_CPPv3N4wmfs9reference17MappedBufferCache3mapE11MappingSpeci"></span><span id="_CPPv2N4wmfs9reference17MappedBufferCache3mapE11MappingSpeci"></span><span id="wmfs::reference::MappedBufferCache::map__MappingSpec.i"></span><span class="target" id="classwmfs_1_1reference_1_1MappedBufferCache_1a543c6555bc58959800c8b509f9ef4094"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">map</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4N4wmfs9reference11MappingSpecE" title="wmfs::reference::MappingSpec"><span class="n"><span class="pre">MappingSpec</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">spec</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">fd</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference17MappedBufferCache3mapE11MappingSpeci" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Adopt and map a transferred descriptor according to <code class="docutils literal notranslate"><span class="pre">spec</span></code>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference17MappedBufferCache6retireENSt8uint64_tENSt8uint32_tENSt8uint64_tE">
+<span id="_CPPv3N4wmfs9reference17MappedBufferCache6retireENSt8uint64_tENSt8uint32_tENSt8uint64_tE"></span><span id="_CPPv2N4wmfs9reference17MappedBufferCache6retireENSt8uint64_tENSt8uint32_tENSt8uint64_tE"></span><span id="wmfs::reference::MappedBufferCache::retire__std::uint64_t.std::uint32_t.std::uint64_t"></span><span class="target" id="classwmfs_1_1reference_1_1MappedBufferCache_1a70e5d86a9f0ba382491a166601c0b26b"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">retire</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">buffer_id</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">generation</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">allocation_id</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference17MappedBufferCache6retireENSt8uint64_tENSt8uint32_tENSt8uint64_tE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Retire one exact buffer generation and logical allocation. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference17MappedBufferCache6tensorEN16TensorDescriptor6ReaderENSt8uint64_tEb">
+<span id="_CPPv3N4wmfs9reference17MappedBufferCache6tensorEN16TensorDescriptor6ReaderENSt8uint64_tEb"></span><span id="_CPPv2N4wmfs9reference17MappedBufferCache6tensorEN16TensorDescriptor6ReaderENSt8uint64_tEb"></span><span id="wmfs::reference::MappedBufferCache::tensor__TensorDescriptor::Reader.std::uint64_t.b"></span><span class="target" id="classwmfs_1_1reference_1_1MappedBufferCache_1ad133cdeb4f6bf37a7b79eba3c5ad8d75"></span><a class="reference internal" href="#_CPPv4N4wmfs9reference11TensorLeaseE" title="wmfs::reference::TensorLease"><span class="n"><span class="pre">TensorLease</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">tensor</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">TensorDescriptor</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Reader</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">descriptor</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">invocation_id</span></span>, <span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">require_writable</span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="k"><span class="pre">false</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference17MappedBufferCache6tensorEN16TensorDescriptor6ReaderENSt8uint64_tEb" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Resolve a descriptor into an invocation-scoped tensor view. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference17MappedBufferCache17finish_invocationENSt8uint64_tE">
+<span id="_CPPv3N4wmfs9reference17MappedBufferCache17finish_invocationENSt8uint64_tE"></span><span id="_CPPv2N4wmfs9reference17MappedBufferCache17finish_invocationENSt8uint64_tE"></span><span id="wmfs::reference::MappedBufferCache::finish_invocation__std::uint64_t"></span><span class="target" id="classwmfs_1_1reference_1_1MappedBufferCache_1a21cfdaf8ba7a183916c9cadb24385b29"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">finish_invocation</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">invocation_id</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference17MappedBufferCache17finish_invocationENSt8uint64_tE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Retire writable mappings owned by an invocation. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference17MappedBufferCache5closeEv">
+<span id="_CPPv3N4wmfs9reference17MappedBufferCache5closeEv"></span><span id="_CPPv2N4wmfs9reference17MappedBufferCache5closeEv"></span><span id="wmfs::reference::MappedBufferCache::close"></span><span class="target" id="classwmfs_1_1reference_1_1MappedBufferCache_1a1c1ed3a1fbb44b18878735d1a9df7d3a"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">close</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference17MappedBufferCache5closeEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Drop all cache ownership while preserving retained tensor aliases. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11TensorLeaseE">
+<span id="_CPPv3N4wmfs9reference11TensorLeaseE"></span><span id="_CPPv2N4wmfs9reference11TensorLeaseE"></span><span id="wmfs::reference::TensorLease"></span><span class="target" id="classwmfs_1_1reference_1_1TensorLease"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">TensorLease</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11TensorLeaseE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Invocation-local ATen tensor handle. </p>
+<p>The tensor’s ATen storage independently retains its mapped region, so aliases remain valid after this lease and the mapping cache entry are released. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11TensorLease11TensorLeaseEN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference11TensorLease11TensorLeaseEN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference11TensorLease11TensorLeaseEN2at6TensorE"></span><span id="wmfs::reference::TensorLease::TensorLease__at::Tensor"></span><span class="target" id="classwmfs_1_1reference_1_1TensorLease_1aba9162996f126e688fcdcc648a93fd0b"></span><span class="k"><span class="pre">explicit</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">TensorLease</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">tensor</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference11TensorLease11TensorLeaseEN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Take ownership of an ATen tensor view. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs9reference11TensorLease6tensorEv">
+<span id="_CPPv3NK4wmfs9reference11TensorLease6tensorEv"></span><span id="_CPPv2NK4wmfs9reference11TensorLease6tensorEv"></span><span id="wmfs::reference::TensorLease::tensorC"></span><span class="target" id="classwmfs_1_1reference_1_1TensorLease_1a497e7592b31432adbfffcf51bba437fb"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-name descname"><span class="n"><span class="pre">tensor</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4NK4wmfs9reference11TensorLease6tensorEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the retained tensor as a read-only handle. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference11TensorLease6tensorEv">
+<span id="_CPPv3N4wmfs9reference11TensorLease6tensorEv"></span><span id="_CPPv2N4wmfs9reference11TensorLease6tensorEv"></span><span id="wmfs::reference::TensorLease::tensor"></span><span class="target" id="classwmfs_1_1reference_1_1TensorLease_1a9c6a2004d5a4be8e14b49f599c5c45e9"></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-name descname"><span class="n"><span class="pre">tensor</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4N4wmfs9reference11TensorLease6tensorEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the retained tensor as a writable handle. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference24receive_buffer_transfersEiR17MappedBufferCache">
+<span id="_CPPv3N4wmfs9reference24receive_buffer_transfersEiR17MappedBufferCache"></span><span id="_CPPv2N4wmfs9reference24receive_buffer_transfersEiR17MappedBufferCache"></span><span id="wmfs::reference::receive_buffer_transfers__i.MappedBufferCacheR"></span><span class="target" id="mapped__buffers_8hpp_1a6e7e447817c18d7c73e01ce2355418d7"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">receive_buffer_transfers</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">control_fd</span></span>, <a class="reference internal" href="#_CPPv4N4wmfs9reference17MappedBufferCacheE" title="wmfs::reference::MappedBufferCache"><span class="n"><span class="pre">MappedBufferCache</span></span></a><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">cache</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference24receive_buffer_transfersEiR17MappedBufferCache" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Receive batched SCM_RIGHTS mapping and retirement control messages. </p>
+</dd></dl>
+
+</section>
+<section id="reference-kernels">
+<h2>Reference Kernels<a class="headerlink" href="#reference-kernels" title="Link to this heading">¶</a></h2>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference6matmulERKN2at6TensorERKN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference6matmulERKN2at6TensorERKN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference6matmulERKN2at6TensorERKN2at6TensorE"></span><span id="wmfs::reference::matmul__at::TensorCR.at::TensorCR"></span><span class="target" id="kernels_8hpp_1a0a3497b3a189a7e99d892bacbcd4b7cc"></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">matmul</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">b</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference6matmulERKN2at6TensorERKN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Compute a matrix product with an allocated result. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference10matmul_outERKN2at6TensorERKN2at6TensorERN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference10matmul_outERKN2at6TensorERKN2at6TensorERN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference10matmul_outERKN2at6TensorERKN2at6TensorERN2at6TensorE"></span><span id="wmfs::reference::matmul_out__at::TensorCR.at::TensorCR.at::TensorR"></span><span class="target" id="kernels_8hpp_1ab542c109fc13d89eb8617f3e571f3c2b"></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">matmul_out</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">b</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">out</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference10matmul_outERKN2at6TensorERKN2at6TensorERN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Compute a matrix product into runtime-owned storage. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference3svdERKN2at6TensorEb">
+<span id="_CPPv3N4wmfs9reference3svdERKN2at6TensorEb"></span><span id="_CPPv2N4wmfs9reference3svdERKN2at6TensorEb"></span><span id="wmfs::reference::svd__at::TensorCR.b"></span><span class="target" id="kernels_8hpp_1ab82ff700f36b3e66c9e3b26ccbeb98d7"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">tuple</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">svd</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">full_matrices</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference3svdERKN2at6TensorEb" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Compute a singular value decomposition with allocated outputs. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference7svd_outERKN2at6TensorEbRN2at6TensorERN2at6TensorERN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference7svd_outERKN2at6TensorEbRN2at6TensorERN2at6TensorERN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference7svd_outERKN2at6TensorEbRN2at6TensorERN2at6TensorERN2at6TensorE"></span><span id="wmfs::reference::svd_out__at::TensorCR.b.at::TensorR.at::TensorR.at::TensorR"></span><span class="target" id="kernels_8hpp_1a523c8b6c621c54160f2a3449dda871de"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">tuple</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">svd_out</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">full_matrices</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">u</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">s</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">vh</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference7svd_outERKN2at6TensorEbRN2at6TensorERN2at6TensorERN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Compute a singular value decomposition into runtime-owned outputs. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference10add_scalarERKN2at6TensorEd">
+<span id="_CPPv3N4wmfs9reference10add_scalarERKN2at6TensorEd"></span><span id="_CPPv2N4wmfs9reference10add_scalarERKN2at6TensorEd"></span><span id="wmfs::reference::add_scalar__at::TensorCR.double"></span><span class="target" id="kernels_8hpp_1a52ca17066e215336274af646453c5818"></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">add_scalar</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">value</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference10add_scalarERKN2at6TensorEd" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Add a scalar with an allocated result. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference14add_scalar_outERKN2at6TensorEdRN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference14add_scalar_outERKN2at6TensorEdRN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference14add_scalar_outERKN2at6TensorEdRN2at6TensorE"></span><span id="wmfs::reference::add_scalar_out__at::TensorCR.double.at::TensorR"></span><span class="target" id="kernels_8hpp_1ab05303d9974300fe61d76e2d646e5503"></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">add_scalar_out</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">value</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">out</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference14add_scalar_outERKN2at6TensorEdRN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Add a scalar into runtime-owned storage. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference14matmul_vjp_outERKN2at6TensorERKN2at6TensorERKN2at6TensorERN2at6TensorERN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference14matmul_vjp_outERKN2at6TensorERKN2at6TensorERKN2at6TensorERN2at6TensorERN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference14matmul_vjp_outERKN2at6TensorERKN2at6TensorERKN2at6TensorERN2at6TensorERN2at6TensorE"></span><span id="wmfs::reference::matmul_vjp_out__at::TensorCR.at::TensorCR.at::TensorCR.at::TensorR.at::TensorR"></span><span class="target" id="kernels_8hpp_1a2c4d05127a99876c3bba2d2ce15d5000"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">tuple</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">matmul_vjp_out</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">b</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">result_cotangent</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a_gradient</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">b_gradient</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference14matmul_vjp_outERKN2at6TensorERKN2at6TensorERKN2at6TensorERN2at6TensorERN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Compute the first-order vector-Jacobian product for matrix multiply. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs9reference18add_scalar_vjp_outERKN2at6TensorERN2at6TensorE">
+<span id="_CPPv3N4wmfs9reference18add_scalar_vjp_outERKN2at6TensorERN2at6TensorE"></span><span id="_CPPv2N4wmfs9reference18add_scalar_vjp_outERKN2at6TensorERN2at6TensorE"></span><span id="wmfs::reference::add_scalar_vjp_out__at::TensorCR.at::TensorR"></span><span class="target" id="kernels_8hpp_1a3834ab5fc806e4fc98bd541604bcb74b"></span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-prename descclassname"><span class="n"><span class="pre">wmfs</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">reference</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">add_scalar_vjp_out</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">result_cotangent</span></span>, <span class="n"><span class="pre">at</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">Tensor</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">a_gradient</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N4wmfs9reference18add_scalar_vjp_outERKN2at6TensorERN2at6TensorE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Copy the add-scalar result cotangent into its input gradient. </p>
+</dd></dl>
+
+</section>
+<section id="file-descriptor-ownership">
+<h2>File Descriptor Ownership<a class="headerlink" href="#file-descriptor-ownership" title="Link to this heading">¶</a></h2>
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs8UniqueFdE">
+<span id="_CPPv3N4wmfs8UniqueFdE"></span><span id="_CPPv2N4wmfs8UniqueFdE"></span><span id="wmfs::UniqueFd"></span><span class="target" id="classwmfs_1_1UniqueFd"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">UniqueFd</span></span></span><a class="headerlink" href="#_CPPv4N4wmfs8UniqueFdE" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Move-only RAII ownership for a POSIX file descriptor. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs8UniqueFd8UniqueFdEi">
+<span id="_CPPv3N4wmfs8UniqueFd8UniqueFdEi"></span><span id="_CPPv2N4wmfs8UniqueFd8UniqueFdEi"></span><span id="wmfs::UniqueFd::UniqueFd__i"></span><span class="target" id="classwmfs_1_1UniqueFd_1a1d24b389f17858e30d9cf974c0fba618"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="k"><span class="pre">explicit</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">UniqueFd</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">fd</span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="o"><span class="pre">-</span></span><span class="m"><span class="pre">1</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4N4wmfs8UniqueFd8UniqueFdEi" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Take ownership of <code class="docutils literal notranslate"><span class="pre">fd</span></code>, or construct an empty owner for <code class="docutils literal notranslate"><span class="pre">-1</span></code>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs8UniqueFd3getEv">
+<span id="_CPPv3NK4wmfs8UniqueFd3getEv"></span><span id="_CPPv2NK4wmfs8UniqueFd3getEv"></span><span id="wmfs::UniqueFd::getC"></span><span class="target" id="classwmfs_1_1UniqueFd_1acdff3870f1aeefaa40202229c323da97"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">get</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4NK4wmfs8UniqueFd3getEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Return the owned descriptor without transferring ownership. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs8UniqueFdcvbEv">
+<span id="_CPPv3NK4wmfs8UniqueFdcvbEv"></span><span id="_CPPv2NK4wmfs8UniqueFdcvbEv"></span><span id="wmfs::UniqueFd::castto-b-operatorC"></span><span class="target" id="classwmfs_1_1UniqueFd_1ae339fa360a235b7c1ba3c9810d010d61"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="k"><span class="pre">explicit</span></span><span class="w"> </span><span class="sig-name descname"><span class="k"><span class="pre">operator</span></span><span class="w"> </span><span class="kt"><span class="pre">bool</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4NK4wmfs8UniqueFdcvbEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Test whether this object owns a valid descriptor. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs8UniqueFd7releaseEv">
+<span id="_CPPv3N4wmfs8UniqueFd7releaseEv"></span><span id="_CPPv2N4wmfs8UniqueFd7releaseEv"></span><span id="wmfs::UniqueFd::release"></span><span class="target" id="classwmfs_1_1UniqueFd_1a490737472f25735d6cd8a18afbd406f5"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">release</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4N4wmfs8UniqueFd7releaseEv" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Transfer ownership to the caller and leave this object empty. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N4wmfs8UniqueFd5resetEi">
+<span id="_CPPv3N4wmfs8UniqueFd5resetEi"></span><span id="_CPPv2N4wmfs8UniqueFd5resetEi"></span><span id="wmfs::UniqueFd::reset__i"></span><span class="target" id="classwmfs_1_1UniqueFd_1aabbfcf3bcfff81a342ad24a7693cb30d"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">reset</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">fd</span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="o"><span class="pre">-</span></span><span class="m"><span class="pre">1</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">noexcept</span></span><a class="headerlink" href="#_CPPv4N4wmfs8UniqueFd5resetEi" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Close the current descriptor and optionally take ownership of another. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK4wmfs8UniqueFd17duplicate_cloexecEi">
+<span id="_CPPv3NK4wmfs8UniqueFd17duplicate_cloexecEi"></span><span id="_CPPv2NK4wmfs8UniqueFd17duplicate_cloexecEi"></span><span id="wmfs::UniqueFd::duplicate_cloexec__iC"></span><span class="target" id="classwmfs_1_1UniqueFd_1ac936f7a68e33dec45041e547e5af9213"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4N4wmfs8UniqueFdE" title="wmfs::UniqueFd"><span class="n"><span class="pre">UniqueFd</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">duplicate_cloexec</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">minimum</span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="m"><span class="pre">0</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK4wmfs8UniqueFd17duplicate_cloexecEi" title="Link to this definition">¶</a><br /></dt>
+<dd><p>Duplicate the descriptor with close-on-exec enabled. </p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>minimum</strong> – Lowest descriptor number accepted by <code class="docutils literal notranslate"><span class="pre">fcntl</span></code>. </p>
+</dd>
+<dt class="field-even">Throws<span class="colon">:</span></dt>
+<dd class="field-even"><p><span><span class="cpp-expr sig sig-inline cpp"><span class="n">std</span><span class="p">::</span><span class="n">system_error</span></span></span> – if duplication fails. </p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A new owning descriptor. </p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../data-flow.html">Data Flow And Reading Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="python.html">Python API Reference</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">C++ API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#native-control-session">Native Control Session</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#worker-mapping-api">Worker Mapping API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#reference-kernels">Reference Kernels</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#file-descriptor-ownership">File Descriptor Ownership</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../contributing-docs.html">Contributing Documentation</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="python.html" title="previous chapter">Python API Reference</a></li>
+      <li>Next: <a href="../contributing-docs.html" title="next chapter">Contributing Documentation</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/api/cpp.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

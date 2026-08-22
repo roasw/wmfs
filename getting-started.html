@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Getting Started &#8212; WMFS ce493f132d49</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <script src="_static/documentation_options.js?v=cbf29fbe"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Data Flow And Reading Guide" href="data-flow.html" />
+    <link rel="prev" title="WMFS Documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="getting-started">
+<h1>Getting Started<a class="headerlink" href="#getting-started" title="Link to this heading">¶</a></h1>
+<p>The public API does not expose RPC requests, workers, or shared-memory handles.
+The same functions are used for every backend.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">wmfs</span>
+
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">discover_plugins</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;plugins&quot;</span><span class="p">))</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">use_backend</span><span class="p">(</span><span class="s2">&quot;isolated&quot;</span><span class="p">)</span>
+
+<span class="n">a</span> <span class="o">=</span> <span class="n">wmfs</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">b</span> <span class="o">=</span> <span class="n">wmfs</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">c</span> <span class="o">=</span> <span class="n">wmfs</span><span class="o">.</span><span class="n">add_scalar</span><span class="p">(</span><span class="n">wmfs</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">),</span> <span class="mf">1.0</span><span class="p">)</span>
+<span class="n">c</span><span class="o">.</span><span class="n">square</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">grad</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">grad</span><span class="p">)</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Use <code class="docutils literal notranslate"><span class="pre">local</span></code> for direct PyTorch execution, <code class="docutils literal notranslate"><span class="pre">bundled</span></code> for the in-process reference
+plugin when it was compiled, and <code class="docutils literal notranslate"><span class="pre">isolated</span></code> for process isolation. Plugin
+discovery starts and validates persistent workers eagerly, so the first
+operation does not start a second process.</p>
+<p>Operation names are dynamic module attributes. Before plugin discovery or an
+explicit <code class="docutils literal notranslate"><span class="pre">local</span></code>/<code class="docutils literal notranslate"><span class="pre">bundled</span></code> backend selection, names such as <code class="docutils literal notranslate"><span class="pre">wmfs.matmul</span></code> do not
+exist. Import <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> first, configure the runtime, and then access its published
+operations.</p>
+<p><code class="docutils literal notranslate"><span class="pre">empty</span></code>, <code class="docutils literal notranslate"><span class="pre">zeros</span></code>, <code class="docutils literal notranslate"><span class="pre">ones</span></code>, and <code class="docutils literal notranslate"><span class="pre">randn</span></code> return ordinary Torch tensors. With the
+isolated backend selected, their storage is allocated directly in shared memory
+and avoids an ingress copy on the first worker invocation. With <code class="docutils literal notranslate"><span class="pre">local</span></code> or
+<code class="docutils literal notranslate"><span class="pre">bundled</span></code>, they delegate to the corresponding native Torch constructors.</p>
+<p>Isolated autograd uses plugin-advertised first-order VJPs. The main process
+retains PyTorch graph scheduling; the plugin implements the mathematical VJP.
+Higher-order isolated gradients and isolated SVD gradients are currently
+rejected explicitly.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data-flow.html">Data Flow And Reading Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/python.html">Python API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/cpp.html">C++ API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing-docs.html">Contributing Documentation</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">WMFS Documentation</a></li>
+      <li>Next: <a href="data-flow.html" title="next chapter">Data Flow And Reading Guide</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/getting-started.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
