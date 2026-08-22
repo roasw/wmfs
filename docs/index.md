@@ -11,6 +11,7 @@ maxdepth: 2
 getting-started
 data-flow
 ring-protocol
+plugin-compatibility
 api/python
 api/cpp
 contributing-docs

@@ -73,6 +73,7 @@ TEST_LAYERS = {
         "test_environment.py",
         "test_failure_boundaries.py",
         "test_fd_broker.py",
+        "test_generated_v1_compatibility.py",
         "test_invocation.py",
         "test_isolated.py",
         "test_output_metadata.py",
