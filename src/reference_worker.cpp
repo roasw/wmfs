@@ -60,6 +60,13 @@ std::uint64_t nanoseconds_since(std::chrono::steady_clock::time_point start) {
             .count());
 }
 
+std::uint64_t steady_nanoseconds() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
 Arguments parse_arguments(int argc, char **argv) {
     Arguments result;
     for (int index = 1; index < argc; ++index) {
@@ -473,16 +480,26 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
         wmfs_ring_record_v1 command{};
         if (commands.pop(command) != wmfs::RingWaitResult::success)
             return;
+        const auto profiled =
+            (command.flags & WMFS_RING_RECORD_FLAG_PROFILE) != 0;
+        const auto worker_dequeued_ns = profiled ? steady_nanoseconds() : 0;
         wmfs_ring_record_v1 completion{};
         completion.kind = command.kind == WMFS_RING_COMMAND_INVOKE
                               ? WMFS_RING_COMPLETION_INVOKE
-                              : WMFS_RING_COMPLETION_PLAN_OUTPUTS;
+                          : command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS
+                              ? WMFS_RING_COMPLETION_PLAN_OUTPUTS
+                              : WMFS_RING_COMPLETION_PONG;
         completion.flags = command.flags;
         completion.session_generation = command.session_generation;
         completion.submission_id = command.submission_id;
         completion.invocation_id = command.invocation_id;
         completion.operation_id = command.operation_id;
         completion.status = WMFS_RING_STATUS_OK;
+        completion.profile.command_published_ns =
+            command.profile.command_published_ns;
+        completion.profile.worker_dequeued_ns = worker_dequeued_ns;
+        completion.profile.worker_started_ns =
+            profiled ? steady_nanoseconds() : 0;
         try {
             c10::InferenceMode inference_mode;
             std::vector<TensorLease> inputs;
@@ -532,6 +549,13 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
                     elapsed > completion.profile.worker_kernel_ns
                         ? elapsed - completion.profile.worker_kernel_ns
                         : 0;
+            } else if (command.kind == WMFS_RING_COMMAND_PING) {
+                const auto kernel = std::chrono::steady_clock::now();
+                if (command.operation_id != 0)
+                    std::this_thread::sleep_for(
+                        std::chrono::nanoseconds(command.operation_id));
+                completion.profile.worker_kernel_ns =
+                    profiled ? nanoseconds_since(kernel) : 0;
             } else {
                 throw std::invalid_argument("Unsupported ring command");
             }
@@ -546,6 +570,8 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
                       "RuntimeError", error.what());
         }
         buffers.finish_invocation(command.invocation_id);
+        completion.profile.completion_published_ns =
+            profiled ? steady_nanoseconds() : 0;
         if (completions.push(completion) != wmfs::RingWaitResult::success)
             return;
     }

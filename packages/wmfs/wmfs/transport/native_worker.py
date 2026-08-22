@@ -33,7 +33,13 @@ from wmfs.transport.worker_process import (
     _start_worker,
 )
 from wmfs_plugin.metadata import metadata_from_reader
-from wmfs_plugin.ring import COMMAND_PLAN_OUTPUTS, DEFAULT_CAPACITY, RingOwner
+from wmfs_plugin.ring import (
+    COMMAND_PING,
+    COMMAND_PLAN_OUTPUTS,
+    DEFAULT_CAPACITY,
+    Record,
+    RingOwner,
+)
 
 _MAX_NATIVE_DESCRIPTORS = 256
 
@@ -182,6 +188,28 @@ class NativeWorkerSession:
         with self._lifecycle_lock:
             self._ensure_open().ping(secrets.randbits(64))
 
+    def ring_ping(self, *, worker_hold_ns: int = 0) -> object:
+        """Measure one benchmark-only command/completion ring round trip."""
+        if not 0 <= worker_hold_ns <= 0xFFFFFFFF:
+            raise ValueError("Ring ping worker hold must fit uint32 nanoseconds")
+        if self._rpc_compatibility:
+            raise RuntimeError("Ring ping is unavailable in RPC compatibility mode")
+        with self._lifecycle_lock:
+            self._ensure_open()
+            rings = self._rings
+        response, metrics = rings.submit_profiled(
+            Record(
+                COMMAND_PING,
+                rings.generation,
+                0,
+                secrets.randbits(64) or 1,
+                worker_hold_ns,
+            ),
+            self._deadlines.request,
+        )
+        _raise_ring_error(response)
+        return metrics
+
     def close(self) -> None:
         with self._lifecycle_lock:
             if self._session is not None:
@@ -307,6 +335,7 @@ class NativeWorkerSession:
                 native_start = perf_counter_ns() if collect_metrics else 0
                 mark_reused_outputs_dirty(output_plan)
                 dispatched = True
+                ring_metrics = None
                 if self._rpc_compatibility:
                     arguments = (
                         invocation_id,
@@ -327,7 +356,12 @@ class NativeWorkerSession:
                     native_profile = self._ensure_open().invoke(*arguments)
                     _raise_operation_error(native_profile)
                 else:
-                    completion = self._rings.submit(
+                    submit = (
+                        self._rings.submit_profiled
+                        if collect_metrics
+                        else self._rings.submit
+                    )
+                    completion = submit(
                         _invocation_record(
                             self._rings.generation,
                             invocation_id,
@@ -339,6 +373,8 @@ class NativeWorkerSession:
                         ),
                         self._deadlines.request,
                     )
+                    if collect_metrics:
+                        completion, ring_metrics = completion
                     self._ensure_open().abort_invocation(invocation_id)
                     _raise_ring_error(completion)
                     profile = completion.profile
@@ -376,7 +412,27 @@ class NativeWorkerSession:
                 output_plan_ns=output_plan.output_plan_ns,
                 native_call_ns=native_call_ns,
                 native_queue_wait_ns=int(native_profile.get("queue_wait_ns", 0)),
-                native_rpc_ns=native_call_ns,
+                native_rpc_ns=native_call_ns if self._rpc_compatibility else 0,
+                ring_round_trip_ns=(ring_metrics.round_trip_ns if ring_metrics else 0),
+                ring_submission_queue_ns=(
+                    ring_metrics.submission_queue_ns if ring_metrics else 0
+                ),
+                ring_enqueue_ns=(ring_metrics.enqueue_ns if ring_metrics else 0),
+                ring_backpressure_wait_ns=(
+                    ring_metrics.backpressure_wait_ns if ring_metrics else 0
+                ),
+                ring_command_wakeup_ns=(
+                    ring_metrics.command_wakeup_ns if ring_metrics else 0
+                ),
+                ring_worker_queue_ns=(
+                    ring_metrics.worker_queue_ns if ring_metrics else 0
+                ),
+                ring_completion_wakeup_ns=(
+                    ring_metrics.completion_wakeup_ns if ring_metrics else 0
+                ),
+                ring_result_materialization_ns=(
+                    ring_metrics.result_materialization_ns if ring_metrics else 0
+                ),
                 worker_input_views_ns=int(
                     native_profile.get("worker_input_views_ns", 0)
                 ),

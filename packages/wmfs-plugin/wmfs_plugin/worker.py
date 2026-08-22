@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter_ns
+from time import perf_counter_ns, sleep
 from types import ModuleType
 from typing import TypeAlias
 
@@ -22,9 +22,11 @@ from wmfs_plugin.ring import (
     ABI_MINOR,
     CAPABILITIES,
     COMMAND_INVOKE,
+    COMMAND_PING,
     COMMAND_PLAN_OUTPUTS,
     COMPLETION_INVOKE,
     COMPLETION_PLAN_OUTPUTS,
+    COMPLETION_PONG,
     FLAG_PROFILE,
     HEADER_SIZE,
     RECORD_SIZE,
@@ -287,11 +289,12 @@ def _ring_worker_loop(
             command = commands.pop()
         except RingError:
             return
-        completion_kind = (
-            COMPLETION_INVOKE
-            if command.kind == COMMAND_INVOKE
-            else COMPLETION_PLAN_OUTPUTS
-        )
+        worker_dequeued_ns = perf_counter_ns() if command.flags & FLAG_PROFILE else 0
+        completion_kind = {
+            COMMAND_INVOKE: COMPLETION_INVOKE,
+            COMMAND_PLAN_OUTPUTS: COMPLETION_PLAN_OUTPUTS,
+            COMMAND_PING: COMPLETION_PONG,
+        }.get(command.kind, COMPLETION_INVOKE)
         completion = Record(
             completion_kind,
             command.generation,
@@ -299,7 +302,13 @@ def _ring_worker_loop(
             command.invocation_id,
             command.operation_id,
             STATUS_OK,
+            flags=command.flags,
         )
+        profile = list(completion.profile)
+        profile[0] = command.profile[0]
+        profile[1] = worker_dequeued_ns
+        profile[2] = perf_counter_ns() if command.flags & FLAG_PROFILE else 0
+        completion.profile = tuple(profile)
         try:
             if command.kind == COMMAND_INVOKE:
                 measured = _invoke_known(
@@ -310,14 +319,12 @@ def _ring_worker_loop(
                 )
                 if measured:
                     completion.profile = (
-                        0,
-                        0,
-                        0,
+                        *completion.profile[:3],
                         measured["inputViewsNs"],
                         measured["outputViewsNs"],
                         measured["dispatchNs"],
                         measured["kernelNs"],
-                        0,
+                        completion.profile[7],
                     )
             elif command.kind == COMMAND_PLAN_OUTPUTS:
                 planned = _plan_outputs(
@@ -332,6 +339,14 @@ def _ring_worker_loop(
                     )
                     for item in planned
                 )
+            elif command.kind == COMMAND_PING:
+                kernel_started = perf_counter_ns()
+                if command.operation_id:
+                    sleep(command.operation_id / 1_000_000_000)
+                if command.flags & FLAG_PROFILE:
+                    profile = list(completion.profile)
+                    profile[6] = perf_counter_ns() - kernel_started
+                    completion.profile = tuple(profile)
             else:
                 raise ValueError("Unsupported ring command")
         except _OperationFailure as error:
@@ -343,6 +358,10 @@ def _ring_worker_loop(
             completion.error_type = type(error).__name__
             completion.error_message = str(error)
         try:
+            if completion.flags & FLAG_PROFILE:
+                profile = list(completion.profile)
+                profile[7] = perf_counter_ns()
+                completion.profile = tuple(profile)
             completions.push(completion)
         except RingError:
             return

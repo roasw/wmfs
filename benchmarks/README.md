@@ -15,17 +15,17 @@ and C++ worker were built in Release mode by their Nix packages. The worker
 contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
 glibc 2.42.
 Torch was limited to one CPU thread. Each operation was warmed up twice, then
-measured ten times. The checked report envelopes use schema 9 and explicitly
+measured ten times. The checked report envelopes use schema 10 and explicitly
 contain no current operation samples because bundled measurements have not been
 generated on the reference host. Their `historical_report` links point to the
 earlier schema 5 numeric reports retained as `baseline.schema5.json` and
 `arena.schema5.json`, rather than relabeling or fabricating results. Those
 legacy boundaries included result destruction and safe-pool
-retirement/reset in isolated end-to-end samples. New schema 9 reports contain
+retirement/reset in isolated end-to-end samples. New schema 10 reports contain
 local, bundled, and isolated samples keyed by backend. All primary samples stop
 at backend return and post-return cleanup is measured separately.
-Known outputs are preallocated from schema metadata and each operation uses one
-Cap'n Proto RPC between the C++ client and C++ worker. The table reports
+Known outputs are preallocated from schema metadata and each operation uses the
+command/completion rings. Cap'n Proto is startup/control only. The table reports
 medians; the JSON reports also contain p95, standard deviation, allocation
 statistics, and transport diagnostics. Pooled reclamation diagnostics use
 internal cumulative metric deltas and report the reclaimed-buffer population,
@@ -55,7 +55,9 @@ memfds. It preserves one-FD-per-buffer capabilities, so each reused generation
 still incurs acknowledged worker retirement and a new FD mapping. The arena
 reached 97.1% suballocation hit rates with one memfd.
 
-RPC-only median latency was 0.082 ms pooled and 0.081 ms in the arena. The
+The historical Cap'n Proto RPC-only median latency was 0.082 ms pooled and 0.081
+ms in the arena. It remains labeled as the old RPC baseline rather than being
+reinterpreted as a ring measurement. The
 schema 5 1,000-call high-frequency `add_scalar` run measured 0.337 ms median and
 2,502 calls/s pooled, versus 0.226 ms and 4,107 calls/s in the arena. Reusing a
 managed `out=` tensor reduced these to 0.262 ms and 3,186 calls/s pooled, and
@@ -71,9 +73,13 @@ reduced that to about 0.003 ms and removed pycapnp and asyncio from steady-state
 dispatch. Compared with the optimized Python worker report, arena small
 `add_scalar` fell from 0.431 ms to 0.198 ms and high-frequency latency fell from
 0.342 ms to 0.186 ms. Detailed JSON diagnostics separate scalar binding,
-output-plan evaluation, native queue wait, RPC, worker views, dispatch, and
-kernel execution. Schema 9 also records backend comparison contracts and groups
-diagnostics by Python frontend, RPC/control, mapping/transport, allocation,
+output-plan evaluation, ring submission/enqueue, wakeup, worker queue, worker
+views, dispatch, kernel, completion, and materialization. Schema 10 also records
+an independent ring ping and a capacity-1 concurrent pressure probe. The
+pressure probe holds each ping in the worker for a recorded 1 ms so the producer
+reliably reaches capacity and reports the actual eventfd backpressure wait, while
+retaining Cap'n Proto ping as the startup/control comparison. Diagnostics are
+grouped by Python frontend, ring/control, mapping/transport, allocation,
 reclamation, and kernel provenance. It does not derive a residual Python
 bookkeeping value from overlapping component timers. Profiling is opt-in on
 each invocation, so ordinary calls do not execute the timing code.
@@ -82,12 +88,12 @@ Protocol v7 separates ordinary completion from profiled metrics. The native
 client also caches value-only tensor descriptors and replaces its allocating
 promise/function queue with a synchronous semaphore handoff. These changes
 reduce allocation pressure but did not move ordinary end-to-end latency beyond
-run-to-run noise: the mandatory RPC and thread wakeup now dominate. Reusable
+run-to-run noise: RPC and thread wakeup dominated that historical implementation. Reusable
 outputs are the measurable remaining eager-path optimization, improving the
 high-frequency cheap-operation median by roughly 19-22% in this report.
 
 These historical values characterize one WSL2 host and are not performance
-thresholds. Regenerate both schema 9 reports on the target system when
+thresholds. Regenerate both schema 10 reports on the target system when
 evaluating the security and performance tradeoff. Compare local, bundled, and
 isolated under identical settings; bundled versus isolated is the focused
 isolation comparison because it holds the reference C++ kernel constant. Only

@@ -34,7 +34,15 @@ def test_native_session_runs_known_outputs_with_one_arena_mapping() -> None:
             torch.testing.assert_close(product, a.tensor @ b.tensor)
             torch.testing.assert_close(u @ torch.diag(singular_values) @ vh, a.tensor)
             torch.testing.assert_close(result, a.tensor + 1.5)
-            assert profile.native_rpc_ns > profile.worker_kernel_ns > 0
+            assert profile.native_call_ns > profile.worker_kernel_ns > 0
+            assert profile.native_rpc_ns == 0
+            assert profile.ring_round_trip_ns > profile.worker_kernel_ns
+            assert profile.ring_submission_queue_ns >= 0
+            assert profile.ring_enqueue_ns >= 0
+            assert profile.ring_command_wakeup_ns >= 0
+            assert profile.ring_worker_queue_ns >= 0
+            assert profile.ring_completion_wakeup_ns >= 0
+            assert profile.ring_result_materialization_ns >= 0
             assert profile.worker_input_views_ns > 0
             assert profile.worker_output_views_ns > 0
             assert profile.scalar_binding_ns > 0
@@ -73,6 +81,19 @@ def test_native_safe_pool_retires_reused_generations() -> None:
             assert second_managed.buffer.generation == identity[1] + 1
             assert session._session.transfer_count == 3
             session.ping()
+            ring = session.ring_ping()
+            assert ring.round_trip_ns > 0
+            assert ring.command_wakeup_ns >= 0
+            assert ring.worker_queue_ns >= 0
+            assert ring.completion_wakeup_ns >= 0
+            assert ring.result_materialization_ns >= 0
+            assert ring.backpressure_wait_ns >= 0
+            assert ring.submission_queue_ns <= ring.round_trip_ns
+            assert ring.enqueue_ns <= ring.round_trip_ns
+            assert ring.command_wakeup_ns <= ring.round_trip_ns
+            assert ring.worker_queue_ns <= ring.round_trip_ns
+            assert ring.completion_wakeup_ns <= ring.round_trip_ns
+            assert ring.result_materialization_ns <= ring.round_trip_ns
         finally:
             session.close()
 

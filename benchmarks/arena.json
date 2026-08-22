@@ -1,5 +1,5 @@
 {
-    "schema_version": 9,
+    "schema_version": 10,
     "measurement_status": "Bundled reference measurements have not been generated.",
     "backends": [
         "local",
@@ -7,5 +7,6 @@
         "isolated"
     ],
     "operations": [],
-    "historical_report": "arena.schema5.json"
+    "historical_report": "arena.schema5.json",
+    "historical_measurement_kind": "Cap'n Proto per-operation RPC baseline"
 }

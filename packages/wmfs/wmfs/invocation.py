@@ -38,6 +38,14 @@ class InvocationMetrics:
     native_call_ns: int = 0
     native_queue_wait_ns: int = 0
     native_rpc_ns: int = 0
+    ring_round_trip_ns: int = 0
+    ring_submission_queue_ns: int = 0
+    ring_enqueue_ns: int = 0
+    ring_backpressure_wait_ns: int = 0
+    ring_command_wakeup_ns: int = 0
+    ring_worker_queue_ns: int = 0
+    ring_completion_wakeup_ns: int = 0
+    ring_result_materialization_ns: int = 0
     worker_input_views_ns: int = 0
     worker_output_views_ns: int = 0
     worker_dispatch_ns: int = 0

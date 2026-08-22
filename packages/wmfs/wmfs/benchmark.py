@@ -7,6 +7,7 @@ import platform
 import statistics
 import sys
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ _DEFAULT_SIZES = {
 }
 _DTYPES = {"float32": torch.float32, "float64": torch.float64}
 _BACKEND_NAMES = ("local", "bundled", "isolated")
+_PRESSURE_WORKER_HOLD_NS = 1_000_000
 
 _COMPARISON_CONTRACT = {
     "local": (
@@ -44,7 +46,8 @@ _COMPARISON_CONTRACT = {
     ),
     "isolated": (
         "Python frontend binding and planning, runtime-owned shared outputs, native "
-        "handoff, RPC, worker dispatch, and the same transport-neutral C++ kernel."
+        "handoff, command/completion rings, worker dispatch, and the same "
+        "transport-neutral C++ kernel."
     ),
 }
 
@@ -57,18 +60,28 @@ _DIAGNOSTIC_PROVENANCE = {
             "latency and is not inferred by subtracting overlapping timers."
         ),
     },
-    "rpc_control": {
+    "ring_control": {
         "metrics": [
-            "rpc_round_trip_ms",
+            "ring_round_trip_ms",
+            "ring_submission_queue_ms",
+            "ring_enqueue_ms",
+            "ring_backpressure_wait_ms",
+            "ring_command_wakeup_ms",
+            "ring_worker_queue_ms",
+            "ring_completion_wakeup_ms",
+            "ring_result_materialization_ms",
             "native_call_ms",
-            "native_queue_wait_ms",
-            "native_rpc_ms",
             "worker_dispatch_ms",
         ],
         "boundary": (
-            "RPC-only ping is independent. Native call is an invocation envelope; "
-            "queue, operation RPC, and worker dispatch are nested profile components."
+            "Ring ping is independent. Submission queue, publication/backpressure, "
+            "worker wakeup/queue, completion wakeup, and caller materialization are "
+            "measured at their owning ring boundary."
         ),
+    },
+    "startup_control": {
+        "metrics": ["rpc_startup_control_round_trip_ms"],
+        "boundary": "Cap'n Proto ping retained only as a startup/control baseline.",
     },
     "mapping_transport": {
         "metrics": [
@@ -131,6 +144,7 @@ class BenchmarkConfig:
     warmups: int = 2
     startup_iterations: int = 3
     rpc_iterations: int = 50
+    backpressure_iterations: int = 32
     diagnostic_iterations: int = 5
     threads: int = 1
     dtype: torch.dtype = torch.float32
@@ -146,6 +160,7 @@ class BenchmarkConfig:
             self.iterations,
             self.startup_iterations,
             self.rpc_iterations,
+            self.backpressure_iterations,
             self.diagnostic_iterations,
             self.threads,
             self.high_frequency_iterations,
@@ -212,6 +227,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
 
     startup = _benchmark_startup(manifest, metadata, config)
     rpc = _benchmark_rpc(manifest, metadata, config)
+    ring = _benchmark_ring(manifest, metadata, config)
+    ring_pressure = _benchmark_ring_pressure(manifest, metadata, config)
 
     generator = torch.Generator().manual_seed(config.seed)
     cases = []
@@ -251,8 +268,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         else None
     )
 
-    return {
-        "schema_version": 9,
+    report = {
+        "schema_version": 10,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -282,6 +299,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "warmups": config.warmups,
             "startup_iterations": config.startup_iterations,
             "rpc_iterations": config.rpc_iterations,
+            "backpressure_iterations": config.backpressure_iterations,
             "diagnostic_iterations": config.diagnostic_iterations,
             "threads": config.threads,
             "dtype": str(config.dtype).removeprefix("torch."),
@@ -293,7 +311,11 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "sizes": config.sizes,
         },
         "worker_startup_ms": summarize(startup),
+        "rpc_startup_control_round_trip_ms": summarize(rpc),
         "rpc_round_trip_ms": summarize(rpc),
+        "ring_control": _summarize_ring_metrics(ring),
+        "ring_capacity_pressure": _summarize_ring_metrics(ring_pressure),
+        "ring_capacity_pressure_worker_hold_ns": _PRESSURE_WORKER_HOLD_NS,
         "measurement_boundaries": {
             "primary_calls": (
                 "Backend invocation through backend return; excludes result destruction, "
@@ -323,6 +345,48 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         "high_frequency_add_scalar_out": high_frequency_out,
         "operations": cases,
     }
+    validate_report(report)
+    return report
+
+
+def validate_report(report: dict[str, Any]) -> None:
+    """Validate the current benchmark report's required measurement groups."""
+    if report.get("schema_version") != 10:
+        raise ValueError("Benchmark report is not schema version 10")
+    if report.get("measurement_status") and not report.get("operations"):
+        if not report.get("historical_report"):
+            raise ValueError("Unmeasured report must identify its historical baseline")
+        return
+    required = {
+        "worker_startup_ms",
+        "rpc_startup_control_round_trip_ms",
+        "ring_control",
+        "ring_capacity_pressure",
+        "operations",
+    }
+    missing = required - report.keys()
+    if missing:
+        raise ValueError(f"Benchmark report is missing {sorted(missing)}")
+    ring_fields = {
+        "round_trip_ms",
+        "submission_queue_ms",
+        "enqueue_ms",
+        "backpressure_wait_ms",
+        "command_wakeup_ms",
+        "worker_queue_ms",
+        "kernel_ms",
+        "completion_wakeup_ms",
+        "result_materialization_ms",
+    }
+    for name in ("ring_control", "ring_capacity_pressure"):
+        if set(report[name]) != ring_fields:
+            raise ValueError(f"Benchmark report has invalid {name} fields")
+        for summary in report[name].values():
+            if summary["count"] <= 0 or any(
+                summary[field] < 0
+                for field in ("median_ms", "p95_ms", "standard_deviation_ms")
+            ):
+                raise ValueError(f"Benchmark report has invalid {name} summary")
 
 
 def render_table(report: dict[str, Any]) -> str:
@@ -414,7 +478,9 @@ def render_table(report: dict[str, Any]) -> str:
     )
 
     startup = report["worker_startup_ms"]
-    rpc = report["rpc_round_trip_ms"]
+    rpc = report["rpc_startup_control_round_trip_ms"]
+    ring = report["ring_control"]["round_trip_ms"]
+    pressure = report["ring_capacity_pressure"]
     high_frequency = report["high_frequency_add_scalar"]
     high_frequency_out = report["high_frequency_add_scalar_out"]
     lines.extend(
@@ -422,19 +488,37 @@ def render_table(report: dict[str, Any]) -> str:
             "",
             "Control plane (milliseconds)",
             *_table(
-                ("measurement", "samples", "median", "stddev"),
+                ("measurement", "samples", "median", "p95", "stddev"),
                 (
                     (
                         "worker startup",
                         startup["count"],
                         _number(startup["median_ms"]),
+                        _number(startup["p95_ms"]),
                         _number(startup["standard_deviation_ms"]),
                     ),
                     (
-                        "RPC-only round trip",
+                        "ring round trip",
+                        ring["count"],
+                        _number(ring["median_ms"]),
+                        _number(ring["p95_ms"]),
+                        _number(ring["standard_deviation_ms"]),
+                    ),
+                    (
+                        "Cap'n Proto startup/control ping",
                         rpc["count"],
                         _number(rpc["median_ms"]),
+                        _number(rpc["p95_ms"]),
                         _number(rpc["standard_deviation_ms"]),
+                    ),
+                    (
+                        "capacity-1 backpressure wait",
+                        pressure["backpressure_wait_ms"]["count"],
+                        _number(pressure["backpressure_wait_ms"]["median_ms"]),
+                        _number(pressure["backpressure_wait_ms"]["p95_ms"]),
+                        _number(
+                            pressure["backpressure_wait_ms"]["standard_deviation_ms"]
+                        ),
                     ),
                 ),
             ),
@@ -505,8 +589,10 @@ def render_table(report: dict[str, Any]) -> str:
                 case["tier"],
                 _median(diagnostics, "scalar_binding_ms"),
                 _median(diagnostics, "output_plan_evaluation_ms"),
-                _median(diagnostics, "native_queue_wait_ms"),
-                _median(diagnostics, "native_rpc_ms"),
+                _median(diagnostics, "ring_submission_queue_ms"),
+                _median(diagnostics, "ring_enqueue_ms"),
+                _median(diagnostics, "ring_command_wakeup_ms"),
+                _median(diagnostics, "ring_worker_queue_ms"),
                 _median(diagnostics, "worker_input_views_ms"),
                 _median(diagnostics, "worker_output_views_ms"),
                 _median(diagnostics, "worker_dispatch_ms"),
@@ -523,8 +609,10 @@ def render_table(report: dict[str, Any]) -> str:
                     "tier",
                     "scalar bind",
                     "shape plan",
-                    "queue",
-                    "RPC",
+                    "submit queue",
+                    "enqueue",
+                    "wakeup",
+                    "worker queue",
                     "input views",
                     "output views",
                     "dispatch",
@@ -561,6 +649,55 @@ def _benchmark_rpc(
         for _ in range(config.warmups):
             session.ping()
         return [_time_call(session.ping)[0] for _ in range(config.rpc_iterations)]
+
+
+def _benchmark_ring(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> list[object]:
+    with _benchmark_session(manifest, metadata, config) as (_buffers, session):
+        for _ in range(config.warmups):
+            session.ring_ping()
+        return [session.ring_ping() for _ in range(config.rpc_iterations)]
+
+
+def _benchmark_ring_pressure(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> list[object]:
+    previous = os.environ.get("WMFS_RING_CAPACITY")
+    os.environ["WMFS_RING_CAPACITY"] = "1"
+    try:
+        with _benchmark_session(manifest, metadata, config) as (_buffers, session):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [
+                    executor.submit(
+                        session.ring_ping, worker_hold_ns=_PRESSURE_WORKER_HOLD_NS
+                    )
+                    for _ in range(config.backpressure_iterations)
+                ]
+                return [future.result() for future in futures]
+    finally:
+        if previous is None:
+            os.environ.pop("WMFS_RING_CAPACITY", None)
+        else:
+            os.environ["WMFS_RING_CAPACITY"] = previous
+
+
+def _summarize_ring_metrics(samples: Sequence[object]) -> dict[str, Any]:
+    fields = {
+        "round_trip_ms": "round_trip_ns",
+        "submission_queue_ms": "submission_queue_ns",
+        "enqueue_ms": "enqueue_ns",
+        "backpressure_wait_ms": "backpressure_wait_ns",
+        "command_wakeup_ms": "command_wakeup_ns",
+        "worker_queue_ms": "worker_queue_ns",
+        "kernel_ms": "worker_kernel_ns",
+        "completion_wakeup_ms": "completion_wakeup_ns",
+        "result_materialization_ms": "result_materialization_ns",
+    }
+    return {
+        name: summarize([int(getattr(sample, attribute)) for sample in samples])
+        for name, attribute in fields.items()
+    }
 
 
 def _benchmark_case(
@@ -687,6 +824,14 @@ def _benchmark_diagnostics(
     native_call = []
     native_queue_wait = []
     native_rpc = []
+    ring_round_trip = []
+    ring_submission_queue = []
+    ring_enqueue = []
+    ring_backpressure_wait = []
+    ring_command_wakeup = []
+    ring_worker_queue = []
+    ring_completion_wakeup = []
+    ring_result_materialization = []
     worker_input_views = []
     worker_output_views = []
     worker_dispatch = []
@@ -736,6 +881,14 @@ def _benchmark_diagnostics(
         native_call.append(metrics.native_call_ns)
         native_queue_wait.append(metrics.native_queue_wait_ns)
         native_rpc.append(metrics.native_rpc_ns)
+        ring_round_trip.append(metrics.ring_round_trip_ns)
+        ring_submission_queue.append(metrics.ring_submission_queue_ns)
+        ring_enqueue.append(metrics.ring_enqueue_ns)
+        ring_backpressure_wait.append(metrics.ring_backpressure_wait_ns)
+        ring_command_wakeup.append(metrics.ring_command_wakeup_ns)
+        ring_worker_queue.append(metrics.ring_worker_queue_ns)
+        ring_completion_wakeup.append(metrics.ring_completion_wakeup_ns)
+        ring_result_materialization.append(metrics.ring_result_materialization_ns)
         worker_input_views.append(metrics.worker_input_views_ns)
         worker_output_views.append(metrics.worker_output_views_ns)
         worker_dispatch.append(metrics.worker_dispatch_ns)
@@ -805,6 +958,14 @@ def _benchmark_diagnostics(
         "native_call_ms": summarize(native_call),
         "native_queue_wait_ms": summarize(native_queue_wait),
         "native_rpc_ms": summarize(native_rpc),
+        "ring_round_trip_ms": summarize(ring_round_trip),
+        "ring_submission_queue_ms": summarize(ring_submission_queue),
+        "ring_enqueue_ms": summarize(ring_enqueue),
+        "ring_backpressure_wait_ms": summarize(ring_backpressure_wait),
+        "ring_command_wakeup_ms": summarize(ring_command_wakeup),
+        "ring_worker_queue_ms": summarize(ring_worker_queue),
+        "ring_completion_wakeup_ms": summarize(ring_completion_wakeup),
+        "ring_result_materialization_ms": summarize(ring_result_materialization),
         "worker_input_views_ms": summarize(worker_input_views),
         "worker_output_views_ms": summarize(worker_output_views),
         "worker_dispatch_ms": summarize(worker_dispatch),
@@ -1159,6 +1320,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--startup-iterations", type=int, default=3)
     parser.add_argument("--rpc-iterations", type=int, default=50)
+    parser.add_argument("--backpressure-iterations", type=int, default=32)
     parser.add_argument("--diagnostic-iterations", type=int, default=5)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--dtype", choices=tuple(_DTYPES), default="float32")
@@ -1189,6 +1351,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         warmups=arguments.warmups,
         startup_iterations=arguments.startup_iterations,
         rpc_iterations=arguments.rpc_iterations,
+        backpressure_iterations=arguments.backpressure_iterations,
         diagnostic_iterations=arguments.diagnostic_iterations,
         threads=arguments.threads,
         dtype=_DTYPES[arguments.dtype],

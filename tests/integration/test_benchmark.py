@@ -14,6 +14,7 @@ from wmfs.benchmark import (
     render_table,
     run_benchmarks,
     summarize,
+    validate_report,
 )
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
@@ -34,18 +35,22 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
 
 
 @pytest.mark.parametrize("name", ("baseline", "arena"))
-def test_checked_reports_use_schema_9_without_fabricated_samples(name: str) -> None:
+def test_checked_reports_use_schema_10_without_fabricated_samples(name: str) -> None:
     benchmark_directory = Path(__file__).parents[2] / "benchmarks"
     report = json.loads((benchmark_directory / f"{name}.json").read_text())
     historical = json.loads(
         (benchmark_directory / report["historical_report"]).read_text()
     )
 
-    assert report["schema_version"] == 9
+    assert report["schema_version"] == 10
     assert report["backends"] == ["local", "bundled", "isolated"]
     assert report["operations"] == []
     assert historical["schema_version"] == 5
     assert historical["operations"]
+    assert report["historical_measurement_kind"] == (
+        "Cap'n Proto per-operation RPC baseline"
+    )
+    validate_report(report)
 
 
 def test_sample_invocation_separates_call_return_from_cleanup(
@@ -103,6 +108,7 @@ def test_benchmark_requires_bundled_reference_support(
                 warmups=0,
                 startup_iterations=1,
                 rpc_iterations=1,
+                backpressure_iterations=2,
                 diagnostic_iterations=1,
                 high_frequency_iterations=1,
             )
@@ -125,6 +131,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
             warmups=0,
             startup_iterations=1,
             rpc_iterations=1,
+            backpressure_iterations=4,
             diagnostic_iterations=1,
             high_frequency_iterations=2,
             control_mode="python",
@@ -133,12 +140,16 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 9
+    assert report["schema_version"] == 10
     assert report["configuration"]["plugin_directory"] == str(
         PLUGIN_DIRECTORY.resolve()
     )
     assert report["worker_startup_ms"]["count"] == 1
     assert report["rpc_round_trip_ms"]["count"] == 1
+    assert report["rpc_startup_control_round_trip_ms"]["count"] == 1
+    assert report["ring_control"]["round_trip_ms"]["count"] == 1
+    assert report["ring_capacity_pressure"]["round_trip_ms"]["count"] == 4
+    assert report["ring_capacity_pressure"]["backpressure_wait_ms"]["p95_ms"] > 0
     assert report["configuration"]["control_mode"] == "python"
     assert report["high_frequency_add_scalar"]["iterations"] == 2
     assert set(report["high_frequency_add_scalar"]["backends"]) == {
@@ -177,6 +188,14 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "native_call_ms",
         "native_queue_wait_ms",
         "native_rpc_ms",
+        "ring_backpressure_wait_ms",
+        "ring_command_wakeup_ms",
+        "ring_completion_wakeup_ms",
+        "ring_enqueue_ms",
+        "ring_result_materialization_ms",
+        "ring_round_trip_ms",
+        "ring_submission_queue_ms",
+        "ring_worker_queue_ms",
         "output_allocations_per_invocation",
         "output_ensure_mapped_ms",
         "output_plan_evaluation_ms",
@@ -220,5 +239,8 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     provenance = report["diagnostic_provenance"]
     assert "scalar_binding_ms" in provenance["frontend_python"]["metrics"]
     assert "worker_kernel_ms" in provenance["kernel"]["metrics"]
+    assert "ring_round_trip_ms" in provenance["ring_control"]["metrics"]
     assert "not inferred by subtracting" in provenance["frontend_python"]["boundary"]
     assert "scalar bind" in render_table(report)
+    assert "Cap'n Proto startup/control ping" in render_table(report)
+    validate_report(report)

@@ -10,7 +10,7 @@ import threading
 from ctypes import CDLL, POINTER, c_uint32, c_uint64
 from ctypes.util import find_library
 from dataclasses import dataclass, field
-from time import monotonic
+from time import monotonic, perf_counter_ns
 from types import SimpleNamespace
 from typing import Iterable
 
@@ -534,6 +534,7 @@ class RingEndpoint:
         self.ring_fd, self.data_fd, self.space_fd = ring_fd, data_fd, space_fd
         self.generation, self.producer = generation, producer
         self._closed = False
+        self._interrupted = False
         size = os.fstat(ring_fd).st_size
         self._mapping = mmap.mmap(ring_fd, size)
         header = _HEADER.unpack_from(self._mapping)
@@ -563,21 +564,29 @@ class RingEndpoint:
             raise RingError("impossible ring counters")
         return producer, consumer
 
-    def push(self, record: Record, timeout: float | None = None) -> None:
+    def push(self, record: Record, timeout: float | None = None) -> int:
         if not self.producer:
             raise RuntimeError("Cannot push through ring consumer")
-        payload = encode(record)
+        payload = bytearray(encode(record))
         deadline = None if timeout is None else monotonic() + timeout
+        backpressure_wait_ns = 0
         with self._lock:
             while True:
                 producer, consumer = self._counters()
                 if producer - consumer < self.capacity:
+                    if record.flags & FLAG_PROFILE:
+                        profile = list(record.profile)
+                        profile[0] = perf_counter_ns()
+                        record.profile = tuple(profile)
+                        _PROFILE.pack_into(payload, _PROFILE_OFFSET, *record.profile)
                     offset = HEADER_SIZE + producer % self.capacity * RECORD_SIZE
                     self._mapping[offset : offset + RECORD_SIZE] = payload
                     _store_u64(self._mapping, 64, producer + 1)
                     os.eventfd_write(self.data_fd, 1)
-                    return
+                    return backpressure_wait_ns
+                wait_started = perf_counter_ns()
                 self._wait(self.space_fd, deadline)
+                backpressure_wait_ns += perf_counter_ns() - wait_started
 
     def pop(self, timeout: float | None = None) -> Record:
         if self.producer:
@@ -597,7 +606,7 @@ class RingEndpoint:
                 self._wait(self.data_fd, deadline)
 
     def _wait(self, fd: int, deadline: float | None) -> None:
-        if self._closed or _load_u32(self._mapping, 28) & 2:
+        if self._interrupted or _load_u32(self._mapping, 28) & 2:
             raise RingError("ring is closed")
         timeout = None if deadline is None else max(0.0, deadline - monotonic())
         poller = select.poll()
@@ -612,14 +621,23 @@ class RingEndpoint:
     def close(self) -> None:
         if self._closed:
             return
+        self.interrupt()
         self._closed = True
-        try:
-            self._mapping.close()
-        except AttributeError:
-            pass
+        self._mapping.close()
         for fd in (self.ring_fd, self.data_fd, self.space_fd):
             try:
                 os.close(fd)
+            except OSError:
+                pass
+
+    def interrupt(self) -> None:
+        if self._interrupted:
+            return
+        self._interrupted = True
+        _fetch_or_u32(self._mapping, 28, 2)
+        for fd in (self.data_fd, self.space_fd):
+            try:
+                os.eventfd_write(fd, 1)
             except OSError:
                 pass
 

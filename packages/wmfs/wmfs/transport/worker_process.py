@@ -8,6 +8,7 @@ import subprocess
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from time import perf_counter_ns
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -42,6 +43,7 @@ from wmfs_plugin.ring import (
     ABI_MINOR,
     CAPABILITIES,
     COMMAND_INVOKE,
+    COMMAND_PING,
     COMMAND_PLAN_OUTPUTS,
     DEFAULT_CAPACITY,
     FLAG_PROFILE,
@@ -83,7 +85,7 @@ class _RingClient:
             CAPABILITIES,
         )
         self._outbound: queue.Queue[Record | None] = queue.Queue()
-        self._pending: dict[int, queue.Queue[Record | BaseException]] = {}
+        self._pending: dict[int, _PendingRingSubmission] = {}
         self._lock = threading.Lock()
         self._next_submission = 1
         self._fatal: BaseException | None = None
@@ -93,28 +95,68 @@ class _RingClient:
         self._consumer.start()
 
     def submit(self, record: Record, timeout: float) -> Record:
-        waiter: queue.Queue[Record | BaseException] = queue.Queue(maxsize=1)
+        result, _metrics = self._submit(record, timeout, False)
+        return result
+
+    def submit_profiled(
+        self, record: Record, timeout: float
+    ) -> tuple[Record, "RingSubmissionMetrics"]:
+        return self._submit(record, timeout, True)
+
+    def _submit(
+        self, record: Record, timeout: float, profiled: bool
+    ) -> tuple[Record, "RingSubmissionMetrics"]:
+        submitted_ns = perf_counter_ns()
+        pending = _PendingRingSubmission(submitted_ns=submitted_ns)
         with self._lock:
             if self._fatal is not None:
                 raise RingError("ring dispatcher failed") from self._fatal
             submission = self._next_submission
             self._next_submission += 1
             record.submission_id = submission
-            self._pending[submission] = waiter
+            if profiled:
+                record.flags |= FLAG_PROFILE
+            self._pending[submission] = pending
         self._outbound.put(record)
         try:
-            result = waiter.get(timeout=timeout)
+            result = pending.waiter.get(timeout=timeout)
         except queue.Empty:
             self._fail(RingError("ring completion deadline expired"))
             raise TimeoutError("ring completion deadline expired") from None
         if isinstance(result, BaseException):
             raise result
-        return result
+        pending.produced.wait()
+        returned_ns = perf_counter_ns()
+        profile = result.profile
+        return result, RingSubmissionMetrics(
+            round_trip_ns=returned_ns - submitted_ns,
+            submission_queue_ns=max(0, pending.producer_started_ns - submitted_ns),
+            enqueue_ns=max(
+                0, pending.command_published_ns - pending.producer_started_ns
+            ),
+            backpressure_wait_ns=pending.backpressure_wait_ns,
+            command_wakeup_ns=_ordered_delta(profile[1], profile[0]),
+            worker_queue_ns=_ordered_delta(profile[2], profile[1]),
+            worker_kernel_ns=int(profile[6]),
+            completion_wakeup_ns=_ordered_delta(
+                pending.completion_consumed_ns, profile[7]
+            ),
+            result_materialization_ns=max(
+                0, returned_ns - pending.completion_consumed_ns
+            ),
+        )
 
     def _produce(self) -> None:
         try:
             while (record := self._outbound.get()) is not None:
-                self._commands.push(record)
+                with self._lock:
+                    pending = self._pending.get(record.submission_id)
+                if pending is None:
+                    raise RingError("ring command has no pending submission")
+                pending.producer_started_ns = perf_counter_ns()
+                pending.backpressure_wait_ns = self._commands.push(record)
+                pending.command_published_ns = perf_counter_ns()
+                pending.produced.set()
         except BaseException as error:
             self._fail(error)
 
@@ -122,11 +164,13 @@ class _RingClient:
         try:
             while True:
                 completion = self._completions.pop()
+                consumed_ns = perf_counter_ns()
                 with self._lock:
-                    waiter = self._pending.pop(completion.submission_id, None)
-                if waiter is None:
+                    pending = self._pending.pop(completion.submission_id, None)
+                if pending is None:
                     raise RingError("completion has unknown submission ID")
-                waiter.put(completion)
+                pending.completion_consumed_ns = consumed_ns
+                pending.waiter.put(completion)
         except BaseException as error:
             self._fail(error)
 
@@ -137,16 +181,49 @@ class _RingClient:
             self._fatal = error
             pending = tuple(self._pending.values())
             self._pending.clear()
-        for waiter in pending:
-            waiter.put(error)
+        for submission in pending:
+            submission.produced.set()
+            submission.waiter.put(error)
 
     def close(self) -> None:
         self._fail(RingError("ring dispatcher is closed"))
         self._outbound.put(None)
-        self._commands.close()
-        self._completions.close()
+        self._commands.interrupt()
+        self._completions.interrupt()
         self._producer.join(timeout=1)
         self._consumer.join(timeout=1)
+        self._commands.close()
+        self._completions.close()
+
+
+@dataclass(frozen=True)
+class RingSubmissionMetrics:
+    round_trip_ns: int
+    submission_queue_ns: int
+    enqueue_ns: int
+    backpressure_wait_ns: int
+    command_wakeup_ns: int
+    worker_queue_ns: int
+    worker_kernel_ns: int
+    completion_wakeup_ns: int
+    result_materialization_ns: int
+
+
+@dataclass
+class _PendingRingSubmission:
+    submitted_ns: int
+    waiter: queue.Queue[Record | BaseException] = field(
+        default_factory=lambda: queue.Queue(maxsize=1)
+    )
+    produced: threading.Event = field(default_factory=threading.Event)
+    producer_started_ns: int = 0
+    command_published_ns: int = 0
+    backpressure_wait_ns: int = 0
+    completion_consumed_ns: int = 0
+
+
+def _ordered_delta(later: int, earlier: int) -> int:
+    return max(0, int(later) - int(earlier)) if later and earlier else 0
 
 
 def _load_runtime_schema() -> ModuleType:
@@ -249,6 +326,27 @@ class WorkerSession:
                 raise RuntimeError("Worker session cannot synchronously call itself")
             future = asyncio.run_coroutine_threadsafe(self._ping(), self._loop)
             future.result(timeout=self._deadlines.request)
+
+    def ring_ping(self, *, worker_hold_ns: int = 0) -> RingSubmissionMetrics:
+        """Measure one benchmark-only command/completion ring round trip."""
+        if not 0 <= worker_hold_ns <= 0xFFFFFFFF:
+            raise ValueError("Ring ping worker hold must fit uint32 nanoseconds")
+        with self._submit_lock:
+            if self._closed or self._ring_client is None:
+                raise RuntimeError("Worker session is closed")
+            rings = self._ring_client
+        response, metrics = rings.submit_profiled(
+            Record(
+                COMMAND_PING,
+                rings.generation,
+                0,
+                secrets.randbits(64) or 1,
+                worker_hold_ns,
+            ),
+            self._deadlines.request,
+        )
+        _raise_ring_error(response)
+        return metrics
 
     def close(self) -> None:
         with self._submit_lock:
@@ -444,6 +542,7 @@ class WorkerSession:
 
             mark_reused_outputs_dirty(output_plan)
             dispatched = True
+            ring_metrics = None
             if self._rpc_compatibility:
                 wire = {
                     "invocationId": invocation_id,
@@ -468,9 +567,16 @@ class WorkerSession:
                     invocation,
                     collect_metrics,
                 )
-                response = await asyncio.to_thread(
-                    self._ring_client.submit, command, self._deadlines.request
+                submit = (
+                    self._ring_client.submit_profiled
+                    if collect_metrics
+                    else self._ring_client.submit
                 )
+                response = await asyncio.to_thread(
+                    submit, command, self._deadlines.request
+                )
+                if collect_metrics:
+                    response, ring_metrics = response
             self._fd_sender.finish_invocation(invocation_id)
             completed = True
             if self._rpc_compatibility:
@@ -486,11 +592,32 @@ class WorkerSession:
                 if collect_metrics and not self._rpc_compatibility
                 else (0,) * 8
             )
+            ring_metrics = ring_metrics if not self._rpc_compatibility else None
             return result, InvocationMetrics(
                 inputs=tuple(input_metrics or ()),
                 outputs=tuple(output_metrics or ()),
                 scalar_binding_ns=invocation.scalar_binding_ns,
                 output_plan_ns=output_plan.output_plan_ns,
+                ring_round_trip_ns=(ring_metrics.round_trip_ns if ring_metrics else 0),
+                ring_submission_queue_ns=(
+                    ring_metrics.submission_queue_ns if ring_metrics else 0
+                ),
+                ring_enqueue_ns=(ring_metrics.enqueue_ns if ring_metrics else 0),
+                ring_backpressure_wait_ns=(
+                    ring_metrics.backpressure_wait_ns if ring_metrics else 0
+                ),
+                ring_command_wakeup_ns=(
+                    ring_metrics.command_wakeup_ns if ring_metrics else 0
+                ),
+                ring_worker_queue_ns=(
+                    ring_metrics.worker_queue_ns if ring_metrics else 0
+                ),
+                ring_completion_wakeup_ns=(
+                    ring_metrics.completion_wakeup_ns if ring_metrics else 0
+                ),
+                ring_result_materialization_ns=(
+                    ring_metrics.result_materialization_ns if ring_metrics else 0
+                ),
                 worker_input_views_ns=(int(worker[3])),
                 worker_output_views_ns=(int(worker[4])),
                 worker_dispatch_ns=(int(worker[5])),
