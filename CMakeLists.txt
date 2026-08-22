@@ -81,6 +81,20 @@ if(BUILD_TESTING)
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/inc"
   )
   add_test(NAME wmfs-unique-fd COMMAND wmfs-unique-fd-test)
+
+  add_executable(wmfs-ring-protocol-test tests/cpp/ring_protocol_test.cpp)
+  target_include_directories(
+    wmfs-ring-protocol-test
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+  )
+  set_target_properties(
+    wmfs-ring-protocol-test
+    PROPERTIES
+      CXX_EXTENSIONS OFF
+      CXX_STANDARD 11
+      CXX_STANDARD_REQUIRED ON
+  )
+  add_test(NAME wmfs-ring-protocol COMMAND wmfs-ring-protocol-test)
 endif()
 
 set(WMFS_BUNDLE_REFERENCE OFF)

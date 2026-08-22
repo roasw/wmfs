@@ -10,6 +10,7 @@ maxdepth: 2
 ---
 getting-started
 data-flow
+ring-protocol
 api/python
 api/cpp
 contributing-docs
