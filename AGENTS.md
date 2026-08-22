@@ -6,12 +6,33 @@
   `packages/wmfs/wmfs`.
 - The independent Python plugin SDK is in `packages/wmfs-plugin`; plugins may
   depend on `wmfs_plugin` but must not depend on the main `wmfs` runtime.
+- The interface compiler and code generator are in `packages/wmfs-tool`; its
+  import package and command-line entry point are `wmfs_tool` and `wmfs-tool`.
+- Plugin interface definitions are the source of truth. `wmfs-tool` generates
+  the deployment manifest, C++ plugin ABI headers/stubs, and Python
+  metadata/stubs. Do not maintain a second handwritten registry.
+- Generated C++ plugin-facing code must compile as C++11. Generated Python
+  plugin-facing code must support the minimum Python 3 version declared by the
+  stable plugin ABI. The main runtime and private native code use C++20 or
+  newer.
 - Implement the runtime in Python first.
 - Use nanobind instead of pybind11 for future Python/C++ bindings.
-- Use C++20 or newer for all C++ code.
 - Keep the root `CMakeLists.txt`, C++ sources in `src`, and headers in `inc`.
 - Build C++ out of tree under the ignored `build` directory.
 - Commit messages must follow the rules in `.gitlint`.
+
+## Test Layout
+
+- Keep package unit tests with the package they test:
+  `packages/wmfs/tests`, `packages/wmfs-plugin/tests`, and
+  `packages/wmfs-tool/tests`.
+- Keep cross-package and worker-process tests under `tests/integration`.
+- Keep C++ unit tests under `tests/cpp` and run them through CTest.
+- Package unit tests must not require another WMFS package unless that package
+  is a declared public dependency.
+- Integration tests cover generated artifacts, runtime/plugin compatibility,
+  process isolation, command/completion rings, shared tensors, and installed
+  package behavior.
 
 ## Goal
 
@@ -44,11 +65,21 @@ Calling a registered function may actually mean:
 ```text
 Python call
     -> runtime dispatch
-    -> Cap'n Proto RPC
+    -> command ring submission
     -> isolated worker
     -> numerical kernel
-    -> RPC result
+    -> completion ring
+    -> tensor result
 ```
+
+Function registration and metadata exchange occur once during worker startup.
+The hot path must not perform per-operation discovery, registration, or RPC.
+
+Command submission and completion are internally asynchronous and support
+multiple in-flight operations per worker. Preserve the existing public API:
+ordinary calls such as `c = wmfs.matmul(a, b)` return tensor results and do not
+expose command objects, rings, RPC, or mandatory futures. A separate explicit
+async API may be added later, but is not required for the migration.
 
 ## Architecture
 
@@ -59,7 +90,7 @@ Python Frontend
       v
 Execution Runtime
       |
-      | Cap'n Proto RPC/control
+      | versioned startup handshake
       |
       +----------------------+
       |                      |
@@ -67,6 +98,9 @@ Execution Runtime
 Worker A                 Worker B
 glibc/toolchain A        glibc/toolchain B
 NumPy/PyTorch/etc.       NumPy/PyTorch/etc.
+      ^                      ^
+      | command/completion   | command/completion
+      | shared-memory rings  | shared-memory rings
       |                      |
       +----------+-----------+
                  |
@@ -80,18 +114,30 @@ Workers should only receive capabilities to the inputs required for an operation
 
 Do not expose the complete object store to plugins.
 
-## RPC
+## Interface Generation
 
-Use Cap'n Proto for:
+Plugin authors define a versioned, declarative interface specification. At
+build time, `wmfs-tool` consumes that specification and emits:
 
-- plugin interface definitions;
-- operation metadata;
-- RPC request/response;
-- function discovery/registration;
-- tensor metadata;
-- errors/status.
+```text
+plugin interface definition
+          |
+      wmfs-tool
+          |
+  +-------+----------+----------------+
+  |                  |                |
+manifest.json   generated C++   generated Python
+                 C++11 ABI      metadata/stubs
+```
 
-Prefer generating plugin registration code from the Cap'n Proto interface/schema rather than maintaining a second handwritten function registry.
+The generated manifest is read by the runtime without importing plugin code.
+Generated C++ and Python adapters depend only on the stable plugin ABI, not on
+private runtime implementation details.
+
+The specification and generated artifacts carry explicit format, ABI, and
+feature versions. Additive evolution must preserve old generated plugins where
+possible. Incompatible changes require a new ABI version and a clear startup
+diagnostic; never silently reinterpret old records.
 
 A plugin should explicitly describe:
 
@@ -107,12 +153,47 @@ Read-only must be the default.
 Mutation must be explicit.
 
 Known outputs are preallocated by the runtime and passed to the worker in the
-operation request. Use the allocator capability only for genuinely dynamic
-outputs whose shape cannot be declared in metadata.
+operation command. Use the output-allocation protocol only for genuinely
+dynamic outputs whose shape cannot be declared in metadata.
+
+## Startup And Rings
+
+At startup the runtime:
+
+1. Reads and validates the generated manifest.
+1. Registers exported functions into the namespaced Python API once.
+1. Launches the isolated worker.
+1. Performs a small, versioned handshake.
+1. Establishes one runtime-to-worker command ring.
+1. Establishes one worker-to-runtime completion ring.
+1. Establishes the FD-control channel and initial shared tensor mappings.
+
+Cap'n Proto may remain temporarily as a migration-only startup/control
+mechanism, but it is not part of the target plugin ABI or operation hot path.
+The final startup handshake is owned by the stable protocol generated by
+`wmfs-tool`.
+
+Ring records use fixed-width, process-independent values. Never place raw
+pointers, process-local FD numbers, C++ object layouts, or Python object details
+in shared memory. Every command and completion carries a session generation,
+submission ID, operation ID, bounded descriptor counts, and explicit status.
+
+The command ring is single-producer/single-consumer for one runtime/worker
+session unless a later protocol version explicitly adds another concurrency
+model. The completion ring is the reverse direction. Publication and
+consumption use documented atomic memory ordering. Ring-full behavior applies
+backpressure rather than overwriting unread records. Blocking waits use a
+kernel notification primitive such as `eventfd`; unbounded busy-spinning is not
+acceptable.
+
+Malformed records, impossible indices, generation mismatches, and ring
+invariant violations are fatal session errors. Ordinary algorithm failures are
+recoverable completion records and do not tear down the worker.
 
 ## Tensor Transport
 
-Do not serialize numerical tensor payloads through Cap'n Proto.
+Do not serialize numerical tensor payloads through the startup protocol or
+command/completion rings.
 
 For CPU tensors:
 
@@ -123,7 +204,7 @@ For CPU tensors:
 1. Construct NumPy/PyTorch/DLPack-compatible tensor views over the mapped memory.
 1. Numerical kernels operate directly on that memory.
 
-A serialized tensor descriptor should contain metadata such as:
+A ring tensor descriptor should contain metadata such as:
 
 ```text
 buffer capability/id
@@ -161,7 +242,9 @@ def operation(ctx, a, b):
     return out
 ```
 
-The worker may request output storage, but the runtime performs/controls the allocation.
+The worker may request output storage through the completion/control protocol,
+but the runtime performs and controls the allocation. Dynamic allocation must
+not grant unrestricted allocator or object-store access.
 
 The Python-facing API may still naturally return values:
 
@@ -169,7 +252,7 @@ The Python-facing API may still naturally return values:
 c = matmul(a, b)
 ```
 
-`c` is a managed tensor handle/view, not a copied RPC payload.
+`c` is a managed tensor handle/view, not a copied control-message payload.
 
 For operations with known output shape, allow runtime preallocation.
 
@@ -204,7 +287,7 @@ Algorithms must not need to understand:
 - memfd;
 - mmap;
 - FD passing;
-- RPC details.
+- transport details.
 
 Runtime adapters handle those concerns.
 
@@ -268,7 +351,8 @@ Also implement one deliberately cheap operation, such as:
 b = add_scalar(a, 1.0)
 ```
 
-This is important because it exposes the fixed RPC/process-isolation overhead.
+This is important because it exposes fixed control-plane/process-isolation
+overhead.
 
 ## Execution Modes
 
@@ -288,9 +372,10 @@ Everything executes in one process.
 ```text
 Python
   -> runtime
-  -> Cap'n Proto RPC
+  -> command ring
   -> worker process
   -> same numerical kernel
+  -> completion ring
 ```
 
 Tensor payloads are shared through mapped memory.
@@ -301,7 +386,9 @@ Measure separately:
 
 - local kernel execution time;
 - isolated end-to-end execution time;
-- RPC-only round-trip latency;
+- command/completion ring round-trip latency;
+- command enqueue and completion dequeue cost;
+- ring-full backpressure and wakeup cost;
 - first-use FD passing + mmap cost;
 - repeated-call cost with mappings cached;
 - shared-memory allocation cost;
@@ -312,7 +399,7 @@ Benchmark several tensor sizes.
 At minimum:
 
 ```text
-small    - RPC overhead dominates
+small    - control-plane overhead dominates
 medium   - mixed
 large    - computation dominates
 ```
@@ -350,7 +437,8 @@ or the reverse.
 
 The important requirement is that no plugin shared library is loaded into the main process.
 
-Communication must occur only through the defined RPC/shared-memory boundary.
+Communication occurs only through the generated startup protocol,
+command/completion rings, FD-control channel, and shared tensor mappings.
 
 Nix may be used to create reproducible incompatible environments.
 
@@ -359,8 +447,9 @@ Nix may be used to create reproducible incompatible environments.
 A plugin should contain:
 
 ```text
-plugin manifest/schema
-generated Cap'n Proto bindings
+plugin interface specification
+generated manifest.json
+generated C++11 and/or Python adapters
 worker executable/entry point
 implementation
 ```
@@ -377,13 +466,15 @@ Do not build a general package manager yet.
 
 Workers must not receive unrestricted access to the object store.
 
-For each invocation, create an operation-scoped context containing only the required capabilities:
+For each command, create an operation-scoped context containing only the
+required capabilities:
 
 ```text
 input buffer capabilities
 output allocator capability
 optional device capability
 logging/error reporting
+submission/completion identity
 ```
 
 Read-only input access should be the default.
@@ -421,6 +512,14 @@ Implementation status:
 - [x] Milestone 5: verified execution in a separately pinned glibc/toolchain
   environment.
 - [x] Milestone 6: local-versus-isolated benchmarking.
+- [ ] Milestone 7: `wmfs-tool` interface compiler and stable generated plugin
+  ABI.
+- [ ] Milestone 8: startup-only registration and versioned ring handshake.
+- [ ] Milestone 9: asynchronous command/completion ring hot path.
+- [ ] Milestone 10: dynamic allocation and recoverable errors over rings.
+- [ ] Milestone 11: compatibility fixtures built from older generated plugin
+  artifacts.
+- [ ] Milestone 12: ring-versus-RPC benchmark and removal of per-call RPC.
 
 ### Milestone 1
 
@@ -436,7 +535,9 @@ add_scalar()
 
 ### Milestone 2
 
-Implement Cap'n Proto worker RPC with ordinary serialized scalar/control messages.
+The original prototype implemented Cap'n Proto worker RPC with ordinary
+serialized scalar/control messages and dynamic plugin registration. Retain it
+only as migration input while implementing Milestones 7-12.
 
 Verify dynamic plugin registration.
 
@@ -463,6 +564,10 @@ Implemented by `wmfs-benchmark`, with a reproducible reference report in
 reports median, p95, and standard deviation; and separates worker startup, RPC,
 shared-memory transport, cached mappings, and output allocation costs.
 
+The ring architecture adds a baseline that separates enqueue, wakeup, worker
+queueing, kernel, completion, and result materialization. Keep the old RPC
+baseline for an explicit before/after comparison until migration is complete.
+
 The central success criterion is:
 
 > For sufficiently expensive numerical operations, process isolation should add only a small fixed control-plane cost while tensor payloads remain zero-copy shared memory.
@@ -475,7 +580,8 @@ The execution framework owns:
 
 ```text
 processes
-RPC
+startup handshake
+command/completion rings
 buffer allocation
 shared memory
 lifetime
@@ -502,3 +608,7 @@ small scalar metadata
 ```
 
 Everything else should remain private to either side.
+
+The stable plugin boundary is the generated ABI plus ring record format, not
+the main runtime's Python package, C++ classes, Cap'n Proto version, or build
+toolchain.
