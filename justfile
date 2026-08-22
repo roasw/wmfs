@@ -49,6 +49,10 @@ test-integration profile=build_type:
 test-sdk:
     just _test-sdk
 
+# Run the independent interface compiler tests explicitly.
+test-tool:
+    just _test-tool
+
 # Build and run native Python tests and CTest targets.
 test-native profile=build_type:
     just build "{{ profile }}"
@@ -67,6 +71,7 @@ test-all profile=build_type:
     just _test-root-layer "{{ profile }}" contract
     just _test-root-layer "{{ profile }}" integration
     just _test-sdk
+    just _test-tool
     just _test-root-layer "{{ profile }}" native
     ctest --test-dir "{{ root }}/build/{{ profile }}" --output-on-failure
     just _test-root-layer "{{ profile }}" package
@@ -86,6 +91,12 @@ _test-sdk:
     env \
       PYTHONPATH="{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
       pytest -q "{{ root }}/packages/wmfs-plugin/tests"
+
+[private]
+_test-tool:
+    env \
+      PYTHONPATH="{{ root }}/packages/wmfs-tool${PYTHONPATH:+:$PYTHONPATH}" \
+      pytest -q "{{ root }}/packages/wmfs-tool/tests"
 
 # Test the local Release development artifacts.
 test-release:
