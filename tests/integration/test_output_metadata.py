@@ -10,7 +10,7 @@ from wmfs.registry import OperationMetadata, OutputPlan, TensorParameter
 from wmfs.transport.worker_process import _load_plugin_schema
 from wmfs_plugin.metadata import metadata_from_reader, validate_operation_metadata
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def test_dynamic_output_plans_are_accepted_for_read_only_inputs() -> None:

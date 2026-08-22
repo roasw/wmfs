@@ -10,7 +10,7 @@ from wmfs.plugins import PluginManifest
 from wmfs.transport.deadlines import TransportDeadlines
 
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
-REFERENCE_DIRECTORY = Path(__file__).parents[1] / "plugins" / "reference"
+REFERENCE_DIRECTORY = Path(__file__).parents[2] / "plugins" / "reference"
 
 
 @dataclass(frozen=True)
@@ -76,22 +76,14 @@ def failure_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> object:
 
 
 TEST_LAYERS = {
-    "unit": {
-        "test_api.py",
-        "test_backend_lifecycle.py",
-        "test_dynamic_api.py",
-        "test_fd_broker.py",
-        "test_invocation.py",
-        "test_memory.py",
-        "test_output_metadata.py",
-        "test_registry.py",
-        "test_runtime_lifecycle.py",
-    },
     "contract": {"test_backend_contract.py"},
     "integration": {
         "test_environment.py",
         "test_failure_boundaries.py",
+        "test_fd_broker.py",
+        "test_invocation.py",
         "test_isolated.py",
+        "test_output_metadata.py",
         "test_plugins.py",
         "test_tensor_transport.py",
     },

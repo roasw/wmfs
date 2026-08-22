@@ -31,6 +31,7 @@ include = [
     "/README.md",
     "/inc/**",
     "/packages/wmfs/wmfs/**",
+    "/packages/wmfs/tests/**",
     "/packages/wmfs-plugin/wmfs_plugin/schemas/**",
     "/plugins/reference/generated/**",
     "/plugins/reference/schemas/**",

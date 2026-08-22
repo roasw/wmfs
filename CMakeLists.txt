@@ -75,7 +75,7 @@ if(WMFS_BUILD_DOCUMENTATION)
 endif()
 
 if(BUILD_TESTING)
-  add_executable(wmfs-unique-fd-test tests/unique_fd_test.cpp)
+  add_executable(wmfs-unique-fd-test tests/cpp/unique_fd_test.cpp)
   target_include_directories(
     wmfs-unique-fd-test
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/inc"
@@ -234,7 +234,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
   if(BUILD_TESTING)
     add_executable(
       wmfs-reference-mapped-buffers-test
-      tests/reference_mapped_buffers_test.cpp
+      tests/cpp/reference_mapped_buffers_test.cpp
       src/reference_mapped_buffers.cpp
     )
     target_include_directories(

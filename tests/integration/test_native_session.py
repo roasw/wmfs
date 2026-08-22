@@ -13,7 +13,7 @@ from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import _start_worker, inspect_plugin
 from wmfs_plugin.schema import load_tensor_schema
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def test_native_session_runs_known_outputs_with_one_arena_mapping() -> None:

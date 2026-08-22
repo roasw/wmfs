@@ -13,7 +13,7 @@ from wmfs.plugins import discover_plugins, find_manifests
 from wmfs.runtime import Runtime
 from wmfs.transport.worker_process import WorkerSession, inspect_plugin
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def test_finds_reference_plugin_manifest() -> None:

@@ -9,7 +9,7 @@ import pytest
 from wmfs_plugin.invocation import InvocationContext
 from wmfs_plugin.metadata import OperationMetadata
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 REFERENCE_SCHEMA = ROOT / "plugins/reference/schemas/wmfs-reference/reference.capnp"
 GENERATED_PYTHON = ROOT / "plugins/reference/wmfs_reference/_generated.py"
 

@@ -16,7 +16,7 @@ from wmfs.benchmark import (
     summarize,
 )
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def test_raw_benchmark_cli_requires_plugin_directory() -> None:
@@ -35,7 +35,7 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
 
 @pytest.mark.parametrize("name", ("baseline", "arena"))
 def test_checked_reports_use_schema_9_without_fabricated_samples(name: str) -> None:
-    benchmark_directory = Path(__file__).parents[1] / "benchmarks"
+    benchmark_directory = Path(__file__).parents[2] / "benchmarks"
     report = json.loads((benchmark_directory / f"{name}.json").read_text())
     historical = json.loads(
         (benchmark_directory / report["historical_report"]).read_text()

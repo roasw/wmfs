@@ -10,7 +10,7 @@ from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.transport.worker_process import WorkerSession, inspect_plugin
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def test_invoke_known_reads_cached_transferred_input() -> None:

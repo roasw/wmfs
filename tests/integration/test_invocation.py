@@ -17,7 +17,7 @@ from wmfs.plugins import find_manifests
 from wmfs.transport.worker_process import _load_plugin_schema
 from wmfs_plugin.metadata import metadata_from_reader
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def _operation(name: str) -> object:

@@ -9,7 +9,7 @@ import torch
 
 from wmfs.runtime import Runtime
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 BUNDLED_AVAILABLE = find_spec("wmfs._bundled") is not None
 NATIVE_AVAILABLE = find_spec("wmfs._native") is not None
 

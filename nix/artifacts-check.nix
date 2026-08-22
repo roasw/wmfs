@@ -74,7 +74,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "plugins/reference/schemas/wmfs-reference/reference.capnp",
           "src/native_module.cpp",
           "src/reference_kernels.cpp",
-          "tests/fixtures/failure_worker.py",
+          "tests/integration/fixtures/failure_worker.py",
         },
         "plugin": {
             "MANIFEST.in",

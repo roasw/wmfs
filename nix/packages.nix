@@ -6,7 +6,7 @@
 let
   version = versions.python;
   workers = import ./reference-workers.nix { inherit pkgs source versions; };
-  failureWorker = ../tests/fixtures/failure_worker.py;
+  failureWorker = ../tests/integration/fixtures/failure_worker.py;
   buildRuntime =
     {
       bundled ? false,
@@ -60,12 +60,12 @@ let
       checkPhase = ''
         runHook preCheck
         cd "$NIX_BUILD_TOP/$sourceRoot"
-        mkdir -p tests/fixtures
-        cp ${failureWorker} tests/fixtures/failure_worker.py
-        chmod u+wx tests/fixtures/failure_worker.py
-        patchShebangs tests/fixtures/failure_worker.py
+        mkdir -p tests/integration/fixtures
+        cp ${failureWorker} tests/integration/fixtures/failure_worker.py
+        chmod u+wx tests/integration/fixtures/failure_worker.py
+        patchShebangs tests/integration/fixtures/failure_worker.py
         for layer in ${if bundled then "contract package" else "unit contract integration native"}; do
-          pytest -c pytest.ini -m "$layer" tests
+          pytest -c pytest.ini -m "$layer" packages/wmfs/tests tests/integration
         done
         runHook postCheck
       '';
@@ -85,7 +85,7 @@ let
         -c ${source}/pytest.ini \
         -o pythonpath= \
         -p no:cacheprovider \
-        -q ${source}/tests/test_bundled.py
+        -q ${source}/tests/integration/test_bundled.py
     touch "$out"
   '';
   benchmark = pkgs.writeShellApplication {

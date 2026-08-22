@@ -6,7 +6,7 @@ import capnp
 
 from wmfs_plugin.schema import PROTOCOL_VERSION, schema_root
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 
 
 def test_distribution_versions_are_derived_from_git() -> None:

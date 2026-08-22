@@ -7,7 +7,7 @@ import wmfs
 from wmfs import randn, runtime
 from wmfs.runtime import Runtime
 
-PLUGIN_DIRECTORY = Path(__file__).parents[1] / "plugins"
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def matmul(*args: object, **kwargs: object) -> object:

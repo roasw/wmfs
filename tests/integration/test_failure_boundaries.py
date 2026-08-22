@@ -33,7 +33,7 @@ def _session_type(control_mode: str) -> type[WorkerSession] | type[NativeWorkerS
 def test_operation_error_preserves_worker_session(
     control_mode: str, profiled: bool
 ) -> None:
-    manifest = find_manifests((Path(__file__).parents[1] / "plugins",))[0]
+    manifest = find_manifests((Path(__file__).parents[2] / "plugins",))[0]
     with BufferManager() as buffers:
         session = _session_type(control_mode)(
             manifest,
