@@ -248,6 +248,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       CapnProto::kj-async
       Threads::Threads
       wmfs::protocol
+      wmfs::ring
       wmfs-reference-kernels
   )
   target_compile_options(wmfs-reference-worker PRIVATE ${TORCH_CXX_FLAGS})

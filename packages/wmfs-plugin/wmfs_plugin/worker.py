@@ -3,6 +3,7 @@ import asyncio
 import ctypes
 import socket
 import sys
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,25 @@ import torch
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
 from wmfs_plugin.invocation import InvocationContext, OutputSpec
 from wmfs_plugin.metadata import OperationMetadata, metadata_from_reader
+from wmfs_plugin.ring import (
+    ABI_MAJOR,
+    ABI_MINOR,
+    CAPABILITIES,
+    COMMAND_INVOKE,
+    COMMAND_PLAN_OUTPUTS,
+    COMPLETION_INVOKE,
+    COMPLETION_PLAN_OUTPUTS,
+    FLAG_PROFILE,
+    HEADER_SIZE,
+    RECORD_SIZE,
+    STATUS_INTERNAL_ERROR,
+    STATUS_OK,
+    STATUS_OPERATION_ERROR,
+    PlannedOutput,
+    Record,
+    RingEndpoint,
+    RingError,
+)
 from wmfs_plugin.schema import PROTOCOL_VERSION, load_tensor_schema, schema_root
 
 OperationHandler: TypeAlias = Callable[[InvocationContext], None]
@@ -48,6 +68,13 @@ def worker_main(
     parser = argparse.ArgumentParser()
     parser.add_argument("--rpc-fd", type=int, required=True)
     parser.add_argument("--fd-socket-fd", type=int, required=True)
+    parser.add_argument("--command-ring-fd", type=int, required=True)
+    parser.add_argument("--command-data-fd", type=int, required=True)
+    parser.add_argument("--command-space-fd", type=int, required=True)
+    parser.add_argument("--completion-ring-fd", type=int, required=True)
+    parser.add_argument("--completion-data-fd", type=int, required=True)
+    parser.add_argument("--completion-space-fd", type=int, required=True)
+    parser.add_argument("--ring-generation", type=int, required=True)
     parser.add_argument("--schema", type=Path, required=True)
     parser.add_argument("--interface", required=True)
     parser.add_argument(
@@ -59,6 +86,17 @@ def worker_main(
             _serve(
                 arguments.rpc_fd,
                 arguments.fd_socket_fd,
+                (
+                    arguments.command_ring_fd,
+                    arguments.command_data_fd,
+                    arguments.command_space_fd,
+                ),
+                (
+                    arguments.completion_ring_fd,
+                    arguments.completion_data_fd,
+                    arguments.completion_space_fd,
+                ),
+                arguments.ring_generation,
                 arguments.schema,
                 arguments.schema_import,
                 arguments.interface,
@@ -72,6 +110,9 @@ def worker_main(
 async def _serve(
     rpc_fd: int,
     fd_socket_fd: int,
+    command_fds: tuple[int, int, int],
+    completion_fds: tuple[int, int, int],
+    ring_generation: int,
     plugin_schema_path: Path,
     schema_import_paths: list[Path],
     interface_name: str,
@@ -87,23 +128,43 @@ async def _serve(
         socket.socket(fileno=fd_socket_fd), load_tensor_schema(), mapped_buffers
     )
     fd_receiver.start()
+    command_ring = RingEndpoint(*command_fds, ring_generation, False)
+    completion_ring = RingEndpoint(*completion_fds, ring_generation, True)
     rpc_socket = socket.socket(fileno=rpc_fd)
     stream = await capnp.AsyncIoStream.create_unix_connection(sock=rpc_socket)
+    plugin_server = _make_server(
+        plugin_schema,
+        interface_name,
+        mapped_buffers,
+        operations,
+        output_planners,
+        ring_generation=ring_generation,
+        ring_capacity=command_ring.capacity,
+    )
+    ring_thread = threading.Thread(
+        target=_ring_worker_loop,
+        args=(
+            command_ring,
+            completion_ring,
+            mapped_buffers,
+            plugin_server._ring_operations,
+            plugin_server._ring_planners,
+        ),
+        daemon=True,
+    )
+    ring_thread.start()
     server = capnp.TwoPartyServer(
         stream,
-        bootstrap=_make_server(
-            plugin_schema,
-            interface_name,
-            mapped_buffers,
-            operations,
-            output_planners,
-        ),
+        bootstrap=plugin_server,
     )
     try:
         await server.on_disconnect()
     finally:
         server.close()
         stream.close()
+        command_ring.close()
+        completion_ring.close()
+        ring_thread.join(timeout=5)
         fd_receiver.close()
         mapped_buffers.close()
 
@@ -114,6 +175,9 @@ def _make_server(
     mapped_buffers: MappedBufferCache,
     handlers: Mapping[str, OperationHandler],
     output_planners: Mapping[str, OutputPlanner] | None = None,
+    *,
+    ring_generation: int = 0,
+    ring_capacity: int = 0,
 ) -> object:
     metadata = plugin_schema.pluginMetadata
     if int(metadata.protocolVersion) != PROTOCOL_VERSION:
@@ -146,6 +210,21 @@ def _make_server(
                     "torchVersion": torch.__version__,
                     "glibcVersion": _glibc_version(),
                     "executable": sys.executable,
+                },
+            )
+
+        async def getRingHandshake(
+            self, _context: object, **_kwargs: object
+        ) -> tuple[dict[str, int]]:
+            return (
+                {
+                    "abiMajor": ABI_MAJOR,
+                    "abiMinor": ABI_MINOR,
+                    "headerSize": HEADER_SIZE,
+                    "recordSize": RECORD_SIZE,
+                    "capacity": ring_capacity,
+                    "generation": ring_generation,
+                    "capabilities": CAPABILITIES,
                 },
             )
 
@@ -190,7 +269,83 @@ def _make_server(
                 return ({"operationError": error.as_capnp()}, [])
             return ({"success": None}, outputs)
 
-    return PluginServer()
+    result = PluginServer()
+    result._ring_operations = operations
+    result._ring_planners = planners
+    return result
+
+
+def _ring_worker_loop(
+    commands: RingEndpoint,
+    completions: RingEndpoint,
+    mapped_buffers: MappedBufferCache,
+    operations: Mapping[int, _Operation],
+    planners: Mapping[int, OutputPlanner],
+) -> None:
+    while True:
+        try:
+            command = commands.pop()
+        except RingError:
+            return
+        completion_kind = (
+            COMPLETION_INVOKE
+            if command.kind == COMMAND_INVOKE
+            else COMPLETION_PLAN_OUTPUTS
+        )
+        completion = Record(
+            completion_kind,
+            command.generation,
+            command.submission_id,
+            command.invocation_id,
+            command.operation_id,
+            STATUS_OK,
+        )
+        try:
+            if command.kind == COMMAND_INVOKE:
+                measured = _invoke_known(
+                    command.invocation(),
+                    mapped_buffers,
+                    operations,
+                    profiled=bool(command.flags & FLAG_PROFILE),
+                )
+                if measured:
+                    completion.profile = (
+                        0,
+                        0,
+                        0,
+                        measured["inputViewsNs"],
+                        measured["outputViewsNs"],
+                        measured["dispatchNs"],
+                        measured["kernelNs"],
+                        0,
+                    )
+            elif command.kind == COMMAND_PLAN_OUTPUTS:
+                planned = _plan_outputs(
+                    command.invocation(include_outputs=False),
+                    mapped_buffers,
+                    operations,
+                    planners,
+                )
+                completion.outputs = tuple(
+                    PlannedOutput(
+                        int(item["output"]), tuple(item["shape"]), str(item["dtype"])
+                    )
+                    for item in planned
+                )
+            else:
+                raise ValueError("Unsupported ring command")
+        except _OperationFailure as error:
+            completion.status = STATUS_OPERATION_ERROR
+            completion.error_type = error.error_type
+            completion.error_message = error.message
+        except Exception as error:
+            completion.status = STATUS_INTERNAL_ERROR
+            completion.error_type = type(error).__name__
+            completion.error_message = str(error)
+        try:
+            completions.push(completion)
+        except RingError:
+            return
 
 
 class _OperationFailure(Exception):

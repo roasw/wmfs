@@ -31,7 +31,7 @@ void test_constants_and_layout() {
     require(offsetof(wmfs_ring_header_v1, consumer) == 128,
             "consumer is not on its assigned cache line");
     require(offsetof(wmfs_ring_record_v1, tensors) == 128, "tensor area moved");
-    require(offsetof(wmfs_ring_record_v1, error) == 11840, "error area moved");
+    require(offsetof(wmfs_ring_record_v1, error) == 11968, "error area moved");
 }
 
 void test_basic_record_roundtrip() {
@@ -47,6 +47,7 @@ void test_basic_record_roundtrip() {
     command.scalar_count = 1;
     command.tensors[0].buffer_id = UINT64_C(53);
     command.tensors[0].buffer_generation = UINT64_C(2);
+    command.tensors[0].allocation_id = UINT64_C(59);
     command.tensors[0].byte_length = UINT64_C(48);
     command.tensors[0].dtype = WMFS_RING_DTYPE_FLOAT64;
     command.tensors[0].rank = 2;
@@ -70,7 +71,8 @@ void test_basic_record_roundtrip() {
     require(decoded.session_generation == 7 && decoded.submission_id == 41 &&
                 decoded.invocation_id == 43 && decoded.operation_id == 47,
             "record identifiers did not round trip");
-    require(decoded.tensors[0].shape[1] == 3 &&
+    require(decoded.tensors[0].allocation_id == 59 &&
+                decoded.tensors[0].shape[1] == 3 &&
                 decoded.tensors[0].strides[0] == 3,
             "tensor descriptor did not round trip");
     require(decoded.scalars[0].text_length == 3 &&

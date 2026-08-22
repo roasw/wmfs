@@ -1,8 +1,9 @@
 # Command and Completion Ring Protocol
 
-Stage 6 defines the stable shared-memory ABI only. It does not define an
-`mmap` owner, an `eventfd` wrapper, or runtime integration. The normative C ABI
-is [`inc/wmfs/protocol/ring.h`](../inc/wmfs/protocol/ring.h).
+The normative C ABI is
+[`inc/wmfs/protocol/ring.h`](../inc/wmfs/protocol/ring.h). ABI 1.1 adds the
+logical `allocation_id` required to distinguish pooled-buffer reuse while
+preserving the 16 KiB record geometry.
 
 ## Version and byte order
 
@@ -64,17 +65,17 @@ combined input/output tensor descriptors, 16 scalars, and 16 planned outputs.
 |     42 |    2 | scalar count                                      |
 |     44 |    2 | planned output count                              |
 |     46 |   82 | reserved, zero                                    |
-|    128 | 4864 | 16 tensor descriptors, 304 bytes each             |
-|   4992 | 4480 | 16 scalars, 280 bytes each                        |
-|   9472 | 2304 | 16 planned outputs, 144 bytes each                |
-|  11776 |   64 | profiling data                                    |
-|  11840 | 1104 | error lengths, flags, type[64], and message[1024] |
-|  12944 | 3440 | reserved, zero                                    |
+|    128 | 4992 | 16 tensor descriptors, 312 bytes each             |
+|   5120 | 4480 | 16 scalars, 280 bytes each                        |
+|   9600 | 2304 | 16 planned outputs, 144 bytes each                |
+|  11904 |   64 | profiling data                                    |
+|  11968 | 1104 | error lengths, flags, type[64], and message[1024] |
+|  13072 | 3312 | reserved, zero                                    |
 
-A tensor descriptor contains four 64-bit capability/view values (`buffer_id`,
-generation, byte offset, byte length), fixed-width dtype/rank/kind/flags and
+A tensor descriptor contains five 64-bit capability/view values (`buffer_id`,
+generation, allocation ID, byte offset, byte length), fixed-width dtype/rank/kind/flags and
 parameter index fields, then signed 64-bit `shape[16]` and `strides[16]` at
-offsets 48 and 176. Tensor kind distinguishes inputs from outputs. Read-only is
+offsets 56 and 184. Tensor kind distinguishes inputs from outputs. Read-only is
 the default; writable access requires `WMFS_RING_TENSOR_FLAG_WRITABLE`.
 
 A scalar stores parameter index, kind, flags, an eight-byte value bit pattern,
@@ -112,6 +113,12 @@ Equivalent platform/compiler intrinsics are permitted only when they provide
 interprocess acquire/release semantics for naturally aligned 64-bit values.
 Do not cast the storage to `std::atomic<uint64_t>` and do not place process-
 local pointers, file descriptor numbers, or synchronization objects in it.
+
+The Python SDK endpoint is Linux-specific and publishes or consumes every
+record through the corresponding `eventfd` syscall. Those syscalls are the
+interprocess synchronization boundary around its naturally aligned counter
+loads/stores; it does not offer a polling-only mode. Native participants still
+use the acquire/release operations above.
 
 ## Notification and backpressure
 

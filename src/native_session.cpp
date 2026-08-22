@@ -1,4 +1,5 @@
 #include "wmfs/native/session.hpp"
+#include "wmfs/protocol/ring.h"
 #include "wmfs/unique_fd.hpp"
 
 #include <capnp/message.h>
@@ -150,6 +151,8 @@ struct Session::Impl {
     struct Worker {
         explicit Worker(UniqueFd rpc_fd, UniqueFd control_fd,
                         std::uint64_t expected_fingerprint,
+                        std::uint64_t expected_ring_generation,
+                        std::uint32_t expected_ring_capacity,
                         std::chrono::nanoseconds startup_timeout,
                         std::chrono::nanoseconds request_timeout,
                         std::chrono::nanoseconds fd_transfer_timeout)
@@ -167,6 +170,24 @@ struct Session::Impl {
             if (version.getVersion() != PROTOCOL_VERSION) {
                 throw std::runtime_error(
                     "Worker protocol does not match native runtime");
+            }
+            if (expected_ring_generation != 0) {
+                auto response =
+                    io.provider->getTimer()
+                        .timeoutAfter(startup_timeout.count() * kj::NANOSECONDS,
+                                      plugin.getRingHandshakeRequest().send())
+                        .wait(io.waitScope);
+                auto ring = response.getRing();
+                if (ring.getAbiMajor() != WMFS_RING_ABI_MAJOR ||
+                    ring.getAbiMinor() != WMFS_RING_ABI_MINOR ||
+                    ring.getHeaderSize() != WMFS_RING_HEADER_SIZE ||
+                    ring.getRecordSize() != WMFS_RING_RECORD_SIZE ||
+                    ring.getCapacity() != expected_ring_capacity ||
+                    ring.getGeneration() != expected_ring_generation ||
+                    (ring.getCapabilities() & 3) != 3) {
+                    throw std::runtime_error(
+                        "Worker ring handshake does not match native runtime");
+                }
             }
             auto metadata =
                 io.provider->getTimer()
@@ -452,12 +473,15 @@ struct Session::Impl {
     };
 
     Impl(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
-         double startup_timeout_seconds, double request_timeout_seconds,
-         double fd_transfer_timeout_seconds)
+         std::uint64_t expected_ring_generation,
+         std::uint32_t expected_ring_capacity, double startup_timeout_seconds,
+         double request_timeout_seconds, double fd_transfer_timeout_seconds)
         : rpc_fd(rpc_fd), control_fd(control_fd),
           interrupt_rpc_fd(this->rpc_fd.duplicate_cloexec()),
           interrupt_control_fd(this->control_fd.duplicate_cloexec()),
           expected_fingerprint(expected_fingerprint),
+          expected_ring_generation(expected_ring_generation),
+          expected_ring_capacity(expected_ring_capacity),
           startup_timeout(timeout_from_seconds(startup_timeout_seconds)),
           request_timeout(timeout_from_seconds(request_timeout_seconds)),
           fd_transfer_timeout(
@@ -496,7 +520,8 @@ struct Session::Impl {
         std::optional<Worker> worker;
         try {
             worker.emplace(std::move(rpc_fd), std::move(control_fd),
-                           expected_fingerprint, startup_timeout,
+                           expected_fingerprint, expected_ring_generation,
+                           expected_ring_capacity, startup_timeout,
                            request_timeout, fd_transfer_timeout);
         } catch (const kj::Exception &error) {
             try {
@@ -591,6 +616,8 @@ struct Session::Impl {
     UniqueFd interrupt_rpc_fd;
     UniqueFd interrupt_control_fd;
     std::uint64_t expected_fingerprint;
+    std::uint64_t expected_ring_generation;
+    std::uint32_t expected_ring_capacity;
     std::chrono::nanoseconds startup_timeout;
     std::chrono::nanoseconds request_timeout;
     std::chrono::nanoseconds fd_transfer_timeout;
@@ -613,10 +640,12 @@ struct Session::Impl {
 
 Session::Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
                  double startup_timeout_seconds, double request_timeout_seconds,
-                 double fd_transfer_timeout_seconds)
+                 double fd_transfer_timeout_seconds,
+                 std::uint64_t ring_generation, std::uint32_t ring_capacity)
     : impl_(std::make_unique<Impl>(
-          rpc_fd, control_fd, expected_fingerprint, startup_timeout_seconds,
-          request_timeout_seconds, fd_transfer_timeout_seconds)) {}
+          rpc_fd, control_fd, expected_fingerprint, ring_generation,
+          ring_capacity, startup_timeout_seconds, request_timeout_seconds,
+          fd_transfer_timeout_seconds)) {}
 
 Session::~Session() = default;
 
@@ -748,6 +777,9 @@ InvocationOutcome Session::invoke(std::uint64_t invocation_id,
                                   const TensorDescriptors &inputs,
                                   const TensorDescriptors &outputs,
                                   const std::vector<ScalarArgument> &scalars) {
+    if (impl_->expected_ring_generation != 0)
+        throw std::logic_error(
+            "Operation RPC is disabled for a ring-capable session");
     InvocationOutcome outcome;
     try {
         impl_->submit([&](Impl::Worker &worker) {
@@ -766,6 +798,9 @@ InvocationProfile Session::invoke_profiled(
     std::uint64_t invocation_id, std::uint32_t operation_id,
     const TensorDescriptors &inputs, const TensorDescriptors &outputs,
     const std::vector<ScalarArgument> &scalars) {
+    if (impl_->expected_ring_generation != 0)
+        throw std::logic_error(
+            "Operation RPC is disabled for a ring-capable session");
     InvocationProfile profile;
     const auto submitted = std::chrono::steady_clock::now();
     try {
@@ -797,6 +832,9 @@ OutputPlanningResult
 Session::plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
                       const TensorDescriptors &inputs,
                       const std::vector<ScalarArgument> &scalars) {
+    if (impl_->expected_ring_generation != 0)
+        throw std::logic_error(
+            "Operation RPC is disabled for a ring-capable session");
     OutputPlanningResult result;
     impl_->submit([&](Impl::Worker &worker) {
         result =

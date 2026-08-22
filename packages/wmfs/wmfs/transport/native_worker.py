@@ -1,4 +1,5 @@
 import importlib
+import os
 import secrets
 import socket
 import subprocess
@@ -25,10 +26,14 @@ from wmfs.registry import EnvironmentMetadata, OperationMetadata, PluginMetadata
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.errors import OperationError, WorkerTransportError
 from wmfs.transport.worker_process import (
+    _invocation_record,
     _load_runtime_schema,
+    _raise_ring_error,
+    _RingClient,
     _start_worker,
 )
 from wmfs_plugin.metadata import metadata_from_reader
+from wmfs_plugin.ring import COMMAND_PLAN_OUTPUTS, DEFAULT_CAPACITY, RingOwner
 
 _MAX_NATIVE_DESCRIPTORS = 256
 
@@ -53,6 +58,7 @@ class NativeWorkerSession:
     ) -> None:
         native: ModuleType = importlib.import_module("wmfs._native")
         self._native = native
+        self._rpc_compatibility = "WMFS_FAILURE_WORKER_MODE" in os.environ
         self._buffers = buffers
         self._deadlines = deadlines
         self._metadata: PluginMetadata | None = None
@@ -61,11 +67,24 @@ class NativeWorkerSession:
         self._session: object | None = None
         self._native_descriptors: OrderedDict[TensorDescriptor, object] = OrderedDict()
         self._lifecycle_lock = threading.RLock()
+        generation = secrets.randbits(64) or 1
+        self._ring_capacity = int(
+            os.environ.get("WMFS_RING_CAPACITY", DEFAULT_CAPACITY)
+        )
+        self._command_ring = RingOwner(self._ring_capacity, generation)
+        self._completion_ring = RingOwner(self._ring_capacity, generation)
+        self._rings = _RingClient(
+            self._command_ring.endpoint(True),
+            self._completion_ring.endpoint(False),
+        )
         rpc_parent, rpc_child = socket.socketpair()
         fd_parent, fd_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
         try:
             self._process = _start_worker(
-                manifest, rpc_child.fileno(), fd_child.fileno()
+                manifest,
+                rpc_child.fileno(),
+                fd_child.fileno(),
+                (self._command_ring, self._completion_ring),
             )
             rpc_child.close()
             fd_child.close()
@@ -76,6 +95,8 @@ class NativeWorkerSession:
                 deadlines.startup,
                 deadlines.request,
                 deadlines.fd_transfer,
+                0 if self._rpc_compatibility else generation,
+                0 if self._rpc_compatibility else self._ring_capacity,
             )
             with _load_runtime_schema().PluginMetadata.from_bytes(
                 self._session.metadata
@@ -94,6 +115,9 @@ class NativeWorkerSession:
                 self._session.close()
                 self._session = None
             self._stop_process()
+            self._command_ring.close()
+            self._completion_ring.close()
+            self._rings.close()
             raise
 
     @property
@@ -151,8 +175,8 @@ class NativeWorkerSession:
                 out,
                 collect_metrics=collect_metrics,
             )
-            with reserve_invocation_access(self._buffers, invocation):
-                return self._invoke(invocation, collect_metrics)
+        with reserve_invocation_access(self._buffers, invocation):
+            return self._invoke(invocation, collect_metrics)
 
     def ping(self) -> None:
         with self._lifecycle_lock:
@@ -163,6 +187,9 @@ class NativeWorkerSession:
             if self._session is not None:
                 self._session.close()
                 self._session = None
+            self._command_ring.close()
+            self._completion_ring.close()
+            self._rings.close()
             self._native_descriptors.clear()
             self._stop_process()
 
@@ -278,31 +305,54 @@ class NativeWorkerSession:
                     )
             try:
                 native_start = perf_counter_ns() if collect_metrics else 0
-                arguments = (
-                    invocation_id,
-                    operation.operation_id,
-                    [self._native_descriptor(item) for item in inputs],
-                    [self._native_descriptor(item) for item in outputs],
-                    [
-                        (index, parameter.kind, value)
-                        for index, (parameter, value) in enumerate(
-                            zip(
-                                operation.scalar_parameters,
-                                invocation.scalars,
-                                strict=True,
-                            )
-                        )
-                    ],
-                )
                 mark_reused_outputs_dirty(output_plan)
                 dispatched = True
-                if collect_metrics:
-                    native_profile = self._ensure_open().invoke_profiled(*arguments)
-                else:
+                if self._rpc_compatibility:
+                    arguments = (
+                        invocation_id,
+                        operation.operation_id,
+                        [self._native_descriptor(item) for item in inputs],
+                        [self._native_descriptor(item) for item in outputs],
+                        [
+                            (index, parameter.kind, value)
+                            for index, (parameter, value) in enumerate(
+                                zip(
+                                    operation.scalar_parameters,
+                                    invocation.scalars,
+                                    strict=True,
+                                )
+                            )
+                        ],
+                    )
                     native_profile = self._ensure_open().invoke(*arguments)
+                    _raise_operation_error(native_profile)
+                else:
+                    completion = self._rings.submit(
+                        _invocation_record(
+                            self._rings.generation,
+                            invocation_id,
+                            operation.operation_id,
+                            inputs,
+                            outputs,
+                            invocation,
+                            collect_metrics,
+                        ),
+                        self._deadlines.request,
+                    )
+                    self._ensure_open().abort_invocation(invocation_id)
+                    _raise_ring_error(completion)
+                    profile = completion.profile
+                    native_profile = {
+                        "worker_input_views_ns": profile[3],
+                        "worker_output_views_ns": profile[4],
+                        "worker_dispatch_ns": profile[5],
+                        "worker_kernel_ns": profile[6],
+                    }
                 native_call_ns = (
                     perf_counter_ns() - native_start if collect_metrics else 0
                 )
+            except OperationError:
+                raise
             except Exception as error:
                 close_error = None
                 try:
@@ -326,7 +376,7 @@ class NativeWorkerSession:
                 output_plan_ns=output_plan.output_plan_ns,
                 native_call_ns=native_call_ns,
                 native_queue_wait_ns=int(native_profile.get("queue_wait_ns", 0)),
-                native_rpc_ns=int(native_profile.get("rpc_ns", 0)),
+                native_rpc_ns=native_call_ns,
                 worker_input_views_ns=int(
                     native_profile.get("worker_input_views_ns", 0)
                 ),
@@ -376,22 +426,19 @@ class NativeWorkerSession:
     ) -> tuple[tuple[int, tuple[int, ...], str], ...]:
         if not any(plan.known is None for plan in invocation.operation.output_plans):
             return ()
-        scalars = [
-            (index, parameter.kind, value)
-            for index, (parameter, value) in enumerate(
-                zip(
-                    invocation.operation.scalar_parameters,
-                    invocation.scalars,
-                    strict=True,
-                )
-            )
-        ]
         try:
-            response = self._ensure_open().plan_outputs(
-                invocation_id,
-                invocation.operation.operation_id,
-                [self._native_descriptor(item) for item in inputs],
-                scalars,
+            response = self._rings.submit(
+                _invocation_record(
+                    self._rings.generation,
+                    invocation_id,
+                    invocation.operation.operation_id,
+                    inputs,
+                    [],
+                    invocation,
+                    False,
+                    kind=COMMAND_PLAN_OUTPUTS,
+                ),
+                self._deadlines.request,
             )
         except Exception as error:
             try:
@@ -401,11 +448,8 @@ class NativeWorkerSession:
             raise WorkerTransportError(
                 f"Worker output planning failed: {type(error).__name__}: {error}"
             ) from error
-        _raise_operation_error(response)
-        return tuple(
-            (int(index), tuple(int(item) for item in shape), str(dtype))
-            for index, shape, dtype in response["outputs"]
-        )
+        _raise_ring_error(response)
+        return tuple((item.output, item.shape, item.dtype) for item in response.outputs)
 
     def _ensure_open(self) -> object:
         if self._session is None:

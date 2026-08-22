@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -175,6 +176,58 @@ def test_isolated_nonzero_allocates_data_dependent_output(control_mode: str) -> 
         torch.testing.assert_close(
             candidate.invoke("add_scalar", source, 1.0), source + 1.0
         )
+    finally:
+        candidate.close()
+
+
+def test_python_reference_hot_path_does_not_call_operation_rpc() -> None:
+    candidate = Runtime()
+    candidate.configure_control("python")
+    candidate.discover_plugins(PLUGIN_DIRECTORY)
+    candidate.use_backend("isolated")
+
+    class HostileOperationRpc:
+        def __getattr__(self, name: str) -> object:
+            if name in {"invokeKnown", "invokeKnownProfiled", "planOutputs"}:
+                raise AssertionError(f"operation RPC {name} was accessed")
+            raise AttributeError(name)
+
+    try:
+        backend = candidate._backends["isolated"]
+        session = backend._sessions["reference"]
+        session._plugin = HostileOperationRpc()
+        source = torch.tensor([[0.0, 2.0], [3.0, 0.0]])
+
+        torch.testing.assert_close(
+            candidate.invoke("add_scalar", source, 1.0), source + 1.0
+        )
+        torch.testing.assert_close(
+            candidate.invoke("nonzero", source), torch.nonzero(source)
+        )
+    finally:
+        candidate.close()
+
+
+@pytest.mark.parametrize("control_mode", ["native", "python"])
+def test_concurrent_ring_submissions_are_matched_to_callers(
+    monkeypatch: pytest.MonkeyPatch, control_mode: str
+) -> None:
+    monkeypatch.setenv("WMFS_RING_CAPACITY", "2")
+    candidate = Runtime()
+    candidate.configure_control(control_mode)
+    candidate.discover_plugins(PLUGIN_DIRECTORY)
+    candidate.use_backend("isolated")
+    source = torch.arange(16, dtype=torch.float64)
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [
+                executor.submit(candidate.invoke, "add_scalar", source, float(value))
+                for value in range(32)
+            ]
+            for value, future in enumerate(futures):
+                torch.testing.assert_close(
+                    future.result(timeout=10), source + float(value)
+                )
     finally:
         candidate.close()
 

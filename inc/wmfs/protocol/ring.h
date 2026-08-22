@@ -20,7 +20,7 @@
 
 #define WMFS_RING_MAGIC UINT64_C(0x31474e5253464d57)
 #define WMFS_RING_ABI_MAJOR UINT32_C(1)
-#define WMFS_RING_ABI_MINOR UINT32_C(0)
+#define WMFS_RING_ABI_MINOR UINT32_C(1)
 #define WMFS_RING_HEADER_SIZE UINT32_C(4096)
 #define WMFS_RING_RECORD_SIZE UINT32_C(16384)
 #define WMFS_RING_CACHE_LINE_SIZE UINT32_C(64)
@@ -115,6 +115,7 @@ typedef enum wmfs_ring_error_flag_v1 {
 typedef struct wmfs_ring_tensor_descriptor_v1 {
     uint64_t buffer_id;
     uint64_t buffer_generation;
+    uint64_t allocation_id;
     uint64_t byte_offset;
     uint64_t byte_length;
     uint32_t dtype;
@@ -201,13 +202,13 @@ typedef struct wmfs_ring_record_v1 {
     wmfs_ring_planned_output_v1 planned_outputs[16];
     wmfs_ring_profile_v1 profile;
     wmfs_ring_error_v1 error;
-    uint8_t reserved_tail[3440];
+    uint8_t reserved_tail[3312];
 } wmfs_ring_record_v1;
 
 typedef wmfs_ring_record_v1 wmfs_ring_command_v1;
 typedef wmfs_ring_record_v1 wmfs_ring_completion_v1;
 
-WMFS_RING_STATIC_ASSERT(sizeof(wmfs_ring_tensor_descriptor_v1) == 304,
+WMFS_RING_STATIC_ASSERT(sizeof(wmfs_ring_tensor_descriptor_v1) == 312,
                         "tensor descriptor ABI size");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, buffer_id) ==
                             0,
@@ -215,27 +216,30 @@ WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, buffer_id) ==
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1,
                                  buffer_generation) == 8,
                         "tensor generation ABI offset");
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1,
+                                 allocation_id) == 16,
+                        "tensor allocation ID ABI offset");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, byte_offset) ==
-                            16,
+                            24,
                         "tensor byte offset ABI offset");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, byte_length) ==
-                            24,
+                            32,
                         "tensor byte length ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, dtype) == 32,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, dtype) == 40,
                         "tensor dtype ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, rank) == 36,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, rank) == 44,
                         "tensor rank ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, kind) == 38,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, kind) == 46,
                         "tensor kind ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, flags) == 40,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, flags) == 48,
                         "tensor flags ABI offset");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1,
-                                 parameter_index) == 44,
+                                 parameter_index) == 52,
                         "tensor parameter index ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, shape) == 48,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, shape) == 56,
                         "tensor shape ABI offset");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_tensor_descriptor_v1, strides) ==
-                            176,
+                            184,
                         "tensor strides ABI offset");
 WMFS_RING_STATIC_ASSERT(sizeof(wmfs_ring_scalar_v1) == 280, "scalar ABI size");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_scalar_v1, bits) == 8,
@@ -295,15 +299,15 @@ WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, planned_output_count) ==
                         "planned output count ABI offset");
 WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, tensors) == 128,
                         "tensor array ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, scalars) == 4992,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, scalars) == 5120,
                         "scalar array ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, planned_outputs) == 9472,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, planned_outputs) == 9600,
                         "planned output array ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, profile) == 11776,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, profile) == 11904,
                         "profile ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, error) == 11840,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, error) == 11968,
                         "error ABI offset");
-WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, reserved_tail) == 12944,
+WMFS_RING_STATIC_ASSERT(offsetof(wmfs_ring_record_v1, reserved_tail) == 13072,
                         "record tail ABI offset");
 
 #undef WMFS_RING_ALIGNOF

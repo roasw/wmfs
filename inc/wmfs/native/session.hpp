@@ -89,7 +89,8 @@ class Session {
     /// @brief Adopt connected RPC/control sockets and validate the worker.
     Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
             double startup_timeout_seconds, double request_timeout_seconds,
-            double fd_transfer_timeout_seconds);
+            double fd_transfer_timeout_seconds,
+            std::uint64_t ring_generation = 0, std::uint32_t ring_capacity = 0);
     ~Session();
 
     Session(const Session &) = delete;

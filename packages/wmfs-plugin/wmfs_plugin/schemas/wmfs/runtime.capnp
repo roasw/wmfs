@@ -184,6 +184,16 @@ struct InvocationOutcome {
   }
 }
 
+struct RingHandshake {
+  abiMajor @0 :UInt32;
+  abiMinor @1 :UInt32;
+  headerSize @2 :UInt32;
+  recordSize @3 :UInt32;
+  capacity @4 :UInt32;
+  generation @5 :UInt64;
+  capabilities @6 :UInt64;
+}
+
 interface Plugin {
   getMetadata @0 () -> (metadata :PluginMetadata);
   ping @1 (nonce :UInt64) -> (nonce :UInt64);
@@ -194,4 +204,5 @@ interface Plugin {
       (outcome :InvocationOutcome, metrics :WorkerInvocationMetrics);
   planOutputs @6 (invocation :OutputPlanningInvocation) ->
       (outcome :InvocationOutcome, outputs :List(PlannedOutput));
+  getRingHandshake @7 () -> (ring :RingHandshake);
 }

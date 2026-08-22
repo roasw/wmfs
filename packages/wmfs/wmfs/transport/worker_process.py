@@ -1,5 +1,6 @@
 import asyncio
 import os
+import queue
 import secrets
 import shutil
 import socket
@@ -36,10 +37,116 @@ from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadl
 from wmfs.transport.errors import OperationError, WorkerTransportError
 from wmfs.transport.fd_broker import FdSender
 from wmfs_plugin.metadata import metadata_from_reader
+from wmfs_plugin.ring import (
+    ABI_MAJOR,
+    ABI_MINOR,
+    CAPABILITIES,
+    COMMAND_INVOKE,
+    COMMAND_PLAN_OUTPUTS,
+    DEFAULT_CAPACITY,
+    FLAG_PROFILE,
+    HEADER_SIZE,
+    RECORD_SIZE,
+    STATUS_OK,
+    STATUS_OPERATION_ERROR,
+    TENSOR_INPUT,
+    TENSOR_OUTPUT,
+    Record,
+    RingEndpoint,
+    RingError,
+    RingOwner,
+    scalar_arguments,
+    tensor_from_descriptor,
+)
 from wmfs_plugin.schema import schema_root
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
+
+
+class _RingClient:
+    def __init__(
+        self,
+        commands: RingEndpoint,
+        completions: RingEndpoint,
+    ) -> None:
+        self._commands = commands
+        self._completions = completions
+        self.generation = commands.generation
+        self.handshake = (
+            ABI_MAJOR,
+            ABI_MINOR,
+            HEADER_SIZE,
+            RECORD_SIZE,
+            commands.capacity,
+            commands.generation,
+            CAPABILITIES,
+        )
+        self._outbound: queue.Queue[Record | None] = queue.Queue()
+        self._pending: dict[int, queue.Queue[Record | BaseException]] = {}
+        self._lock = threading.Lock()
+        self._next_submission = 1
+        self._fatal: BaseException | None = None
+        self._producer = threading.Thread(target=self._produce, daemon=True)
+        self._consumer = threading.Thread(target=self._consume, daemon=True)
+        self._producer.start()
+        self._consumer.start()
+
+    def submit(self, record: Record, timeout: float) -> Record:
+        waiter: queue.Queue[Record | BaseException] = queue.Queue(maxsize=1)
+        with self._lock:
+            if self._fatal is not None:
+                raise RingError("ring dispatcher failed") from self._fatal
+            submission = self._next_submission
+            self._next_submission += 1
+            record.submission_id = submission
+            self._pending[submission] = waiter
+        self._outbound.put(record)
+        try:
+            result = waiter.get(timeout=timeout)
+        except queue.Empty:
+            self._fail(RingError("ring completion deadline expired"))
+            raise TimeoutError("ring completion deadline expired") from None
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def _produce(self) -> None:
+        try:
+            while (record := self._outbound.get()) is not None:
+                self._commands.push(record)
+        except BaseException as error:
+            self._fail(error)
+
+    def _consume(self) -> None:
+        try:
+            while True:
+                completion = self._completions.pop()
+                with self._lock:
+                    waiter = self._pending.pop(completion.submission_id, None)
+                if waiter is None:
+                    raise RingError("completion has unknown submission ID")
+                waiter.put(completion)
+        except BaseException as error:
+            self._fail(error)
+
+    def _fail(self, error: BaseException) -> None:
+        with self._lock:
+            if self._fatal is not None:
+                return
+            self._fatal = error
+            pending = tuple(self._pending.values())
+            self._pending.clear()
+        for waiter in pending:
+            waiter.put(error)
+
+    def close(self) -> None:
+        self._fail(RingError("ring dispatcher is closed"))
+        self._outbound.put(None)
+        self._commands.close()
+        self._completions.close()
+        self._producer.join(timeout=1)
+        self._consumer.join(timeout=1)
 
 
 def _load_runtime_schema() -> ModuleType:
@@ -68,6 +175,7 @@ class WorkerSession:
         deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> None:
         self._manifest = manifest
+        self._rpc_compatibility = "WMFS_FAILURE_WORKER_MODE" in os.environ
         self._buffers = buffers
         self._expected_metadata = expected_metadata
         self._deadlines = deadlines
@@ -79,9 +187,9 @@ class WorkerSession:
         self._plugin: object | None = None
         self._operations: dict[str, OperationMetadata] = {}
         self._fd_sender: FdSender | None = None
+        self._ring_client: _RingClient | None = None
         self._startup_error: BaseException | None = None
         self._shutdown: asyncio.Event | None = None
-        self._invoke_lock: asyncio.Lock | None = None
         self._serve_task: asyncio.Task[None] | None = None
         self._closed = False
         self._invalidated = False
@@ -165,12 +273,16 @@ class WorkerSession:
         self._serve_task = asyncio.current_task()
         self._loop = asyncio.get_running_loop()
         self._shutdown = asyncio.Event()
-        self._invoke_lock = asyncio.Lock()
         async with _worker_connection(self._manifest, self._deadlines) as (
             plugin,
             fd_sender,
+            ring_client,
         ):
-            metadata = await _validate_worker(plugin, self._deadlines.startup)
+            metadata = await _validate_worker(
+                plugin,
+                self._deadlines.startup,
+                None if self._rpc_compatibility else ring_client.handshake,
+            )
             if (
                 self._expected_metadata is not None
                 and metadata != self._expected_metadata
@@ -184,6 +296,7 @@ class WorkerSession:
             self._plugin = plugin
             self._operations = {item.name: item for item in metadata.operations}
             self._fd_sender = fd_sender
+            self._ring_client = ring_client
             self._ready.set()
             await self._shutdown.wait()
 
@@ -198,63 +311,58 @@ class WorkerSession:
         invocation: BoundInvocation,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
-        if self._invoke_lock is None or self._plugin is None or self._fd_sender is None:
+        if self._plugin is None or self._fd_sender is None or self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
-        async with self._invoke_lock:
-            invocation_id = secrets.randbits(64)
-            input_metrics: list[InputPreparationMetrics] | None = (
-                [] if collect_metrics else None
-            )
-            output_metrics: list[OutputAllocationMetrics] | None = (
-                [] if collect_metrics else None
-            )
-            shared_inputs = [
-                share_input(
-                    self._buffers,
-                    item.tensor,
-                    collect_metrics=collect_metrics,
-                )
-                for item in invocation.tensor_inputs
-            ]
-            inputs = [item[0] for item in shared_inputs]
-            mapping_start = perf_counter_ns() if collect_metrics else 0
-            try:
-                input_transfers = await asyncio.to_thread(
-                    self._fd_sender.ensure_mapped_many,
-                    tuple(
-                        (managed.buffer, bound.writable)
-                        for managed, bound in zip(
-                            inputs, invocation.tensor_inputs, strict=True
-                        )
-                    ),
-                    invocation_id=invocation_id,
-                )
-            except Exception:
-                self._invalidated = True
-                if self._shutdown is not None:
-                    self._shutdown.set()
-                raise
-            mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
-            if input_metrics is not None:
-                for index, ((managed, copy_ns), transferred) in enumerate(
-                    zip(shared_inputs, input_transfers, strict=True)
-                ):
-                    input_metrics.append(
-                        InputPreparationMetrics(
-                            byte_length=managed.buffer.byte_length,
-                            shared_copy_ns=copy_ns,
-                            mapping_ns=mapping_ns if index == 0 else 0,
-                            fd_transferred=transferred,
-                        )
+        invocation_id = secrets.randbits(64) or 1
+        input_metrics: list[InputPreparationMetrics] | None = (
+            [] if collect_metrics else None
+        )
+        output_metrics: list[OutputAllocationMetrics] | None = (
+            [] if collect_metrics else None
+        )
+        shared_inputs = [
+            share_input(self._buffers, item.tensor, collect_metrics=collect_metrics)
+            for item in invocation.tensor_inputs
+        ]
+        inputs = [item[0] for item in shared_inputs]
+        mapping_start = perf_counter_ns() if collect_metrics else 0
+        try:
+            input_transfers = await asyncio.to_thread(
+                self._fd_sender.ensure_mapped_many,
+                tuple(
+                    (managed.buffer, bound.writable)
+                    for managed, bound in zip(
+                        inputs, invocation.tensor_inputs, strict=True
                     )
-            return await self._invoke_known(
-                invocation,
-                inputs,
-                invocation_id,
-                input_metrics,
-                output_metrics,
-                collect_metrics,
+                ),
+                invocation_id=invocation_id,
             )
+        except Exception:
+            self._invalidated = True
+            if self._shutdown is not None:
+                self._shutdown.set()
+            raise
+        mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
+        if input_metrics is not None:
+            for index, ((managed, copy_ns), transferred) in enumerate(
+                zip(shared_inputs, input_transfers, strict=True)
+            ):
+                input_metrics.append(
+                    InputPreparationMetrics(
+                        byte_length=managed.buffer.byte_length,
+                        shared_copy_ns=copy_ns,
+                        mapping_ns=mapping_ns if index == 0 else 0,
+                        fd_transferred=transferred,
+                    )
+                )
+        return await self._invoke_known(
+            invocation,
+            inputs,
+            invocation_id,
+            input_metrics,
+            output_metrics,
+            collect_metrics,
+        )
 
     async def _invoke_known(
         self,
@@ -265,7 +373,7 @@ class WorkerSession:
         output_metrics: list[OutputAllocationMetrics] | None,
         collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
-        if self._plugin is None or self._fd_sender is None:
+        if self._fd_sender is None or self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
         outputs: list[ManagedTensor] = []
         dispatched = False
@@ -334,48 +442,59 @@ class WorkerSession:
                         )
                     )
 
-            wire_invocation = {
-                "invocationId": invocation_id,
-                "operationId": invocation.operation.operation_id,
-                "inputs": [item.descriptor.as_capnp() for item in inputs],
-                "outputs": [item.descriptor.as_capnp() for item in outputs],
-                "scalars": _scalar_arguments(invocation.operation, invocation.scalars),
-            }
             mark_reused_outputs_dirty(output_plan)
             dispatched = True
-            if collect_metrics:
+            if self._rpc_compatibility:
+                wire = {
+                    "invocationId": invocation_id,
+                    "operationId": invocation.operation.operation_id,
+                    "inputs": [item.descriptor.as_capnp() for item in inputs],
+                    "outputs": [item.descriptor.as_capnp() for item in outputs],
+                    "scalars": _scalar_arguments(
+                        invocation.operation, invocation.scalars
+                    ),
+                }
                 response = await asyncio.wait_for(
-                    self._plugin.invokeKnownProfiled(invocation=wire_invocation),
+                    self._plugin.invokeKnown(invocation=wire),
                     self._deadlines.request,
                 )
             else:
-                response = await asyncio.wait_for(
-                    self._plugin.invokeKnown(invocation=wire_invocation),
-                    self._deadlines.request,
+                command = _invocation_record(
+                    self._ring_client.generation,
+                    invocation_id,
+                    invocation.operation.operation_id,
+                    inputs,
+                    outputs,
+                    invocation,
+                    collect_metrics,
+                )
+                response = await asyncio.to_thread(
+                    self._ring_client.submit, command, self._deadlines.request
                 )
             self._fd_sender.finish_invocation(invocation_id)
-            operation_error = _operation_error(response.outcome)
             completed = True
-            if operation_error is not None:
-                raise operation_error
+            if self._rpc_compatibility:
+                operation_error = _operation_error(response.outcome)
+                if operation_error is not None:
+                    raise operation_error
+            else:
+                _raise_ring_error(response)
             result = invocation_result(outputs)
             outputs.clear()
-            worker = response.metrics if collect_metrics else None
+            worker = (
+                response.profile
+                if collect_metrics and not self._rpc_compatibility
+                else (0,) * 8
+            )
             return result, InvocationMetrics(
                 inputs=tuple(input_metrics or ()),
                 outputs=tuple(output_metrics or ()),
                 scalar_binding_ns=invocation.scalar_binding_ns,
                 output_plan_ns=output_plan.output_plan_ns,
-                worker_input_views_ns=(
-                    int(worker.inputViewsNs) if worker is not None else 0
-                ),
-                worker_output_views_ns=(
-                    int(worker.outputViewsNs) if worker is not None else 0
-                ),
-                worker_dispatch_ns=(
-                    int(worker.dispatchNs) if worker is not None else 0
-                ),
-                worker_kernel_ns=(int(worker.kernelNs) if worker is not None else 0),
+                worker_input_views_ns=(int(worker[3])),
+                worker_output_views_ns=(int(worker[4])),
+                worker_dispatch_ns=(int(worker[5])),
+                worker_kernel_ns=int(worker[6]),
                 mapping_batches=int(
                     any(item.fd_transferred for item in input_metrics or ())
                 )
@@ -397,63 +516,62 @@ class WorkerSession:
         inputs: list[ManagedTensor],
         invocation_id: int,
     ) -> tuple[tuple[int, tuple[int, ...], str], ...]:
-        if self._plugin is None:
+        if self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
         if not any(plan.known is None for plan in invocation.operation.output_plans):
             return ()
-        wire_invocation = {
-            "invocationId": invocation_id,
-            "operationId": invocation.operation.operation_id,
-            "inputs": [item.descriptor.as_capnp() for item in inputs],
-            "scalars": _scalar_arguments(invocation.operation, invocation.scalars),
-        }
         try:
-            response = await asyncio.wait_for(
-                self._plugin.planOutputs(invocation=wire_invocation),
-                self._deadlines.request,
+            command = _invocation_record(
+                self._ring_client.generation,
+                invocation_id,
+                invocation.operation.operation_id,
+                inputs,
+                [],
+                invocation,
+                False,
+                kind=COMMAND_PLAN_OUTPUTS,
+            )
+            response = await asyncio.to_thread(
+                self._ring_client.submit, command, self._deadlines.request
             )
         except Exception:
             self._invalidated = True
             if self._shutdown is not None:
                 self._shutdown.set()
             raise
-        operation_error = _operation_error(response.outcome)
-        if operation_error is not None:
-            raise operation_error
+        _raise_ring_error(response)
         return tuple(
             (
-                int(item.output),
-                tuple(int(dimension) for dimension in item.shape),
-                str(item.dtype),
+                item.output,
+                item.shape,
+                item.dtype,
             )
             for item in response.outputs
         )
 
     async def _ping(self) -> None:
-        if self._invoke_lock is None or self._plugin is None:
+        if self._plugin is None:
             raise RuntimeError("Worker session is not ready")
-        async with self._invoke_lock:
-            nonce = secrets.randbits(64)
-            response = await asyncio.wait_for(
-                self._plugin.ping(nonce=nonce), self._deadlines.request
-            )
-            if response.nonce != nonce:
-                raise RuntimeError("Worker returned an invalid ping response")
+        nonce = secrets.randbits(64)
+        response = await asyncio.wait_for(
+            self._plugin.ping(nonce=nonce), self._deadlines.request
+        )
+        if response.nonce != nonce:
+            raise RuntimeError("Worker returned an invalid ping response")
 
     async def _environment(self) -> EnvironmentMetadata:
-        if self._invoke_lock is None or self._plugin is None:
+        if self._plugin is None:
             raise RuntimeError("Worker session is not ready")
-        async with self._invoke_lock:
-            response = await asyncio.wait_for(
-                self._plugin.getEnvironment(), self._deadlines.request
-            )
-            environment = response.environment
-            return EnvironmentMetadata(
-                python_version=str(environment.pythonVersion),
-                torch_version=str(environment.torchVersion),
-                glibc_version=str(environment.glibcVersion),
-                executable=str(environment.executable),
-            )
+        response = await asyncio.wait_for(
+            self._plugin.getEnvironment(), self._deadlines.request
+        )
+        environment = response.environment
+        return EnvironmentMetadata(
+            python_version=str(environment.pythonVersion),
+            torch_version=str(environment.torchVersion),
+            glibc_version=str(environment.glibcVersion),
+            executable=str(environment.executable),
+        )
 
     def _submit_invocation(
         self,
@@ -475,24 +593,71 @@ class WorkerSession:
                 out,
                 collect_metrics=collect_metrics,
             )
-            with reserve_invocation_access(self._buffers, invocation):
-                future = asyncio.run_coroutine_threadsafe(
-                    self._invoke(invocation, collect_metrics),
-                    self._loop,
-                )
-                try:
-                    return future.result()
-                except Exception as error:
-                    if self._invalidated:
-                        try:
-                            self.close()
-                        except Exception:
-                            pass
-                        raise WorkerTransportError(
-                            "Worker transport failed during invocation: "
-                            f"{type(error).__name__}: {error}"
-                        ) from error
-                    raise
+        with reserve_invocation_access(self._buffers, invocation):
+            future = asyncio.run_coroutine_threadsafe(
+                self._invoke(invocation, collect_metrics), self._loop
+            )
+            try:
+                return future.result()
+            except Exception as error:
+                if self._invalidated:
+                    try:
+                        self.close()
+                    except Exception:
+                        pass
+                    raise WorkerTransportError(
+                        "Worker transport failed during invocation: "
+                        f"{type(error).__name__}: {error}"
+                    ) from error
+                raise
+
+
+def _invocation_record(
+    generation: int,
+    invocation_id: int,
+    operation_id: int,
+    inputs: list[ManagedTensor],
+    outputs: list[ManagedTensor],
+    invocation: BoundInvocation,
+    profiled: bool,
+    *,
+    kind: int = COMMAND_INVOKE,
+) -> Record:
+    tensors = tuple(
+        tensor_from_descriptor(item.descriptor, TENSOR_INPUT, index, bound.writable)
+        for index, (item, bound) in enumerate(
+            zip(inputs, invocation.tensor_inputs, strict=True)
+        )
+    ) + tuple(
+        tensor_from_descriptor(item.descriptor, TENSOR_OUTPUT, index, True)
+        for index, item in enumerate(outputs)
+    )
+    scalars = scalar_arguments(
+        (index, parameter.kind, value)
+        for index, (parameter, value) in enumerate(
+            zip(invocation.operation.scalar_parameters, invocation.scalars, strict=True)
+        )
+    )
+    return Record(
+        kind,
+        generation,
+        1,
+        invocation_id,
+        operation_id,
+        flags=FLAG_PROFILE if profiled else 0,
+        tensors=tensors,
+        scalars=scalars,
+    )
+
+
+def _raise_ring_error(completion: Record) -> None:
+    if completion.status == STATUS_OK:
+        return
+    if completion.status == STATUS_OPERATION_ERROR:
+        raise OperationError(completion.error_type, completion.error_message)
+    raise RingError(
+        f"worker ring failure {completion.error_type}: {completion.error_message}"
+    )
 
 
 def _scalar_arguments(
@@ -533,16 +698,24 @@ def inspect_worker_environment(
 async def _inspect_plugin(
     manifest: "PluginManifest", deadlines: TransportDeadlines
 ) -> PluginMetadata:
-    async with _worker_connection(manifest, deadlines) as (plugin, _fd_sender):
-        return await _validate_worker(plugin, deadlines.startup)
+    async with _worker_connection(manifest, deadlines) as (plugin, _fd_sender, rings):
+        return await _validate_worker(
+            plugin,
+            deadlines.startup,
+            None if "WMFS_FAILURE_WORKER_MODE" in os.environ else rings.handshake,
+        )
 
 
 async def _inspect_worker_environment(
     manifest: "PluginManifest",
     deadlines: TransportDeadlines,
 ) -> EnvironmentMetadata:
-    async with _worker_connection(manifest, deadlines) as (plugin, _fd_sender):
-        await _validate_worker(plugin, deadlines.startup)
+    async with _worker_connection(manifest, deadlines) as (plugin, _fd_sender, rings):
+        await _validate_worker(
+            plugin,
+            deadlines.startup,
+            None if "WMFS_FAILURE_WORKER_MODE" in os.environ else rings.handshake,
+        )
         response = await asyncio.wait_for(plugin.getEnvironment(), deadlines.request)
         environment = response.environment
         return EnvironmentMetadata(
@@ -553,7 +726,11 @@ async def _inspect_worker_environment(
         )
 
 
-async def _validate_worker(plugin: object, timeout: float) -> PluginMetadata:
+async def _validate_worker(
+    plugin: object,
+    timeout: float,
+    expected_ring: tuple[int, int, int, int, int, int, int] | None,
+) -> PluginMetadata:
     runtime_schema = _load_runtime_schema()
     try:
         protocol = await asyncio.wait_for(plugin.getProtocolVersion(), timeout)
@@ -570,6 +747,28 @@ async def _validate_worker(plugin: object, timeout: float) -> PluginMetadata:
     ping = await asyncio.wait_for(plugin.ping(nonce=nonce), timeout)
     if ping.nonce != nonce:
         raise RuntimeError("Worker returned an invalid ping response")
+    if expected_ring is not None:
+        try:
+            ring_response = await asyncio.wait_for(plugin.getRingHandshake(), timeout)
+        except Exception as error:
+            raise RuntimeError(
+                "Worker did not confirm ring transport readiness"
+            ) from error
+        ring = ring_response.ring
+        actual_ring = (
+            int(ring.abiMajor),
+            int(ring.abiMinor),
+            int(ring.headerSize),
+            int(ring.recordSize),
+            int(ring.capacity),
+            int(ring.generation),
+            int(ring.capabilities),
+        )
+        if actual_ring != expected_ring:
+            raise RuntimeError(
+                f"Worker ring handshake mismatch: expected {expected_ring}, "
+                f"received {actual_ring}"
+            )
     response = await asyncio.wait_for(plugin.getMetadata(), timeout)
     metadata = metadata_from_reader(response.metadata)
     if metadata.protocol_version != runtime_schema.protocolVersion:
@@ -584,11 +783,23 @@ async def _validate_worker(plugin: object, timeout: float) -> PluginMetadata:
 async def _worker_connection(
     manifest: "PluginManifest",
     deadlines: TransportDeadlines,
-) -> AsyncIterator[tuple[object, FdSender]]:
+) -> AsyncIterator[tuple[object, FdSender, _RingClient]]:
     rpc_parent, rpc_child = socket.socketpair()
     fd_parent, fd_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    capacity = int(os.environ.get("WMFS_RING_CAPACITY", DEFAULT_CAPACITY))
+    generation = secrets.randbits(64) or 1
+    command_owner = RingOwner(capacity, generation)
+    completion_owner = RingOwner(capacity, generation)
+    ring_client = _RingClient(
+        command_owner.endpoint(True), completion_owner.endpoint(False)
+    )
     try:
-        process = _start_worker(manifest, rpc_child.fileno(), fd_child.fileno())
+        process = _start_worker(
+            manifest,
+            rpc_child.fileno(),
+            fd_child.fileno(),
+            (command_owner, completion_owner),
+        )
     except Exception:
         rpc_parent.close()
         fd_parent.close()
@@ -606,7 +817,7 @@ async def _worker_connection(
         interface = getattr(plugin_schema, manifest.interface)
         stream = await capnp.AsyncIoStream.create_unix_connection(sock=rpc_parent)
         client = capnp.TwoPartyClient(stream)
-        yield client.bootstrap().cast_as(interface), fd_sender
+        yield client.bootstrap().cast_as(interface), fd_sender, ring_client
     finally:
         if client is not None:
             client.close()
@@ -621,10 +832,16 @@ async def _worker_connection(
         await _wait_for_worker(process, deadlines)
         if fd_sender is not None:
             fd_sender.worker_exited()
+        command_owner.close()
+        completion_owner.close()
+        ring_client.close()
 
 
 def _start_worker(
-    manifest: "PluginManifest", rpc_fd: int, fd_socket_fd: int
+    manifest: "PluginManifest",
+    rpc_fd: int,
+    fd_socket_fd: int,
+    ring_owners: tuple[RingOwner, RingOwner] | None = None,
 ) -> subprocess.Popen[str]:
     protocol_schema_root = schema_root().resolve()
     environment = os.environ.copy()
@@ -633,13 +850,42 @@ def _start_worker(
     worker = shutil.which(manifest.worker, path=environment.get("PATH"))
     if worker is None:
         raise RuntimeError(f"Worker executable {manifest.worker!r} was not found")
-    return subprocess.Popen(
+    if ring_owners is None:
+        generation = secrets.randbits(64) or 1
+        ring_owners = (
+            RingOwner(DEFAULT_CAPACITY, generation),
+            RingOwner(DEFAULT_CAPACITY, generation),
+        )
+    command, completion = ring_owners
+    compatibility = "WMFS_FAILURE_WORKER_MODE" in environment
+    arguments = [
+        worker,
+        "--rpc-fd",
+        str(rpc_fd),
+        "--fd-socket-fd",
+        str(fd_socket_fd),
+    ]
+    if not compatibility:
+        arguments.extend(
+            [
+                "--command-ring-fd",
+                str(command.ring_fd),
+                "--command-data-fd",
+                str(command.data_fd),
+                "--command-space-fd",
+                str(command.space_fd),
+                "--completion-ring-fd",
+                str(completion.ring_fd),
+                "--completion-data-fd",
+                str(completion.data_fd),
+                "--completion-space-fd",
+                str(completion.space_fd),
+                "--ring-generation",
+                str(command.generation),
+            ]
+        )
+    arguments.extend(
         [
-            worker,
-            "--rpc-fd",
-            str(rpc_fd),
-            "--fd-socket-fd",
-            str(fd_socket_fd),
             "--schema",
             str(manifest.schema_path),
             "--interface",
@@ -648,14 +894,23 @@ def _start_worker(
             str(protocol_schema_root),
             "--schema-import",
             str(manifest.schema_path.parent.parent),
-        ],
+        ]
+    )
+    process = subprocess.Popen(
+        arguments,
         cwd=manifest.root,
         env=environment,
-        pass_fds=(rpc_fd, fd_socket_fd),
+        pass_fds=(
+            (rpc_fd, fd_socket_fd)
+            if compatibility
+            else (rpc_fd, fd_socket_fd, *command.fds, *completion.fds)
+        ),
         stdout=subprocess.DEVNULL,
         stderr=None,
         text=True,
     )
+    process._wmfs_ring_owners = ring_owners
+    return process
 
 
 async def _wait_for_worker(
