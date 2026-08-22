@@ -82,7 +82,7 @@ def _manifest(plugin: Plugin, document: dict[str, Any], fingerprint: str) -> str
     result["interfaceFingerprint"] = f"sha256:{fingerprint}"
     result["operationCount"] = len(plugin.operations)
     return (
-        json.dumps(result, allow_nan=False, ensure_ascii=True, indent=2, sort_keys=True)
+        json.dumps(result, allow_nan=False, ensure_ascii=True, indent=4, sort_keys=True)
         + "\n"
     )
 
@@ -181,7 +181,8 @@ typedef struct wmfs_plugin_api_v1 {
     wmfs_dispatch_v1 dispatch;
 } wmfs_plugin_api_v1;
 
-typedef const wmfs_plugin_api_v1 *(*wmfs_get_plugin_api_v1)(uint32_t abi_version);
+typedef const wmfs_plugin_api_v1 *(*wmfs_get_plugin_api_v1)(
+    uint32_t abi_version);
 
 #ifdef __cplusplus
 }
@@ -192,6 +193,8 @@ typedef const wmfs_plugin_api_v1 *(*wmfs_get_plugin_api_v1)(uint32_t abi_version
 
 def _cpp_wrapper(plugin: Plugin, fingerprint: str) -> str:
     guard = f"WMFS_{plugin.namespace.upper()}_PLUGIN_HPP"
+    fingerprint_macro = f"#define WMFS_{plugin.namespace.upper()}_INTERFACE_FINGERPRINT"
+    fingerprint_padding = " " * max(1, 79 - len(fingerprint_macro))
     operation_lines = "\n".join(
         f"    {item.name} = UINT32_C({item.operation_id}),"
         for item in plugin.operations
@@ -205,7 +208,8 @@ def _cpp_wrapper(plugin: Plugin, fingerprint: str) -> str:
 
 #define WMFS_{plugin.namespace.upper()}_ABI_VERSION UINT32_C({plugin.abi_version})
 #define WMFS_{plugin.namespace.upper()}_PROTOCOL_VERSION UINT32_C({plugin.protocol_version})
-#define WMFS_{plugin.namespace.upper()}_INTERFACE_FINGERPRINT "sha256:{fingerprint}"
+{fingerprint_macro}{fingerprint_padding}\\
+    "sha256:{fingerprint}"
 
 namespace wmfs {{
 namespace {plugin.namespace} {{
@@ -214,10 +218,11 @@ enum operation_id : std::uint32_t {{
 {operation_lines}
 }};
 
-}}  // namespace {plugin.namespace}
-}}  // namespace wmfs
+}} // namespace {plugin.namespace}
+}} // namespace wmfs
 
-extern "C" const wmfs_plugin_api_v1 *wmfs_plugin_get_api(std::uint32_t abi_version);
+extern "C" const wmfs_plugin_api_v1 *
+wmfs_plugin_get_api(std::uint32_t abi_version);
 
 #endif
 """
@@ -237,7 +242,8 @@ def _cpp_stub(plugin: Plugin) -> str:
 
 namespace {{
 int32_t dispatch(const wmfs_invocation_v1 *invocation) {{
-    if (invocation == 0 || invocation->struct_size < sizeof(wmfs_invocation_v1)) {{
+    if (invocation == 0 ||
+        invocation->struct_size < sizeof(wmfs_invocation_v1)) {{
         return WMFS_STATUS_INVALID_ARGUMENT;
     }}
     switch (invocation->operation_id) {{
@@ -247,13 +253,15 @@ int32_t dispatch(const wmfs_invocation_v1 *invocation) {{
     }}
 }}
 
-const wmfs_plugin_api_v1 API = {{
-    sizeof(wmfs_plugin_api_v1), WMFS_{plugin.namespace.upper()}_ABI_VERSION,
-    WMFS_{plugin.namespace.upper()}_PROTOCOL_VERSION, UINT32_C(0),
-    "{plugin.name}", "{plugin.version}",
-    WMFS_{plugin.namespace.upper()}_INTERFACE_FINGERPRINT, &dispatch
-}};
-}}  // namespace
+const wmfs_plugin_api_v1 API = {{sizeof(wmfs_plugin_api_v1),
+                                WMFS_{plugin.namespace.upper()}_ABI_VERSION,
+                                WMFS_{plugin.namespace.upper()}_PROTOCOL_VERSION,
+                                UINT32_C(0),
+                                "{plugin.name}",
+                                "{plugin.version}",
+                                WMFS_{plugin.namespace.upper()}_INTERFACE_FINGERPRINT,
+                                &dispatch}};
+}} // namespace
 
 extern "C" const wmfs_plugin_api_v1 *wmfs_plugin_get_api(uint32_t abi_version) {{
     return abi_version == WMFS_{plugin.namespace.upper()}_ABI_VERSION ? &API : 0;
@@ -304,7 +312,9 @@ PLUGIN_VERSION = {json.dumps(plugin.version)}
 FORMAT_VERSION = {plugin.format_version}
 ABI_VERSION = {plugin.abi_version}
 PROTOCOL_VERSION = {plugin.protocol_version}
-INTERFACE_FINGERPRINT = "sha256:{fingerprint}"
+INTERFACE_FINGERPRINT = (
+    "sha256:{fingerprint}"
+)
 
 
 class Operation(NamedTuple):
