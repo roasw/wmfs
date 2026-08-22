@@ -7,6 +7,11 @@ name = "reference"
 version = "0.1.0"
 namespace = "reference"
 python_module = "wmfs_reference"
+
+[deployment]
+schema = "../schemas/wmfs-reference/reference.capnp"
+interface = "ReferencePlugin"
+root = ".."
 worker = "wmfs-reference-worker"
 
 [[operations]]

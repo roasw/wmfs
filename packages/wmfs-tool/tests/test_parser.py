@@ -15,6 +15,8 @@ def test_reference_interface_represents_current_operations() -> None:
     assert plugin.name == "reference"
     assert plugin.abi_version == 1
     assert plugin.worker == "wmfs-reference-worker"
+    assert plugin.schema == "../schemas/wmfs-reference/reference.capnp"
+    assert plugin.interface == "ReferencePlugin"
     assert [(item.operation_id, item.name) for item in plugin.operations] == [
         (1, "matmul"),
         (2, "svd"),

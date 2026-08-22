@@ -8,7 +8,7 @@
 #define WMFS_REFERENCE_ABI_VERSION UINT32_C(1)
 #define WMFS_REFERENCE_PROTOCOL_VERSION UINT32_C(11)
 #define WMFS_REFERENCE_INTERFACE_FINGERPRINT                                   \
-    "sha256:b5f8db09b63c92bc1857797c78005f7455b3a497c02133b80659948d93252cd2"
+    "sha256:b0f2005fae597c883fc5caf85c3b78f88996b0141b5c7a71bdd9d7163efc3123"
 
 namespace wmfs {
 namespace reference {

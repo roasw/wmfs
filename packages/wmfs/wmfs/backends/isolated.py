@@ -63,22 +63,10 @@ class IsolatedBackend:
         )
         try:
             for manifest in manifests:
-                if manifest.name in backend._sessions:
-                    raise ValueError(f"Plugin {manifest.name!r} is already discovered")
-                session = backend._new_session(manifest.name, discover=True)
+                registry.register(manifest.metadata)
+            for manifest in manifests:
+                session = backend._new_session(manifest.name)
                 backend._sessions[manifest.name] = session
-                metadata = session.metadata
-                if metadata.name != manifest.name:
-                    raise ValueError(
-                        f"Plugin manifest names {manifest.name!r}, but worker reports "
-                        f"{metadata.name!r}"
-                    )
-                if metadata.version != manifest.version:
-                    raise ValueError(
-                        f"Plugin manifest version is {manifest.version!r}, but worker "
-                        f"reports {metadata.version!r}"
-                    )
-                registry.register(metadata)
             return registry, backend
         except BaseException:
             backend.close()
@@ -255,10 +243,8 @@ class IsolatedBackend:
                 self._condition.notify_all()
         raise RuntimeError("Isolated backend is closed")
 
-    def _new_session(
-        self, plugin_name: str, *, discover: bool = False
-    ) -> WorkerSession | NativeWorkerSession:
-        expected = None if discover else self._registry.plugin(plugin_name)
+    def _new_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+        expected = self._registry.plugin(plugin_name)
         use_native = self._control_mode == "native" or (
             self._control_mode == "auto" and native_available()
         )

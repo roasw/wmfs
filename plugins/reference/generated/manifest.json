@@ -1,8 +1,15 @@
 {
     "abiVersion": 1,
+    "deployment": {
+        "interface": "ReferencePlugin",
+        "root": "..",
+        "schema": "../schemas/wmfs-reference/reference.capnp",
+        "worker": "wmfs-reference-worker"
+    },
     "formatVersion": 1,
     "generator": "wmfs-tool/1",
-    "interfaceFingerprint": "sha256:b5f8db09b63c92bc1857797c78005f7455b3a497c02133b80659948d93252cd2",
+    "interfaceFingerprint": "sha256:b0f2005fae597c883fc5caf85c3b78f88996b0141b5c7a71bdd9d7163efc3123",
+    "metadataFingerprint": "0x549fb18b7a4b6c75",
     "operationCount": 6,
     "operations": [
         {
@@ -411,8 +418,7 @@
         "name": "reference",
         "namespace": "reference",
         "pythonModule": "wmfs_reference",
-        "version": "0.1.0",
-        "worker": "wmfs-reference-worker"
+        "version": "0.1.0"
     },
     "protocolVersion": 11
 }

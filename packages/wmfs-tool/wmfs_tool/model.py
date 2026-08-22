@@ -77,4 +77,7 @@ class Plugin:
     namespace: str
     python_module: str
     worker: str
+    schema: str
+    interface: str
+    deployment_root: str
     operations: tuple[Operation, ...]

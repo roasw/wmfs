@@ -87,7 +87,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         "reference": {
             "MANIFEST.in",
             "README.md",
-            "plugin.toml",
+            "generated/manifest.json",
             "pyproject.toml",
             "schemas/wmfs-reference/reference.capnp",
             "wmfs_reference/worker.py",
@@ -134,7 +134,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         ),
         "reference": (
             "wmfs_reference/worker.py",
-            "share/wmfs/plugins/reference/plugin.toml",
+            "share/wmfs/plugins/reference/generated/manifest.json",
             "share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp",
             "wmfs_reference-${releaseVersion}.dist-info/entry_points.txt",
         ),

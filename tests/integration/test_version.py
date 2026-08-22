@@ -1,3 +1,4 @@
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -68,7 +69,9 @@ def test_distribution_versions_are_derived_from_git() -> None:
 
 
 def test_plugin_protocol_version_is_independent() -> None:
-    manifest = tomllib.loads((ROOT / "plugins/reference/plugin.toml").read_text())
+    manifest = json.loads(
+        (ROOT / "plugins/reference/generated/manifest.json").read_text()
+    )
     plugin_version = manifest["plugin"]["version"]
 
     schema_path = ROOT / "plugins/reference/schemas/wmfs-reference/reference.capnp"

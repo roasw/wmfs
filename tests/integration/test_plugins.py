@@ -1,3 +1,5 @@
+import json
+import sys
 from dataclasses import replace
 from inspect import signature
 from pathlib import Path
@@ -9,9 +11,9 @@ import wmfs
 import wmfs.transport.native_worker as native_worker_module
 import wmfs.transport.worker_process as worker_process_module
 from wmfs.memory import BufferManager
-from wmfs.plugins import discover_plugins, find_manifests
+from wmfs.plugins import discover_plugins, find_manifests, load_manifest
 from wmfs.runtime import Runtime
-from wmfs.transport.worker_process import WorkerSession, inspect_plugin
+from wmfs.transport.worker_process import WorkerSession
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
@@ -23,9 +25,10 @@ def test_finds_reference_plugin_manifest() -> None:
     assert manifests[0].name == "reference"
     assert manifests[0].interface == "ReferencePlugin"
     assert manifests[0].schema_path.is_file()
+    assert manifests[0].metadata.fingerprint == 0x549FB18B7A4B6C75
 
 
-def test_discovers_operations_over_rpc() -> None:
+def test_discovers_operations_from_generated_manifest() -> None:
     registry = discover_plugins([PLUGIN_DIRECTORY])
 
     assert registry.plugin_names == ("reference",)
@@ -141,8 +144,7 @@ def test_discovery_session_is_reused_for_first_invocation(
 
 def test_worker_session_rejects_metadata_changed_after_discovery() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
-    metadata = inspect_plugin(manifest)
-    expected = replace(metadata, version="changed")
+    expected = replace(manifest.metadata, version="changed")
 
     with BufferManager() as buffers:
         with pytest.raises(RuntimeError, match="failed to start") as raised:
@@ -150,3 +152,51 @@ def test_worker_session_rejects_metadata_changed_after_discovery() -> None:
 
     assert raised.value.__cause__ is not None
     assert "metadata changed after plugin discovery" in str(raised.value.__cause__)
+
+
+def test_manifest_discovery_does_not_import_plugin_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sys.modules.pop("wmfs_reference", None)
+
+    registry = discover_plugins([PLUGIN_DIRECTORY])
+
+    assert registry.plugin_names == ("reference",)
+    assert "wmfs_reference" not in sys.modules
+
+
+def test_manifest_rejects_interface_and_metadata_drift(tmp_path: Path) -> None:
+    source = PLUGIN_DIRECTORY / "reference" / "generated" / "manifest.json"
+    document = json.loads(source.read_text())
+    document["operations"][0]["name"] = "drifted"
+    drifted = tmp_path / "manifest.json"
+    drifted.write_text(json.dumps(document))
+
+    with pytest.raises(ValueError, match="interface fingerprint"):
+        load_manifest(drifted)
+
+    document = json.loads(source.read_text())
+    document["metadataFingerprint"] = "0x0000000000000001"
+    drifted.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="metadata fingerprint"):
+        load_manifest(drifted)
+
+
+def test_finds_installed_generated_manifest_layout(tmp_path: Path) -> None:
+    plugin_root = tmp_path / "share" / "wmfs" / "plugins" / "reference"
+    generated = plugin_root / "generated"
+    schema = plugin_root / "schemas" / "wmfs-reference"
+    generated.mkdir(parents=True)
+    schema.mkdir(parents=True)
+    source_root = PLUGIN_DIRECTORY / "reference"
+    (generated / "manifest.json").write_bytes(
+        (source_root / "generated" / "manifest.json").read_bytes()
+    )
+    (schema / "reference.capnp").write_bytes(
+        (source_root / "schemas" / "wmfs-reference" / "reference.capnp").read_bytes()
+    )
+
+    manifests = find_manifests([plugin_root.parent])
+
+    assert len(manifests) == 1
+    assert manifests[0].root == plugin_root

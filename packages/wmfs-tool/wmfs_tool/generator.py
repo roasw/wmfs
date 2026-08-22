@@ -70,7 +70,6 @@ def _interface_document(plugin: Plugin) -> dict[str, Any]:
             "namespace": plugin.namespace,
             "pythonModule": plugin.python_module,
             "version": plugin.version,
-            "worker": plugin.worker,
         },
         "protocolVersion": plugin.protocol_version,
     }
@@ -78,13 +77,107 @@ def _interface_document(plugin: Plugin) -> dict[str, Any]:
 
 def _manifest(plugin: Plugin, document: dict[str, Any], fingerprint: str) -> str:
     result = dict(document)
+    result["deployment"] = {
+        "interface": plugin.interface,
+        "root": plugin.deployment_root,
+        "schema": plugin.schema,
+        "worker": plugin.worker,
+    }
     result["generator"] = _GENERATOR
     result["interfaceFingerprint"] = f"sha256:{fingerprint}"
+    result["metadataFingerprint"] = f"0x{_metadata_fingerprint(plugin):016x}"
     result["operationCount"] = len(plugin.operations)
     return (
         json.dumps(result, allow_nan=False, ensure_ascii=True, indent=4, sort_keys=True)
         + "\n"
     )
+
+
+def _metadata_fingerprint(plugin: Plugin) -> int:
+    metadata = {
+        "name": plugin.name,
+        "operations": [_metadata_operation(item) for item in plugin.operations],
+        "protocol_version": plugin.protocol_version,
+        "version": plugin.version,
+    }
+    envelope = {"encoding": "wmfs-plugin-metadata-v1", "metadata": metadata}
+    canonical = json.dumps(
+        envelope,
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(canonical).digest()[:8], "big")
+
+
+def _metadata_operation(operation: Operation) -> dict[str, Any]:
+    return {
+        "internal": operation.internal,
+        "name": operation.name,
+        "operation_id": operation.operation_id,
+        "output_plans": [_metadata_output(item) for item in operation.outputs],
+        "scalar_parameters": [asdict(item) for item in operation.scalars],
+        "tensor_inputs": [
+            {"access": _metadata_access(item.access), "name": item.name}
+            for item in operation.inputs
+        ],
+        "tensor_outputs": [
+            {"access": "readOnly", "name": item.name} for item in operation.outputs
+        ],
+        "vjp": asdict(operation.vjp) if operation.vjp is not None else None,
+    }
+
+
+def _metadata_access(access: str) -> str:
+    return {"read_only": "readOnly", "read_write": "readWrite"}[access]
+
+
+def _metadata_output(output: Any) -> dict[str, Any]:
+    known = None
+    if output.allocation == "known":
+        if output.same_shape_as_input is not None:
+            shape_kind = "sameShapeAsInput"
+            shape: Any = output.same_shape_as_input
+        else:
+            shape_kind = "dimensions"
+            shape = [_metadata_dimension(item) for item in output.dimensions]
+        known = {
+            "dtype": _metadata_dtype(output.dtype),
+            "shape": shape,
+            "shape_kind": shape_kind,
+        }
+    return {"known": known, "name": output.name}
+
+
+def _metadata_dimension(dimension: Any) -> dict[str, Any]:
+    if dimension.kind == "constant":
+        value: Any = dimension.axis
+    elif dimension.kind == "input_axis":
+        value = {"axis": dimension.axis, "input": dimension.input}
+    elif dimension.kind in {"minimum", "maximum"}:
+        value = [_metadata_dimension(item) for item in dimension.operands]
+    else:
+        value = {
+            "scalar_parameter": dimension.scalar,
+            "when_false": _metadata_dimension(dimension.when_false),
+            "when_true": _metadata_dimension(dimension.when_true),
+        }
+    kind = "inputAxis" if dimension.kind == "input_axis" else dimension.kind
+    return {"kind": kind, "value": value}
+
+
+def _metadata_dtype(dtype: Any) -> dict[str, Any]:
+    if dtype.kind == "input":
+        value: Any = dtype.input
+    elif dtype.kind == "fixed":
+        value = dtype.value
+    else:
+        value = {"scalar_parameter": dtype.scalar, "tensor_input": dtype.input}
+    kind = (
+        "promoteTensorScalar" if dtype.kind == "promote_tensor_scalar" else dtype.kind
+    )
+    return {"kind": kind, "value": value}
 
 
 def _abi_header() -> str:

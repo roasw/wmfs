@@ -17,7 +17,7 @@ wmfs-reference-worker = "wmfs_reference.worker:main"
 include = ["wmfs_reference*"]
 
 [tool.setuptools.data-files]
-"share/wmfs/plugins/reference" = ["plugin.toml"]
+"share/wmfs/plugins/reference/generated" = ["generated/manifest.json"]
 "share/wmfs/plugins/reference/schemas/wmfs-reference" = [
     "schemas/wmfs-reference/reference.capnp",
 ]

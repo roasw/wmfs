@@ -35,7 +35,7 @@ def _backend(
     )
     registry = OperationRegistry()
     registry.register(metadata)
-    manifest = PluginManifest("test", "1", Path(), "Test", "test", Path())
+    manifest = PluginManifest("test", "1", metadata, Path(), "Test", "test", Path())
     monkeypatch.setattr(isolated_module, "WorkerSession", session_type)
     return IsolatedBackend((manifest,), registry, control_mode="python")
 
@@ -130,7 +130,7 @@ def test_backend_propagates_deadlines_to_python_session(
     )
     registry = OperationRegistry()
     registry.register(metadata)
-    manifest = PluginManifest("test", "1", Path(), "Test", "test", Path())
+    manifest = PluginManifest("test", "1", metadata, Path(), "Test", "test", Path())
     monkeypatch.setattr(isolated_module, "WorkerSession", Session)
     backend = IsolatedBackend(
         (manifest,), registry, control_mode="python", deadlines=deadlines
@@ -270,12 +270,20 @@ def test_discovery_failure_closes_all_partial_sessions_and_buffers(
         )
 
     class Session:
-        def __init__(self, manifest: PluginManifest, *_args: object) -> None:
+        def __init__(
+            self,
+            manifest: PluginManifest,
+            _buffers: object,
+            expected: PluginMetadata,
+            *_args: object,
+        ) -> None:
             self.name = manifest.name
             self.metadata = metadata(
                 "first" if manifest.name == "second" else manifest.name,
                 "duplicate",
             )
+            if self.metadata != expected:
+                raise RuntimeError("Worker metadata does not match manifest metadata")
 
         def close(self) -> None:
             closed.append(self.name)
@@ -288,13 +296,29 @@ def test_discovery_failure_closes_all_partial_sessions_and_buffers(
             closed.append("buffers")
 
     manifests = (
-        PluginManifest("first", "1", Path(), "First", "first", Path()),
-        PluginManifest("second", "1", Path(), "Second", "second", Path()),
+        PluginManifest(
+            "first",
+            "1",
+            metadata("first", "duplicate"),
+            Path(),
+            "First",
+            "first",
+            Path(),
+        ),
+        PluginManifest(
+            "second",
+            "1",
+            metadata("second", "duplicate"),
+            Path(),
+            "Second",
+            "second",
+            Path(),
+        ),
     )
     monkeypatch.setattr(isolated_module, "WorkerSession", Session)
     monkeypatch.setattr(isolated_module, "BufferManager", Buffers)
 
-    with pytest.raises(ValueError, match="manifest names.*worker reports"):
+    with pytest.raises(RuntimeError, match="metadata does not match|failed to start"):
         IsolatedBackend.discover(manifests, control_mode="python")
 
-    assert closed == ["first", "second", "buffers"]
+    assert closed == ["first", "buffers"]

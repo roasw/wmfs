@@ -1,12 +1,12 @@
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
-from wmfs.plugins import PluginManifest
+from wmfs.plugins import PluginManifest, load_manifest
 from wmfs.transport.deadlines import TransportDeadlines
 
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
@@ -55,19 +55,11 @@ def failure_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> object:
         monkeypatch.setenv("WMFS_FAILURE_WORKER_MODE", mode)
         monkeypatch.setenv("WMFS_FAILURE_WORKER_PID_FILE", os.fspath(pid_file))
         monkeypatch.setenv("WMFS_FAILURE_WORKER_PYTHONPATH", os.pathsep.join(sys.path))
+        manifest = load_manifest(REFERENCE_DIRECTORY / "generated" / "manifest.json")
         return FailureWorker(
-            PluginManifest(
-                name="reference",
-                version="0.1.0",
-                schema_path=(
-                    REFERENCE_DIRECTORY
-                    / "schemas"
-                    / "wmfs-reference"
-                    / "reference.capnp"
-                ),
-                interface="ReferencePlugin",
+            replace(
+                manifest,
                 worker=os.fspath(FIXTURE_DIRECTORY / "failure_worker.py"),
-                root=REFERENCE_DIRECTORY,
             ),
             pid_file,
         )

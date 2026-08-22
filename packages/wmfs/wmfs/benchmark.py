@@ -203,9 +203,9 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     with BufferManager(
         mode=config.memory_mode, arena_bytes=config.arena_bytes
     ) as discovery_buffers:
-        discovery_session = _new_session(manifest, discovery_buffers, None, config)
+        metadata = manifest.metadata
+        discovery_session = _new_session(manifest, discovery_buffers, metadata, config)
         try:
-            metadata = discovery_session.metadata
             worker = discovery_session.environment()
         finally:
             discovery_session.close()

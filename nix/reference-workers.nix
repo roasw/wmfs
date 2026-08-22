@@ -30,10 +30,10 @@ in
     pythonImportsCheck = [ "wmfs_reference" ];
 
     postInstall = ''
-      substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \
+      substituteInPlace "$out/share/wmfs/plugins/reference/generated/manifest.json" \
         --replace-fail \
-        'worker = "wmfs-reference-worker"' \
-        'worker = "'"$out"'/bin/wmfs-reference-worker"'
+        '"worker": "wmfs-reference-worker"' \
+        '"worker": "'"$out"'/bin/wmfs-reference-worker"'
     '';
   };
 
@@ -62,10 +62,10 @@ in
     buildTargets = [ "wmfs-reference-worker" ];
 
     postInstall = ''
-      substituteInPlace "$out/share/wmfs/plugins/reference/plugin.toml" \
+      substituteInPlace "$out/share/wmfs/plugins/reference/generated/manifest.json" \
         --replace-fail \
-        'worker = "wmfs-reference-worker"' \
-        'worker = "'"$out"'/bin/wmfs-reference-worker"'
+        '"worker": "wmfs-reference-worker"' \
+        '"worker": "'"$out"'/bin/wmfs-reference-worker"'
     '';
   };
 }

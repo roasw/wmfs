@@ -34,14 +34,29 @@ def load_interface(path: Path) -> Plugin:
     root = _table(data, "interface")
     _keys(
         root,
-        {"format_version", "abi_version", "protocol_version", "plugin", "operations"},
+        {
+            "format_version",
+            "abi_version",
+            "protocol_version",
+            "plugin",
+            "deployment",
+            "operations",
+        },
         "interface",
     )
     plugin = _table(_required(root, "plugin", "interface"), "interface.plugin")
     _keys(
         plugin,
-        {"name", "version", "namespace", "python_module", "worker"},
+        {"name", "version", "namespace", "python_module"},
         "interface.plugin",
+    )
+    deployment = _table(
+        _required(root, "deployment", "interface"), "interface.deployment"
+    )
+    _keys(
+        deployment,
+        {"schema", "interface", "root", "worker"},
+        "interface.deployment",
     )
     operations_data = _list(
         _required(root, "operations", "interface"), "interface.operations"
@@ -68,7 +83,20 @@ def load_interface(path: Path) -> Plugin:
             "plugin.python_module",
         ),
         worker=_string(
-            _required(plugin, "worker", "interface.plugin"), "plugin.worker"
+            _required(deployment, "worker", "interface.deployment"),
+            "deployment.worker",
+        ),
+        schema=_string(
+            _required(deployment, "schema", "interface.deployment"),
+            "deployment.schema",
+        ),
+        interface=_identifier(
+            _required(deployment, "interface", "interface.deployment"),
+            "deployment.interface",
+        ),
+        deployment_root=_string(
+            _required(deployment, "root", "interface.deployment"),
+            "deployment.root",
         ),
         operations=tuple(
             _operation(item, index) for index, item in enumerate(operations_data)

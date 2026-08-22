@@ -32,7 +32,9 @@ def test_generation_is_deterministic_and_check_detects_stale(tmp_path: Path) -> 
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["interfaceFingerprint"] == f"sha256:{first}"
     assert manifest["operationCount"] == 6
-    assert manifest["plugin"]["worker"] == "wmfs-reference-worker"
+    assert manifest["deployment"]["worker"] == "wmfs-reference-worker"
+    assert manifest["deployment"]["interface"] == "ReferencePlugin"
+    assert manifest["metadataFingerprint"] == "0x549fb18b7a4b6c75"
     assert manifest["operations"][5]["outputs"][0]["allocation"] == "dynamic"
 
     (tmp_path / "manifest.json").write_text("stale")

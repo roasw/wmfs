@@ -269,8 +269,8 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     COMPONENT reference-worker
   )
   install(
-    FILES plugins/reference/plugin.toml
-    DESTINATION share/wmfs/plugins/reference
+    FILES plugins/reference/generated/manifest.json
+    DESTINATION share/wmfs/plugins/reference/generated
     COMPONENT reference-worker
   )
   install(
