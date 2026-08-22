@@ -42,6 +42,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(CapnProto CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
+add_library(wmfs-ring STATIC src/ring.cpp)
+add_library(wmfs::ring ALIAS wmfs-ring)
+target_include_directories(
+  wmfs-ring
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+)
+
 option(WMFS_BUILD_PYTHON_RUNTIME "Build the Python runtime extension" ON)
 option(WMFS_BUILD_REFERENCE_WORKER "Build the C++ reference plugin worker" OFF)
 option(WMFS_BUILD_DOCUMENTATION "Build the unified API documentation" OFF)
@@ -95,6 +102,10 @@ if(BUILD_TESTING)
       CXX_STANDARD_REQUIRED ON
   )
   add_test(NAME wmfs-ring-protocol COMMAND wmfs-ring-protocol-test)
+
+  add_executable(wmfs-ring-test tests/cpp/ring_test.cpp)
+  target_link_libraries(wmfs-ring-test PRIVATE wmfs::ring Threads::Threads)
+  add_test(NAME wmfs-ring COMMAND wmfs-ring-test)
 endif()
 
 set(WMFS_BUNDLE_REFERENCE OFF)
