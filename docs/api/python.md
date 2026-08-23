@@ -35,7 +35,8 @@ public API does not expose command records or mandatory futures. `ping()` and
 Write a versioned `interface.toml`, run `wmfs-tool generate`, and commit the
 manifest, C/C++11 ABI files, and Python metadata/stubs. Package and runtime builds
 consume those committed files. CI runs the same command with `--check`; plugins
-depend on `wmfs-plugin` at runtime and do not depend on `wmfs-tool`.
+do not depend on `wmfs-tool` at runtime. Python worker distributions depend on
+`wmfs-plugin`; C++ workers do not.
 
 ## Runtime
 

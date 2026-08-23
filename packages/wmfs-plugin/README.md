@@ -5,6 +5,11 @@ not depend on or import the main `wmfs` execution runtime. Plugins can therefore
 install and deploy the SDK with their worker environment rather than the
 application environment.
 
+This package is not required by applications, the main `wmfs` runtime, or C++
+workers. It is declared only by distributions that execute plugin code in a
+Python worker process. Interface generation belongs to `wmfs-tool` and happens
+before deployment.
+
 For v0.1, the invocation context, shared-memory tensor mapping, and generic
 worker bootstrap are intentionally Torch-specific. The wire schemas and
 `wmfs_plugin.metadata` contract remain Torch-independent, so control-plane code

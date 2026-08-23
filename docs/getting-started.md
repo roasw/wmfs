@@ -5,6 +5,11 @@ handles. Calls are synchronous even though the isolated runtime supports
 multiple asynchronous submissions internally. The same functions are used for
 every backend.
 
+Application environments install `wmfs`. Python worker environments install
+`wmfs-plugin`; C++ workers do not. Plugin build and CI environments install
+`wmfs-tool` to generate committed deployment artifacts. See
+{doc}`package-roles` for the complete dependency and workflow matrix.
+
 ```python
 from pathlib import Path
 

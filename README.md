@@ -9,6 +9,20 @@ rings, shared CPU tensors, and an independently deployed C++ worker linked to
 its own LibTorch environment. Ordinary Python calls remain synchronous and
 return tensor results; asynchronous submissions are private runtime machinery.
 
+## Which Package To Use
+
+- Applications install `wmfs`.
+- Python plugin workers install `wmfs-plugin`, but applications and C++ workers
+  do not.
+- Plugin builds and CI install `wmfs-tool`; deployed runtimes and workers do
+  not.
+
+`wmfs-tool` generates the manifest and C++/Python interfaces from
+`interface.toml`. Generated Python worker adapters target `wmfs-plugin`, while
+generated C++11 interfaces have no Python package dependency. See the
+[package-role guide](docs/package-roles.md) for complete workflows and the
+dependency graph.
+
 ## Development Build
 
 The `wmfs` Python distribution lives under `packages/wmfs` and owns the runtime
@@ -186,8 +200,8 @@ tensors. The wire schemas and metadata model are Torch-independent and can be
 imported by control-plane tooling without loading Torch. Both layers remain in
 one SDK distribution until a separate package has a concrete use case.
 
-The SDK provides worker-side protocol schema copies, FD receiver, mapped Torch views, and
-metadata-driven worker bootstrap:
+The SDK provides worker-side protocol schema copies, an FD receiver, mapped
+Torch views, and metadata-driven worker bootstrap:
 
 ```python
 from wmfs_plugin import InvocationContext, worker_main

@@ -5,6 +5,10 @@ runtime metadata and C/C++11 and Python plugin-facing artifacts. It is an
 independent build-time package and does not depend on the WMFS runtime, plugin
 SDK, PyTorch, or Cap'n Proto.
 
+Install it in plugin build and CI environments, not in application or worker
+runtime environments. Python workers consume its generated adapters through
+`wmfs-plugin`; C++ workers consume its generated C++11 interface directly.
+
 ```console
 wmfs-tool generate --interface interface.toml --output generated
 wmfs-tool generate --interface interface.toml --output generated --check
