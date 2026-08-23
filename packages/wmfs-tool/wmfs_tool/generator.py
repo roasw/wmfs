@@ -97,11 +97,33 @@ def _manifest(plugin: Plugin, document: dict[str, Any], fingerprint: str) -> str
     result["interfaceFingerprint"] = f"sha256:{fingerprint}"
     result["metadataFingerprint"] = f"0x{_metadata_fingerprint(plugin):016x}"
     result["operationCount"] = len(plugin.operations)
+    result["startupCapabilities"] = _startup_capabilities(plugin)
     result["configuration"] = _configuration_manifest(plugin)
     return (
         json.dumps(result, allow_nan=False, ensure_ascii=True, indent=4, sort_keys=True)
         + "\n"
     )
+
+
+def _startup_capabilities(plugin: Plugin) -> int:
+    capabilities = (1 << 0) | (1 << 1) | (1 << 2)
+    if plugin.configuration is not None:
+        capabilities |= 1 << 3
+    capabilities |= (1 << 4) | (1 << 5)
+    if plugin.lifecycle.initialize:
+        capabilities |= 1 << 6
+    if plugin.lifecycle.shutdown:
+        capabilities |= 1 << 7
+    return capabilities
+
+
+def _digest_initializer(value: str | None) -> str:
+    digest = bytes.fromhex(value.removeprefix("sha256:")) if value else bytes(32)
+    lines = [
+        "    " + ", ".join(f"0x{item:02x}" for item in digest[index : index + 11])
+        for index in range(0, len(digest), 11)
+    ]
+    return "{\n" + ",\n".join(lines) + "}"
 
 
 def _configuration_manifest(plugin: Plugin) -> dict[str, Any] | None:
@@ -472,12 +494,17 @@ def _cpp_wrapper(plugin: Plugin, fingerprint: str) -> str:
 #define WMFS_{plugin.namespace.upper()}_HAS_INITIALIZE {int(plugin.lifecycle.initialize)}
 #define WMFS_{plugin.namespace.upper()}_HAS_SHUTDOWN {int(plugin.lifecycle.shutdown)}
 #define WMFS_{plugin.namespace.upper()}_METADATA_FINGERPRINT UINT64_C(0x{_metadata_fingerprint(plugin):016x})
+#define WMFS_{plugin.namespace.upper()}_OPERATION_COUNT UINT32_C({len(plugin.operations)})
+#define WMFS_{plugin.namespace.upper()}_STARTUP_CAPABILITIES UINT64_C({_startup_capabilities(plugin)})
 {fingerprint_macro}{fingerprint_padding}\\
     "sha256:{fingerprint}"
 {configuration_fingerprint_declaration}
 
 namespace wmfs {{
 namespace {plugin.namespace} {{
+
+static const std::uint8_t interface_fingerprint_sha256[32] = {_digest_initializer("sha256:" + fingerprint)};
+static const std::uint8_t configuration_fingerprint_sha256[32] = {_digest_initializer(configuration_fingerprint)};
 
 enum class operation_id : std::uint32_t {{
 {operation_lines}
@@ -799,13 +826,21 @@ PLUGIN_VERSION = {json.dumps(plugin.version)}
 FORMAT_VERSION = {plugin.format_version}
 ABI_VERSION = {plugin.abi_version}
 PROTOCOL_VERSION = {plugin.protocol_version}
+OPERATION_COUNT = {len(plugin.operations)}
+STARTUP_CAPABILITIES = {_startup_capabilities(plugin)}
 HAS_INITIALIZE = {plugin.lifecycle.initialize!r}
 HAS_SHUTDOWN = {plugin.lifecycle.shutdown!r}
 INTERFACE_FINGERPRINT = (
     "sha256:{fingerprint}"
 )
+INTERFACE_FINGERPRINT_SHA256 = bytes.fromhex(
+    {json.dumps(fingerprint)}
+)
 CONFIGURATION_SCHEMA_VERSION = {configuration_schema_version!r}
 CONFIGURATION_FINGERPRINT = {configuration_fingerprint_literal}
+CONFIGURATION_FINGERPRINT_SHA256 = bytes.fromhex(
+    {json.dumps(configuration_fingerprint.removeprefix("sha256:") if configuration_fingerprint else "00" * 32)}
+)
 CONFIGURATION_SCHEMA = {schema_literal}
 {examples_declaration}{enums_block}
 
@@ -873,11 +908,15 @@ PLUGIN_VERSION: Final[str]
 FORMAT_VERSION: Final[int]
 ABI_VERSION: Final[int]
 PROTOCOL_VERSION: Final[int]
+OPERATION_COUNT: Final[int]
+STARTUP_CAPABILITIES: Final[int]
 HAS_INITIALIZE: Final[bool]
 HAS_SHUTDOWN: Final[bool]
 INTERFACE_FINGERPRINT: Final[str]
+INTERFACE_FINGERPRINT_SHA256: Final[bytes]
 CONFIGURATION_SCHEMA_VERSION: Final[int | None]
 CONFIGURATION_FINGERPRINT: Final[str | None]
+CONFIGURATION_FINGERPRINT_SHA256: Final[bytes]
 CONFIGURATION_SCHEMA: Final[Mapping[str, object] | None]
 CONFIGURATION_EXAMPLES: Final[Mapping[str, Mapping[str, object]]]
 

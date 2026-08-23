@@ -632,5 +632,6 @@
         "pythonModule": "wmfs_reference",
         "version": "0.1.0"
     },
-    "protocolVersion": 11
+    "protocolVersion": 11,
+    "startupCapabilities": 255
 }

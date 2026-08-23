@@ -48,6 +48,8 @@ class PluginManifest:
     local_provider: str | None = None
     bundled_namespace: str | None = None
     entry_symbol: str | None = None
+    interface_fingerprint: bytes = b""
+    startup_capabilities: int = 0
 
 
 def load_manifest(path: Path) -> PluginManifest:
@@ -79,7 +81,11 @@ def load_manifest(path: Path) -> PluginManifest:
     }
     if format_version == 2:
         fields.add("enums")
-    optional_fields = {"configuration", "lifecycle"} if format_version == 2 else set()
+    optional_fields = (
+        {"configuration", "lifecycle", "startupCapabilities"}
+        if format_version == 2
+        else set()
+    )
     _keys_with_optional(data, fields, optional_fields, "manifest")
     if "lifecycle" in data:
         lifecycle = _object(data["lifecycle"], "manifest.lifecycle")
@@ -96,7 +102,12 @@ def load_manifest(path: Path) -> PluginManifest:
         raise ValueError(
             f"Manifest operationCount is {count}, but contains {len(operations)} operations"
         )
-    _validate_interface_fingerprint(data)
+    interface_fingerprint = _validate_interface_fingerprint(data)
+    startup_capabilities = (
+        _uint64(data["startupCapabilities"], "manifest.startupCapabilities")
+        if "startupCapabilities" in data
+        else 0
+    )
 
     plugin = _object(data["plugin"], "manifest.plugin")
     _keys(
@@ -170,6 +181,8 @@ def load_manifest(path: Path) -> PluginManifest:
             if "entrySymbol" in deployment
             else None
         ),
+        interface_fingerprint=interface_fingerprint,
+        startup_capabilities=startup_capabilities,
     )
 
 
@@ -430,7 +443,7 @@ def _vjp(value: Any, where: str) -> VjpMetadata | None:
     )
 
 
-def _validate_interface_fingerprint(document: dict[str, Any]) -> None:
+def _validate_interface_fingerprint(document: dict[str, Any]) -> bytes:
     declared = _string(
         document["interfaceFingerprint"], "manifest.interfaceFingerprint"
     )
@@ -450,6 +463,7 @@ def _validate_interface_fingerprint(document: dict[str, Any]) -> None:
             "metadataFingerprint",
             "operationCount",
             "configuration",
+            "startupCapabilities",
         }
     }
     canonical = json.dumps(
@@ -464,6 +478,7 @@ def _validate_interface_fingerprint(document: dict[str, Any]) -> None:
         raise ValueError(
             f"Manifest interface fingerprint is sha256:{match.group(1)}, expected sha256:{actual}"
         )
+    return bytes.fromhex(actual)
 
 
 def _metadata_fingerprint(value: Any) -> int:
@@ -527,6 +542,13 @@ def _integer(value: Any, where: str) -> int:
     if type(value) is not int:
         raise ValueError(f"{where} must be an integer")
     return value
+
+
+def _uint64(value: Any, where: str) -> int:
+    result = _integer(value, where)
+    if not 0 <= result <= 0xFFFFFFFFFFFFFFFF:
+        raise ValueError(f"{where} must be an unsigned 64-bit integer")
+    return result
 
 
 def _boolean(value: Any, where: str) -> bool:

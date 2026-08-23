@@ -30,7 +30,7 @@ if(NOT WMFS_VERSION)
   set(WMFS_VERSION "unknown")
 endif()
 
-project(wmfs LANGUAGES CXX)
+project(wmfs LANGUAGES C CXX)
 message(STATUS "WMFS version: ${WMFS_VERSION}")
 
 include(CTest)
@@ -39,7 +39,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(CapnProto CONFIG REQUIRED)
+option(WMFS_BUILD_CAPNP_PROTOCOL "Build the legacy Cap'n Proto protocol" ON)
+if(WMFS_BUILD_CAPNP_PROTOCOL)
+  find_package(CapnProto CONFIG REQUIRED)
+endif()
 find_package(Threads REQUIRED)
 
 add_library(wmfs-ring STATIC src/ring.cpp)
@@ -49,9 +52,25 @@ target_include_directories(
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc"
 )
 
+# Additive fixed-width control codec. This target deliberately has no Cap'n
+# Proto dependency and remains separate from the production protocol target.
+add_library(wmfs-control STATIC src/control.cpp)
+add_library(wmfs::control ALIAS wmfs-control)
+target_include_directories(wmfs-control PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc")
+set_target_properties(
+  wmfs-control
+  PROPERTIES
+    CXX_EXTENSIONS OFF
+    CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON
+)
+
 option(WMFS_BUILD_PYTHON_RUNTIME "Build the Python runtime extension" ON)
 option(WMFS_BUILD_REFERENCE_WORKER "Build the C++ reference plugin worker" OFF)
 option(WMFS_BUILD_DOCUMENTATION "Build the unified API documentation" OFF)
+if(NOT WMFS_BUILD_CAPNP_PROTOCOL AND (WMFS_BUILD_PYTHON_RUNTIME OR WMFS_BUILD_REFERENCE_WORKER))
+  message(FATAL_ERROR "Python runtime and reference worker require the legacy Cap'n Proto protocol")
+endif()
 set(
   WMFS_BUNDLED_PLUGINS
   ""
@@ -84,6 +103,16 @@ if(WMFS_BUILD_DOCUMENTATION)
 endif()
 
 if(BUILD_TESTING)
+  add_executable(wmfs-control-layout-c-test tests/cpp/control_layout_test.c)
+  target_include_directories(wmfs-control-layout-c-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/inc")
+  set_target_properties(wmfs-control-layout-c-test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+  add_test(NAME wmfs-control-layout-c COMMAND wmfs-control-layout-c-test)
+
+  add_executable(wmfs-control-test tests/cpp/control_test.cpp)
+  target_link_libraries(wmfs-control-test PRIVATE wmfs::control)
+  set_target_properties(wmfs-control-test PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME wmfs-control COMMAND wmfs-control-test)
+
   add_executable(wmfs-unique-fd-test tests/cpp/unique_fd_test.cpp)
   target_include_directories(
     wmfs-unique-fd-test
@@ -149,26 +178,28 @@ if(WMFS_BUILD_REFERENCE_WORKER AND NOT TARGET wmfs-reference-kernels)
   target_compile_options(wmfs-reference-kernels PRIVATE ${TORCH_CXX_FLAGS})
 endif()
 
-set(
-  WMFS_SCHEMA_ROOT
-  "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/protocol/schemas"
-)
-set(CAPNPC_SRC_PREFIX "${WMFS_SCHEMA_ROOT}")
-set(CAPNPC_IMPORT_DIRS "${WMFS_SCHEMA_ROOT}")
-capnp_generate_cpp(
-  WMFS_CAPNP_SOURCES
-  WMFS_CAPNP_HEADERS
-  packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp
-  packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp
-)
-add_library(wmfs-protocol STATIC ${WMFS_CAPNP_SOURCES})
-add_library(wmfs::protocol ALIAS wmfs-protocol)
-set_target_properties(wmfs-protocol PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_include_directories(
-  wmfs-protocol
-  PUBLIC "${CMAKE_CURRENT_BINARY_DIR}"
-)
-target_link_libraries(wmfs-protocol PUBLIC CapnProto::capnp-rpc)
+if(WMFS_BUILD_CAPNP_PROTOCOL)
+  set(
+    WMFS_SCHEMA_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/protocol/schemas"
+  )
+  set(CAPNPC_SRC_PREFIX "${WMFS_SCHEMA_ROOT}")
+  set(CAPNPC_IMPORT_DIRS "${WMFS_SCHEMA_ROOT}")
+  capnp_generate_cpp(
+    WMFS_CAPNP_SOURCES
+    WMFS_CAPNP_HEADERS
+    packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp
+    packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp
+  )
+  add_library(wmfs-protocol STATIC ${WMFS_CAPNP_SOURCES})
+  add_library(wmfs::protocol ALIAS wmfs-protocol)
+  set_target_properties(wmfs-protocol PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(
+    wmfs-protocol
+    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}"
+  )
+  target_link_libraries(wmfs-protocol PUBLIC CapnProto::capnp-rpc)
+endif()
 
 if(WMFS_BUILD_PYTHON_RUNTIME)
   find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)

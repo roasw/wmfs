@@ -10,14 +10,22 @@ PLUGIN_VERSION = "0.1.0"
 FORMAT_VERSION = 2
 ABI_VERSION = 1
 PROTOCOL_VERSION = 11
+OPERATION_COUNT = 6
+STARTUP_CAPABILITIES = 255
 HAS_INITIALIZE = True
 HAS_SHUTDOWN = True
 INTERFACE_FINGERPRINT = (
     "sha256:b734e7a8e8d52ed04df2074b8d936e5c441d6d17f836997d3df9ba964d07cabd"
 )
+INTERFACE_FINGERPRINT_SHA256 = bytes.fromhex(
+    "b734e7a8e8d52ed04df2074b8d936e5c441d6d17f836997d3df9ba964d07cabd"
+)
 CONFIGURATION_SCHEMA_VERSION = 1
 CONFIGURATION_FINGERPRINT = (
     "sha256:7487dddfb9cbe8c7e33d14e6d12dffe1aba04cf1bc190ed9b2cdae7fea6159cf"
+)
+CONFIGURATION_FINGERPRINT_SHA256 = bytes.fromhex(
+    "7487dddfb9cbe8c7e33d14e6d12dffe1aba04cf1bc190ed9b2cdae7fea6159cf"
 )
 CONFIGURATION_SCHEMA = json.loads(
     '{"additionalProperties":false,"description":"Initialization settings for the reference numerical plugin.","properties":{"emit_diagnostics":{"default":false,"description":"Enable plugin diagnostic records when logging is available.","type":"boolean"},"precision":{"default":"balanced","description":"Numerical precision policy for supported kernels.","enum":["fast","balanced","accurate"],"maxLength":8,"minLength":4,"type":"string"},"solver":{"additionalProperties":false,"description":"SVD solver controls.","properties":{"algorithm":{"description":"SVD algorithm family.","enum":["divideAndConquer","qrIteration"],"type":"string"},"tolerance":{"default":1e-07,"description":"Relative convergence tolerance.","maximum":1.0,"minimum":0.0,"type":"number"}},"required":["algorithm"],"type":"object"},"tags":{"default":[],"description":"Bounded labels attached to diagnostic records.","items":{"maxLength":24,"minLength":1,"type":"string"},"maxItems":8,"minItems":0,"type":"array"},"threads":{"default":1,"description":"Maximum number of kernel threads.","maximum":64,"minimum":1,"type":"integer"}},"required":[],"type":"object"}'
