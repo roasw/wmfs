@@ -5,7 +5,11 @@
 - The `wmfs` Python distribution is in `packages/wmfs`; its import package is
   `packages/wmfs/wmfs`.
 - The independent Python plugin SDK is in `packages/wmfs-plugin`; plugins may
-  depend on `wmfs_plugin` but must not depend on the main `wmfs` runtime.
+  depend on `wmfs_plugin` but must not depend on the main `wmfs` runtime. Only
+  Python worker distributions depend on this SDK.
+- Runtime protocol metadata, schemas, and ring codecs live under
+  `packages/wmfs/wmfs/protocol` and `packages/wmfs/wmfs/transport`. The runtime,
+  C++ builds, and `wmfs-tool` must not depend on `packages/wmfs-plugin`.
 - The interface compiler and code generator are in `packages/wmfs-tool`; its
   import package and command-line entry point are `wmfs_tool` and `wmfs-tool`.
 - Plugin interface definitions are the source of truth. `wmfs-tool` generates
@@ -26,7 +30,8 @@
 - Keep package unit tests with the package they test:
   `packages/wmfs/tests`, `packages/wmfs-plugin/tests`, and
   `packages/wmfs-tool/tests`.
-- Keep cross-package and worker-process tests under `tests/integration`.
+- Keep runtime integration tests under `tests/integration` and Python
+  runtime/worker-SDK interoperability tests under `tests/python_worker`.
 - Keep C++ unit tests under `tests/cpp` and run them through CTest.
 - Package unit tests must not require another WMFS package unless that package
   is a declared public dependency.

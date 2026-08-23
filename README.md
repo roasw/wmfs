@@ -11,8 +11,9 @@ return tensor results; asynchronous submissions are private runtime machinery.
 
 ## Development Build
 
-The `wmfs` Python distribution lives under `packages/wmfs`. The independent
-worker-side SDK and protocol schemas live under `packages/wmfs-plugin`.
+The `wmfs` Python distribution lives under `packages/wmfs` and owns the runtime
+protocol schemas and codecs. The independent Python worker SDK lives under
+`packages/wmfs-plugin` and carries compatible worker-side copies.
 Root-level CMake, C++ sources, tests, plugins, Nix definitions, and benchmarks
 remain shared repository infrastructure.
 
@@ -41,9 +42,10 @@ just build RelWithDebInfo
 WMFS_BUILD_TYPE=Release nix develop
 ```
 
-The shell adds the selected output prefix plus the `packages/wmfs` and
-`packages/wmfs-plugin` source directories to `PYTHONPATH`, and adds the output
-prefix to `PATH`. Re-run the corresponding `just build` recipe after source
+The shell adds the selected output prefix plus `packages/wmfs` and
+`packages/wmfs-tool` to `PYTHONPATH`, but does not globally expose the worker
+SDK. SDK and Python-worker test recipes add it explicitly. The shell also adds
+the output prefix to `PATH`. Re-run the corresponding `just build` recipe after source
 changes. Verify that the development artifacts are selected, then run tests
 directly from the source tree:
 
@@ -176,14 +178,15 @@ three built-in operations.
 
 ## Plugin Discovery
 
-Python plugins depend on the standalone `wmfs-plugin` distribution rather than
-the main runtime; the SDK source does not import `wmfs`. For v0.1 its invocation,
+Only Python worker distributions depend on the standalone `wmfs-plugin`
+distribution; the main runtime, C++ workers, and generated C++ artifacts do not.
+The SDK source does not import `wmfs`. For v0.1 its invocation,
 shared-memory transport, and worker layers deliberately target Torch CPU
 tensors. The wire schemas and metadata model are Torch-independent and can be
 imported by control-plane tooling without loading Torch. Both layers remain in
 one SDK distribution until a separate package has a concrete use case.
 
-The SDK provides the protocol schemas, FD receiver, mapped Torch views, and
+The SDK provides worker-side protocol schema copies, FD receiver, mapped Torch views, and
 metadata-driven worker bootstrap:
 
 ```python

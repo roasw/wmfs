@@ -12,6 +12,9 @@ can inspect and validate operation metadata without importing Torch. These
 layers remain in one distribution; the current boundary does not warrant a
 premature package split.
 
+The SDK does not provide code generation. `wmfs-tool` is the sole generator;
+its generated Python implementation adapters target these stable worker types.
+
 Operation handlers accept one `InvocationContext` and return `None`:
 
 ```python

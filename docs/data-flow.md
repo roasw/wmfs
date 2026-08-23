@@ -62,7 +62,7 @@ Read next:
   concurrent close behavior.
 - `packages/wmfs/wmfs/autograd.py`, `invoke_with_vjp`: the custom PyTorch
   autograd edge and backward ring invocation.
-- `packages/wmfs-plugin/wmfs_plugin/metadata.py`: canonical operation and VJP
+- `packages/wmfs/wmfs/protocol/metadata.py`: runtime operation and VJP
   declarations, validation, and fingerprints.
 
 ### 3. Invocation Planning
@@ -126,9 +126,9 @@ Important implementations:
   Python orchestration around the same ring protocol.
 - `packages/wmfs/wmfs/transport/fd_broker.py`, `FdSender.ensure_mapped_many`:
   Python batched FD sender.
-- `packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp`: startup/control
+- `packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp`: startup/control
   metadata protocol.
-- `packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/tensor.capnp`: tensor and
+- `packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp`: tensor and
   batched buffer-transfer descriptors.
 
 ### 6. Worker Views And Kernel Dispatch
