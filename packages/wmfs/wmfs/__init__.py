@@ -6,12 +6,15 @@ from typing import Any
 __path__ = extend_path(__path__, __name__)
 
 from wmfs.api import empty, ones, randn, zeros
+from wmfs.configuration import ConfigurationMetadata
 from wmfs.operations import create_operation
 from wmfs.runtime import runtime
 
 __all__ = [
     "__version__",
+    "ConfigurationMetadata",
     "empty",
+    "list_configurable",
     "ones",
     "ops",
     "randn",
@@ -69,6 +72,13 @@ class _Operations:
 
 
 ops = _Operations()
+
+
+def list_configurable(
+    plugin: str | None = None,
+) -> tuple[ConfigurationMetadata, ...] | ConfigurationMetadata:
+    """Return immutable configuration metadata loaded from plugin manifests."""
+    return runtime.list_configurable(plugin)
 
 
 def __getattr__(name: str) -> Any:

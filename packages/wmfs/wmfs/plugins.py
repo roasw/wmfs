@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from wmfs.configuration import (
+    EMPTY_CONFIGURATION_BYTES,
+    ConfigurationMetadata,
+    parse_configuration_metadata,
+)
 from wmfs.protocol.metadata import validate_plugin_metadata
 from wmfs.protocol.schema import PROTOCOL_VERSION
 from wmfs.registry import (
@@ -38,6 +43,8 @@ class PluginManifest:
     interface: str
     worker: str
     root: Path
+    configuration: ConfigurationMetadata | None = None
+    configuration_bytes: bytes = EMPTY_CONFIGURATION_BYTES
 
 
 def load_manifest(path: Path) -> PluginManifest:
@@ -76,8 +83,6 @@ def load_manifest(path: Path) -> PluginManifest:
         _keys(lifecycle, {"initialize", "shutdown"}, "manifest.lifecycle")
         _boolean(lifecycle["initialize"], "manifest.lifecycle.initialize")
         _boolean(lifecycle["shutdown"], "manifest.lifecycle.shutdown")
-    if "configuration" in data and data["configuration"] is not None:
-        _object(data["configuration"], "manifest.configuration")
     _require_equal(data, "abiVersion", _ABI_VERSION)
     _require_equal(data, "protocolVersion", PROTOCOL_VERSION)
     _require_equal(data, "generator", f"wmfs-tool/{format_version}")
@@ -111,6 +116,11 @@ def load_manifest(path: Path) -> PluginManifest:
         metadata_version=format_version,
     )
     validate_plugin_metadata(metadata)
+    configuration = (
+        parse_configuration_metadata(name, data.get("configuration"))
+        if format_version == 2
+        else None
+    )
 
     deployment = _object(data["deployment"], "manifest.deployment")
     _keys(
@@ -137,6 +147,7 @@ def load_manifest(path: Path) -> PluginManifest:
         interface=_string(deployment["interface"], "deployment.interface"),
         worker=_string(deployment["worker"], "deployment.worker"),
         root=root,
+        configuration=configuration,
     )
 
 

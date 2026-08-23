@@ -264,6 +264,21 @@ session started by that attempt, and the existing registry remains unchanged.
 Discovered operations continue to execute through the explicitly selected
 backend until isolated operation dispatch is enabled.
 
+For manifest inspection and configuration before initialization, use the
+worker-free loading path. Configuration validation does not insert schema
+defaults; `configure_plugin` stores one canonical UTF-8 JSON snapshot:
+
+```python
+runtime.load_plugins(Path("plugins"))
+metadata = wmfs.list_configurable("reference")
+runtime.validate_config("reference", {"threads": 4})
+runtime.configure_plugin("reference", {"threads": 4})
+```
+
+`load_plugins` is transactional and neither imports nor launches plugin code.
+Calling `close()` clears loaded manifests and configured snapshots. Lifecycle
+hooks and configuration transport to workers are not enabled yet.
+
 Transport deadlines are immutable for a discovered backend and can be changed
 before discovery. Defaults are 30 seconds for startup, requests, shutdown, and
 post-terminate kill grace, and 5 seconds for FD transfer:

@@ -1,6 +1,8 @@
 import atexit
 import keyword
 import threading
+from collections.abc import Mapping
+from dataclasses import replace
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Protocol
@@ -10,8 +12,13 @@ import torch
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
+from wmfs.configuration import (
+    EMPTY_CONFIGURATION_BYTES,
+    ConfigurationMetadata,
+    validate_and_canonicalize,
+)
 from wmfs.operations import python_parameter_name
-from wmfs.plugins import find_manifests
+from wmfs.plugins import PluginManifest, find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
 from wmfs.tensors import Size, TensorFactory, normalize_shape
 from wmfs.transport.deadlines import (
@@ -68,6 +75,9 @@ class Runtime:
         self._backends = _initial_backends()
         self._backend_name: str | None = None
         self._registry = OperationRegistry()
+        self._manifests: dict[str, PluginManifest] = {}
+        self._plugin_configurations: dict[str, bytes] = {}
+        self._initialized_plugins: set[str] = set()
         self._operation_generation = 0
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
@@ -127,6 +137,67 @@ class Runtime:
             self._condition.wait_for(lambda: self._state == "open")
             return self._registry.operation(name)
 
+    def load_plugins(self, *plugin_directories: Path) -> None:
+        """Load and publish manifests transactionally without starting workers."""
+        manifests = find_manifests(list(plugin_directories))
+        registry = OperationRegistry()
+        for manifest in manifests:
+            registry.register(manifest.metadata)
+        _validate_public_operations(registry)
+        loaded = {manifest.name: manifest for manifest in manifests}
+        configurations = {name: EMPTY_CONFIGURATION_BYTES for name in loaded}
+        with self._condition:
+            self._ensure_open()
+            self._registry = registry
+            self._manifests = loaded
+            self._plugin_configurations = configurations
+            self._initialized_plugins.clear()
+            self._operation_generation += 1
+
+    def list_configurable(
+        self, plugin: str | None = None
+    ) -> tuple[ConfigurationMetadata, ...] | ConfigurationMetadata:
+        """Return immutable manifest configuration metadata without initialization."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            if plugin is not None:
+                manifest = self._manifest_locked(plugin)
+                if manifest.configuration is None:
+                    raise ValueError(f"Plugin {plugin!r} is not configurable")
+                return manifest.configuration
+            return tuple(
+                manifest.configuration
+                for name, manifest in sorted(self._manifests.items())
+                if manifest.configuration is not None
+            )
+
+    def validate_config(
+        self, plugin: str, config: Mapping[str, object] | None
+    ) -> bytes:
+        """Validate configuration and return canonical UTF-8 JSON bytes."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            manifest = self._manifest_locked(plugin)
+            return validate_and_canonicalize(
+                config, manifest.configuration, plugin=plugin
+            )
+
+    def configure_plugin(
+        self, plugin: str, config: Mapping[str, object] | None = None
+    ) -> None:
+        """Store immutable configuration bytes before plugin initialization."""
+        with self._condition:
+            self._ensure_open()
+            manifest = self._manifest_locked(plugin)
+            if plugin in self._initialized_plugins:
+                raise RuntimeError(
+                    f"Configure plugin {plugin!r} before it is initialized"
+                )
+            encoded = validate_and_canonicalize(
+                config, manifest.configuration, plugin=plugin
+            )
+            self._plugin_configurations[plugin] = encoded
+
     def discover_plugins(self, *plugin_directories: Path) -> None:
         """Discover plugins and retain one validated worker session per plugin.
 
@@ -142,6 +213,18 @@ class Runtime:
             self._accept_work()
         try:
             manifests = find_manifests(list(plugin_directories))
+            with self._condition:
+                configured = dict(self._plugin_configurations)
+                loaded = dict(self._manifests)
+            manifests = tuple(
+                replace(
+                    manifest,
+                    configuration_bytes=_configuration_for_manifest(
+                        manifest, loaded.get(manifest.name), configured
+                    ),
+                )
+                for manifest in manifests
+            )
             registry, replacement = IsolatedBackend.discover(
                 manifests,
                 memory_mode=self._memory_mode,
@@ -157,6 +240,12 @@ class Runtime:
             with self._condition:
                 previous = self._backends.get("isolated")
                 self._registry = registry
+                self._manifests = {manifest.name: manifest for manifest in manifests}
+                self._plugin_configurations = {
+                    manifest.name: manifest.configuration_bytes
+                    for manifest in manifests
+                }
+                self._initialized_plugins = set(self._manifests)
                 self._backends["isolated"] = replacement
                 if self._backend_name == "isolated":
                     self._backend_name = None
@@ -337,6 +426,7 @@ class Runtime:
             self._accept_work()
             try:
                 backend = self._selected_backend_locked()
+                self._mark_operation_plugin_initialized_locked(operation)
             except BaseException:
                 self._active_work -= 1
                 self._condition.notify_all()
@@ -371,6 +461,7 @@ class Runtime:
                 raise RuntimeError(f"Operation {operation!r} is no longer registered")
             try:
                 backend = self._selected_backend_locked()
+                self._mark_operation_plugin_initialized_locked(operation)
             except BaseException:
                 self._active_work -= 1
                 self._condition.notify_all()
@@ -443,6 +534,9 @@ class Runtime:
             self._backends = replacements
             self._backend_name = None
             self._registry = OperationRegistry()
+            self._manifests = {}
+            self._plugin_configurations = {}
+            self._initialized_plugins = set()
             self._operation_generation += 1
             self._memory_mode = "pooled"
             self._arena_bytes = None
@@ -496,6 +590,20 @@ class Runtime:
             )
         return self._backends[self._backend_name]
 
+    def _manifest_locked(self, plugin: str) -> PluginManifest:
+        try:
+            return self._manifests[plugin]
+        except KeyError:
+            raise KeyError(f"Plugin {plugin!r} is not loaded") from None
+
+    def _mark_operation_plugin_initialized_locked(self, operation: str) -> None:
+        try:
+            self._initialized_plugins.add(
+                self._registry.plugin_for_operation(operation)
+            )
+        except KeyError:
+            pass
+
 
 def _initial_backends() -> dict[str, Backend]:
     backends: dict[str, Backend] = {"local": LocalBackend()}
@@ -504,10 +612,27 @@ def _initial_backends() -> dict[str, Backend]:
     return backends
 
 
+def _configuration_for_manifest(
+    manifest: PluginManifest,
+    loaded: PluginManifest | None,
+    configurations: dict[str, bytes],
+) -> bytes:
+    encoded = configurations.get(manifest.name, EMPTY_CONFIGURATION_BYTES)
+    if encoded == EMPTY_CONFIGURATION_BYTES or loaded is None:
+        return EMPTY_CONFIGURATION_BYTES
+    if loaded.configuration is None or manifest.configuration is None:
+        return EMPTY_CONFIGURATION_BYTES
+    if loaded.configuration.fingerprint != manifest.configuration.fingerprint:
+        return EMPTY_CONFIGURATION_BYTES
+    return encoded
+
+
 _RESERVED_OPERATION_NAMES = {
+    "ConfigurationMetadata",
     "__version__",
     "api",
     "empty",
+    "list_configurable",
     "ones",
     "ops",
     "randn",
