@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from wmfs_tool.model import Operation, Plugin, ScalarParameter
+from wmfs_tool.model import ConfigurationProperty, Operation, Plugin, ScalarParameter
 from wmfs_tool.parser import load_interface
 
 _GENERATOR = "wmfs-tool/2"
@@ -77,6 +77,7 @@ def _interface_document(plugin: Plugin) -> dict[str, Any]:
             "version": plugin.version,
         },
         "protocolVersion": plugin.protocol_version,
+        "lifecycle": asdict(plugin.lifecycle),
     }
 
 
@@ -92,10 +93,92 @@ def _manifest(plugin: Plugin, document: dict[str, Any], fingerprint: str) -> str
     result["interfaceFingerprint"] = f"sha256:{fingerprint}"
     result["metadataFingerprint"] = f"0x{_metadata_fingerprint(plugin):016x}"
     result["operationCount"] = len(plugin.operations)
+    result["configuration"] = _configuration_manifest(plugin)
     return (
         json.dumps(result, allow_nan=False, ensure_ascii=True, indent=4, sort_keys=True)
         + "\n"
     )
+
+
+def _configuration_manifest(plugin: Plugin) -> dict[str, Any] | None:
+    if plugin.configuration is None:
+        return None
+    schema = _configuration_schema(plugin.configuration)
+    return {
+        "encoding": "wmfs-configuration-schema-v1",
+        "examples": {name: value for name, value in plugin.configuration.examples},
+        "fingerprint": _configuration_fingerprint(plugin),
+        "schema": schema,
+        "schemaVersion": plugin.configuration.schema_version,
+    }
+
+
+def _configuration_fingerprint(plugin: Plugin) -> str | None:
+    if plugin.configuration is None:
+        return None
+    envelope = {
+        "encoding": "wmfs-configuration-schema-v1",
+        "schema": _configuration_schema(plugin.configuration),
+    }
+    canonical = json.dumps(
+        envelope,
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _configuration_schema(configuration: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "additionalProperties": False,
+        "properties": {
+            item.name: _configuration_property_document(item)
+            for item in configuration.properties
+        },
+        "required": [item.name for item in configuration.properties if item.required],
+        "type": "object",
+    }
+    if configuration.description is not None:
+        result["description"] = configuration.description
+    return result
+
+
+def _configuration_property_document(item: ConfigurationProperty) -> dict[str, Any]:
+    result: dict[str, Any] = {"type": item.kind}
+    if item.description is not None:
+        result["description"] = item.description
+    if item.has_default:
+        result["default"] = item.default
+    if item.enum:
+        result["enum"] = list(item.enum)
+    for model_name, document_name in (
+        ("minimum", "minimum"),
+        ("maximum", "maximum"),
+        ("min_length", "minLength"),
+        ("max_length", "maxLength"),
+        ("min_items", "minItems"),
+        ("max_items", "maxItems"),
+    ):
+        value = getattr(item, model_name)
+        if value is not None:
+            result[document_name] = value
+    if item.kind == "object":
+        result.update(
+            {
+                "additionalProperties": False,
+                "properties": {
+                    child.name: _configuration_property_document(child)
+                    for child in item.properties
+                },
+                "required": [child.name for child in item.properties if child.required],
+            }
+        )
+    elif item.kind == "array":
+        assert item.items is not None
+        result["items"] = _configuration_property_document(item.items)
+    return result
 
 
 def _metadata_fingerprint(plugin: Plugin) -> int:
@@ -318,6 +401,10 @@ def _cpp_wrapper(plugin: Plugin, fingerprint: str) -> str:
     guard = f"WMFS_{plugin.namespace.upper()}_PLUGIN_HPP"
     fingerprint_macro = f"#define WMFS_{plugin.namespace.upper()}_INTERFACE_FINGERPRINT"
     fingerprint_padding = " " * max(1, 79 - len(fingerprint_macro))
+    configuration_macro = (
+        f"#define WMFS_{plugin.namespace.upper()}_CONFIGURATION_FINGERPRINT"
+    )
+    configuration_padding = " " * max(1, 79 - len(configuration_macro))
     operation_lines = "\n".join(
         f"    {item.name} = UINT32_C({item.operation_id}),"
         for item in plugin.operations
@@ -327,6 +414,11 @@ def _cpp_wrapper(plugin: Plugin, fingerprint: str) -> str:
         f"template <typename T>\nstd::int32_t {item.name}_typed(dtype_tag<T>, const wmfs_invocation_v1 *);"
         for item in plugin.operations
     )
+    configuration_fingerprint = _configuration_fingerprint(plugin)
+    configuration_version = (
+        plugin.configuration.schema_version if plugin.configuration else 0
+    )
+    configuration_declarations = _cpp_configuration_declarations(plugin)
     return f"""// Generated by wmfs-tool. Do not edit.
 #ifndef {guard}
 #define {guard}
@@ -336,8 +428,13 @@ def _cpp_wrapper(plugin: Plugin, fingerprint: str) -> str:
 
 #define WMFS_{plugin.namespace.upper()}_ABI_VERSION UINT32_C({plugin.abi_version})
 #define WMFS_{plugin.namespace.upper()}_PROTOCOL_VERSION UINT32_C({plugin.protocol_version})
+#define WMFS_{plugin.namespace.upper()}_CONFIGURATION_SCHEMA_VERSION UINT32_C({configuration_version})
+#define WMFS_{plugin.namespace.upper()}_HAS_INITIALIZE {int(plugin.lifecycle.initialize)}
+#define WMFS_{plugin.namespace.upper()}_HAS_SHUTDOWN {int(plugin.lifecycle.shutdown)}
 {fingerprint_macro}{fingerprint_padding}\\
     "sha256:{fingerprint}"
+{configuration_macro}{configuration_padding}\\
+    {json.dumps(configuration_fingerprint or "")}
 
 namespace wmfs {{
 namespace {plugin.namespace} {{
@@ -347,6 +444,8 @@ enum operation_id : std::uint32_t {{
 }};
 
 {enums}
+
+{configuration_declarations}
 
 template <typename T> struct dtype_tag {{}};
 
@@ -360,6 +459,38 @@ wmfs_plugin_get_api(std::uint32_t abi_version);
 
 #endif
 """
+
+
+def _cpp_configuration_declarations(plugin: Plugin) -> str:
+    if plugin.configuration is None:
+        return ""
+    lines = ["namespace configuration {"]
+
+    def visit(
+        properties: tuple[ConfigurationProperty, ...], path: tuple[str, ...]
+    ) -> None:
+        for item in properties:
+            constant = "_".join((*path, item.name))
+            lines.append(f"constexpr char {constant}_key[] = {json.dumps(item.name)};")
+            if (
+                item.kind == "string"
+                and item.enum
+                and all(isinstance(value, str) for value in item.enum)
+            ):
+                enum_name = "".join(
+                    part[:1].upper() + part[1:] for part in (*path, item.name)
+                )
+                members = "\n".join(
+                    f"    {value} = {index}," for index, value in enumerate(item.enum)
+                )
+                lines.append(
+                    f"enum class {enum_name} : std::uint32_t {{\n{members}\n}};"
+                )
+            visit(item.properties, (*path, item.name))
+
+    visit(plugin.configuration.properties, ())
+    lines.append("} // namespace configuration")
+    return "\n\n".join(lines)
 
 
 def _cpp_stub(plugin: Plugin) -> str:
@@ -555,8 +686,27 @@ def _python_metadata(plugin: Plugin, fingerprint: str) -> str:
     )
     enum_import = "from enum import IntEnum\n" if plugin.enums else ""
     enums = "\n\n\n".join(_python_enum(item.name, item.values) for item in plugin.enums)
+    configuration = _configuration_manifest(plugin)
+    configuration_schema = configuration["schema"] if configuration else None
+    configuration_examples = configuration["examples"] if configuration else {}
+    configuration_import = "import json\n" if configuration else ""
+    configuration_schema_version = (
+        plugin.configuration.schema_version if plugin.configuration else None
+    )
+    configuration_fingerprint = _configuration_fingerprint(plugin)
+    configuration_fingerprint_literal = (
+        "(\n    " + json.dumps(configuration_fingerprint) + "\n)"
+        if configuration_fingerprint
+        else "None"
+    )
+    schema_literal = _python_json_literal(configuration_schema)
+    examples_literal = (
+        _python_json_literal(configuration_examples, "    ")
+        if configuration
+        else "    {}"
+    )
     return f"""# Generated by wmfs-tool. Do not edit.
-{enum_import}from types import MappingProxyType
+{configuration_import}{enum_import}from types import MappingProxyType
 from typing import NamedTuple
 
 PLUGIN_NAME = {json.dumps(plugin.name)}
@@ -565,8 +715,16 @@ PLUGIN_VERSION = {json.dumps(plugin.version)}
 FORMAT_VERSION = {plugin.format_version}
 ABI_VERSION = {plugin.abi_version}
 PROTOCOL_VERSION = {plugin.protocol_version}
+HAS_INITIALIZE = {plugin.lifecycle.initialize!r}
+HAS_SHUTDOWN = {plugin.lifecycle.shutdown!r}
 INTERFACE_FINGERPRINT = (
     "sha256:{fingerprint}"
+)
+CONFIGURATION_SCHEMA_VERSION = {configuration_schema_version!r}
+CONFIGURATION_FINGERPRINT = {configuration_fingerprint_literal}
+CONFIGURATION_SCHEMA = {schema_literal}
+CONFIGURATION_EXAMPLES = MappingProxyType(
+{examples_literal}
 )
 
 
@@ -590,6 +748,21 @@ OPERATIONS_BY_NAME = MappingProxyType({{item.name: item for item in OPERATIONS}}
 """
 
 
+def _python_json_literal(value: Any, indentation: str = "") -> str:
+    if value is None:
+        return indentation + "None"
+    canonical = json.dumps(
+        value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True
+    )
+    return "\n".join(
+        (
+            indentation + "json.loads(",
+            indentation + "    " + repr(canonical),
+            indentation + ")",
+        )
+    )
+
+
 def _python_tuple(values: Iterable[str]) -> str:
     items = tuple(values)
     rendered = ", ".join(json.dumps(item) for item in items)
@@ -606,7 +779,8 @@ def _python_stub(plugin: Plugin) -> str:
         _python_operation_stub(item) for item in plugin.operations if not item.internal
     )
     enum_import = "from enum import IntEnum\n" if plugin.enums else ""
-    return f"""{enum_import}from typing import Final, Mapping, NamedTuple, overload
+    configuration_types = _python_configuration_types(plugin)
+    return f"""{enum_import}from typing import Final, Literal, Mapping, NamedTuple, TypedDict, overload
 
 import torch
 
@@ -616,9 +790,17 @@ PLUGIN_VERSION: Final[str]
 FORMAT_VERSION: Final[int]
 ABI_VERSION: Final[int]
 PROTOCOL_VERSION: Final[int]
+HAS_INITIALIZE: Final[bool]
+HAS_SHUTDOWN: Final[bool]
 INTERFACE_FINGERPRINT: Final[str]
+CONFIGURATION_SCHEMA_VERSION: Final[int | None]
+CONFIGURATION_FINGERPRINT: Final[str | None]
+CONFIGURATION_SCHEMA: Final[Mapping[str, object] | None]
+CONFIGURATION_EXAMPLES: Final[Mapping[str, Mapping[str, object]]]
 
 {enums}
+
+{configuration_types}
 
 class Operation(NamedTuple):
     operation_id: int
@@ -634,6 +816,74 @@ OPERATIONS_BY_NAME: Mapping[str, Operation]
 
 {functions}
 """
+
+
+def _python_configuration_types(plugin: Plugin) -> str:
+    if plugin.configuration is None:
+        return "Configuration = Mapping[str, object]"
+    declarations: list[str] = []
+
+    def annotation(item: ConfigurationProperty, path: tuple[str, ...]) -> str:
+        name = "".join(part[:1].upper() + part[1:] for part in (*path, item.name))
+        if item.enum:
+            alias = name + "Value"
+            declarations.append(
+                f"{alias} = Literal[{', '.join(json.dumps(value) for value in item.enum)}]"
+            )
+            return alias
+        if item.kind == "object":
+            return name
+        if item.kind == "array":
+            assert item.items is not None
+            return f"list[{annotation(item.items, (*path, item.name))}]"
+        return {
+            "boolean": "bool",
+            "integer": "int",
+            "number": "float | int",
+            "string": "str",
+        }[item.kind]
+
+    def typed_dict(
+        name: str, properties: tuple[ConfigurationProperty, ...], path: tuple[str, ...]
+    ) -> None:
+        fields: list[tuple[ConfigurationProperty, str]] = []
+        for item in properties:
+            field_annotation = annotation(item, path)
+            fields.append((item, field_annotation))
+            if item.kind == "object":
+                child_name = "".join(
+                    part[:1].upper() + part[1:] for part in (*path, item.name)
+                )
+                typed_dict(child_name, item.properties, (*path, item.name))
+        required = [(item, value) for item, value in fields if item.required]
+        optional = [(item, value) for item, value in fields if not item.required]
+        if required and optional:
+            base = name + "Required"
+            declarations.append(
+                "class "
+                + base
+                + "(TypedDict):\n"
+                + "\n".join(f"    {item.name}: {value}" for item, value in required)
+            )
+            declarations.append(
+                "class "
+                + name
+                + "("
+                + base
+                + ", total=False):\n"
+                + "\n".join(f"    {item.name}: {value}" for item, value in optional)
+            )
+        else:
+            total = "" if required else ", total=False"
+            declarations.append(
+                "class "
+                + name
+                + f"(TypedDict{total}):\n"
+                + "\n".join(f"    {item.name}: {value}" for item, value in fields)
+            )
+
+    typed_dict("Configuration", plugin.configuration.properties, ())
+    return "\n\n".join(declarations)
 
 
 def _python_enum(name: str, values: tuple[str, ...]) -> str:
@@ -694,6 +944,12 @@ def _python_name(name: str) -> str:
 
 
 def _worker_python_adapter(plugin: Plugin) -> str:
+    configuration_fingerprint = _configuration_fingerprint(plugin)
+    configuration_fingerprint_literal = (
+        "(\n    " + json.dumps(configuration_fingerprint) + "\n)"
+        if configuration_fingerprint
+        else "None"
+    )
     operations = "\n".join(
         "\n".join(
             (
@@ -741,6 +997,10 @@ API_NAMESPACE = PLUGIN_NAME
 PLUGIN_VERSION = {json.dumps(plugin.version)}
 PROTOCOL_VERSION = {plugin.protocol_version}
 METADATA_FINGERPRINT = 0x{_metadata_fingerprint(plugin):016X}
+HAS_INITIALIZE = {plugin.lifecycle.initialize!r}
+HAS_SHUTDOWN = {plugin.lifecycle.shutdown!r}
+CONFIGURATION_SCHEMA_VERSION = {plugin.configuration.schema_version if plugin.configuration else 0}
+CONFIGURATION_FINGERPRINT = {configuration_fingerprint_literal}
 
 
 class GeneratedOperation(NamedTuple):
@@ -823,6 +1083,10 @@ def _worker_cpp_dispatch(plugin: Plugin) -> str:
     return f'''// Generated by wmfs-tool. Do not edit.
 constexpr char WMFS_PLUGIN_VERSION[] = "{plugin.version}";
 constexpr std::uint64_t WMFS_METADATA_FINGERPRINT = 0x{_metadata_fingerprint(plugin):016x}ULL;
+constexpr bool WMFS_HAS_INITIALIZE = {str(plugin.lifecycle.initialize).lower()};
+constexpr bool WMFS_HAS_SHUTDOWN = {str(plugin.lifecycle.shutdown).lower()};
+constexpr std::uint32_t WMFS_CONFIGURATION_SCHEMA_VERSION = {plugin.configuration.schema_version if plugin.configuration else 0}U;
+constexpr char WMFS_CONFIGURATION_FINGERPRINT[] = {json.dumps(_configuration_fingerprint(plugin) or "")};
 
 void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
                    std::vector<TensorLease> &outputs,

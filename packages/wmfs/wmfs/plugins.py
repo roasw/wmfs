@@ -69,11 +69,15 @@ def load_manifest(path: Path) -> PluginManifest:
     }
     if format_version == 2:
         fields.add("enums")
-    _keys(
-        data,
-        fields,
-        "manifest",
-    )
+    optional_fields = {"configuration", "lifecycle"} if format_version == 2 else set()
+    _keys_with_optional(data, fields, optional_fields, "manifest")
+    if "lifecycle" in data:
+        lifecycle = _object(data["lifecycle"], "manifest.lifecycle")
+        _keys(lifecycle, {"initialize", "shutdown"}, "manifest.lifecycle")
+        _boolean(lifecycle["initialize"], "manifest.lifecycle.initialize")
+        _boolean(lifecycle["shutdown"], "manifest.lifecycle.shutdown")
+    if "configuration" in data and data["configuration"] is not None:
+        _object(data["configuration"], "manifest.configuration")
     _require_equal(data, "abiVersion", _ABI_VERSION)
     _require_equal(data, "protocolVersion", PROTOCOL_VERSION)
     _require_equal(data, "generator", f"wmfs-tool/{format_version}")
@@ -412,6 +416,7 @@ def _validate_interface_fingerprint(document: dict[str, Any]) -> None:
             "interfaceFingerprint",
             "metadataFingerprint",
             "operationCount",
+            "configuration",
         }
     }
     canonical = json.dumps(
@@ -462,6 +467,17 @@ def _array(value: Any, where: str) -> list[Any]:
 def _keys(value: dict[str, Any], expected: set[str], where: str) -> None:
     missing = expected - set(value)
     unknown = set(value) - expected
+    if missing or unknown:
+        raise ValueError(
+            f"{where} fields do not match the manifest format: missing={sorted(missing)}, unknown={sorted(unknown)}"
+        )
+
+
+def _keys_with_optional(
+    value: dict[str, Any], required: set[str], optional: set[str], where: str
+) -> None:
+    missing = required - set(value)
+    unknown = set(value) - required - optional
     if missing or unknown:
         raise ValueError(
             f"{where} fields do not match the manifest format: missing={sorted(missing)}, unknown={sorted(unknown)}"

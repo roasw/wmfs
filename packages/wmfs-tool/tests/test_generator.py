@@ -43,6 +43,14 @@ def test_generation_is_deterministic_and_check_detects_stale(tmp_path: Path) -> 
         "columnMajor",
     ]
     assert manifest["operations"][5]["outputs"][0]["allocation"] == "dynamic"
+    assert manifest["lifecycle"] == {"initialize": True, "shutdown": True}
+    configuration = manifest["configuration"]
+    assert configuration["schemaVersion"] == 1
+    assert configuration["encoding"] == "wmfs-configuration-schema-v1"
+    assert configuration["fingerprint"].startswith("sha256:")
+    assert configuration["schema"]["additionalProperties"] is False
+    assert configuration["schema"]["properties"]["solver"]["required"] == ["algorithm"]
+    assert configuration["examples"]["throughput"]["threads"] == 8
     assert (
         (tmp_path / "reference_dispatch.inc")
         .read_text()
@@ -53,6 +61,8 @@ def test_generation_is_deterministic_and_check_detects_stale(tmp_path: Path) -> 
     assert "full_matrices: bool = True" in stub
     assert "-> tuple[torch.Tensor, torch.Tensor, torch.Tensor]" in stub
     assert "out: tuple[torch.Tensor, torch.Tensor, torch.Tensor]" in stub
+    assert "class Configuration(TypedDict, total=False):" in stub
+    assert 'PrecisionValue = Literal["fast", "balanced", "accurate"]' in stub
     assert (
         (tmp_path.parent / "wmfs_reference" / "_generated.py")
         .read_text()
@@ -85,6 +95,10 @@ def test_generated_headers_and_stub_compile_as_cpp11(tmp_path: Path) -> None:
     source.write_text(
         "#include <wmfs/reference_plugin.hpp>\n"
         'static_assert(WMFS_REFERENCE_ABI_VERSION == 1, "ABI");\n'
+        'static_assert(WMFS_REFERENCE_CONFIGURATION_SCHEMA_VERSION == 1, "config");\n'
+        'static_assert(WMFS_REFERENCE_HAS_INITIALIZE, "initialize");\n'
+        "static_assert(wmfs::reference::configuration::Precision::accurate != "
+        'wmfs::reference::configuration::Precision::fast, "config enum");\n'
         "namespace wmfs { namespace reference {\n"
         "#define WMFS_IMPL(operation, type) template <> std::int32_t "
         "operation##_typed<type>(dtype_tag<type>, const wmfs_invocation_v1 *) "
@@ -161,3 +175,47 @@ def test_generated_headers_and_stub_compile_as_cpp11(tmp_path: Path) -> None:
         text=True,
     )
     subprocess.run([str(executable)], check=True, capture_output=True, text=True)
+
+
+def test_configuration_fingerprint_is_independent_from_interface_metadata(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    changed = tmp_path / "changed.toml"
+    source = INTERFACE.read_text(encoding="utf-8")
+    changed.write_text(
+        source.replace("default = 1\nminimum = 1", "default = 2\nminimum = 1", 1)
+    )
+
+    first_interface = generate(INTERFACE, first)
+    second_interface = generate(changed, second)
+    first_manifest = json.loads((first / "manifest.json").read_text())
+    second_manifest = json.loads((second / "manifest.json").read_text())
+
+    assert second_interface == first_interface
+    assert (
+        second_manifest["metadataFingerprint"] == first_manifest["metadataFingerprint"]
+    )
+    assert (
+        second_manifest["configuration"]["fingerprint"]
+        != first_manifest["configuration"]["fingerprint"]
+    )
+
+
+def test_non_configurable_plugin_generates_null_configuration(tmp_path: Path) -> None:
+    source = INTERFACE.read_text(encoding="utf-8")
+    start = source.index("[configuration]")
+    end = source.index("[[enums]]")
+    path = tmp_path / "interface.toml"
+    path.write_text(source[:start] + source[end:])
+
+    generate(path, tmp_path / "generated")
+
+    manifest = json.loads((tmp_path / "generated/manifest.json").read_text())
+    metadata = (tmp_path / "generated/python/wmfs_reference/interface.py").read_text()
+    header = (tmp_path / "generated/include/wmfs/reference_plugin.hpp").read_text()
+    assert manifest["configuration"] is None
+    assert "CONFIGURATION_SCHEMA_VERSION = None" in metadata
+    assert "CONFIGURATION_FINGERPRINT = None" in metadata
+    assert "CONFIGURATION_SCHEMA_VERSION UINT32_C(0)" in header

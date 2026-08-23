@@ -1,5 +1,100 @@
 {
     "abiVersion": 1,
+    "configuration": {
+        "encoding": "wmfs-configuration-schema-v1",
+        "examples": {
+            "conservative": {
+                "emit_diagnostics": false,
+                "precision": "accurate",
+                "solver": {
+                    "algorithm": "qrIteration",
+                    "tolerance": 1e-10
+                },
+                "tags": [
+                    "production"
+                ],
+                "threads": 1
+            },
+            "throughput": {
+                "precision": "fast",
+                "solver": {
+                    "algorithm": "divideAndConquer"
+                },
+                "threads": 8
+            }
+        },
+        "fingerprint": "sha256:7487dddfb9cbe8c7e33d14e6d12dffe1aba04cf1bc190ed9b2cdae7fea6159cf",
+        "schema": {
+            "additionalProperties": false,
+            "description": "Initialization settings for the reference numerical plugin.",
+            "properties": {
+                "emit_diagnostics": {
+                    "default": false,
+                    "description": "Enable plugin diagnostic records when logging is available.",
+                    "type": "boolean"
+                },
+                "precision": {
+                    "default": "balanced",
+                    "description": "Numerical precision policy for supported kernels.",
+                    "enum": [
+                        "fast",
+                        "balanced",
+                        "accurate"
+                    ],
+                    "maxLength": 8,
+                    "minLength": 4,
+                    "type": "string"
+                },
+                "solver": {
+                    "additionalProperties": false,
+                    "description": "SVD solver controls.",
+                    "properties": {
+                        "algorithm": {
+                            "description": "SVD algorithm family.",
+                            "enum": [
+                                "divideAndConquer",
+                                "qrIteration"
+                            ],
+                            "type": "string"
+                        },
+                        "tolerance": {
+                            "default": 1e-07,
+                            "description": "Relative convergence tolerance.",
+                            "maximum": 1.0,
+                            "minimum": 0.0,
+                            "type": "number"
+                        }
+                    },
+                    "required": [
+                        "algorithm"
+                    ],
+                    "type": "object"
+                },
+                "tags": {
+                    "default": [],
+                    "description": "Bounded labels attached to diagnostic records.",
+                    "items": {
+                        "maxLength": 24,
+                        "minLength": 1,
+                        "type": "string"
+                    },
+                    "maxItems": 8,
+                    "minItems": 0,
+                    "type": "array"
+                },
+                "threads": {
+                    "default": 1,
+                    "description": "Maximum number of kernel threads.",
+                    "maximum": 64,
+                    "minimum": 1,
+                    "type": "integer"
+                }
+            },
+            "required": [],
+            "type": "object"
+        },
+        "schemaVersion": 1
+    },
     "deployment": {
         "interface": "ReferencePlugin",
         "root": "..",
@@ -17,7 +112,11 @@
     ],
     "formatVersion": 2,
     "generator": "wmfs-tool/2",
-    "interfaceFingerprint": "sha256:2f39cb403bd717ad108c0c60a7fc6990d348bd20f9a855836ac22cf2a8f3a8f4",
+    "interfaceFingerprint": "sha256:b734e7a8e8d52ed04df2074b8d936e5c441d6d17f836997d3df9ba964d07cabd",
+    "lifecycle": {
+        "initialize": true,
+        "shutdown": true
+    },
     "metadataFingerprint": "0xf6ed5672a8a496cb",
     "operationCount": 6,
     "operations": [

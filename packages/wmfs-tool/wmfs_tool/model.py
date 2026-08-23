@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 ScalarDefault: TypeAlias = bool | float | int | str | None
+ConfigurationScalar: TypeAlias = bool | float | int | str
+ConfigurationValue: TypeAlias = (
+    ConfigurationScalar | list["ConfigurationValue"] | dict[str, "ConfigurationValue"]
+)
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,39 @@ class Operation:
 
 
 @dataclass(frozen=True)
+class ConfigurationProperty:
+    name: str
+    kind: str
+    required: bool
+    description: str | None
+    has_default: bool
+    default: ConfigurationValue | None
+    enum: tuple[ConfigurationScalar, ...]
+    minimum: float | int | None
+    maximum: float | int | None
+    min_length: int | None
+    max_length: int | None
+    min_items: int | None
+    max_items: int | None
+    properties: tuple["ConfigurationProperty", ...]
+    items: "ConfigurationProperty | None"
+
+
+@dataclass(frozen=True)
+class Configuration:
+    schema_version: int
+    description: str | None
+    properties: tuple[ConfigurationProperty, ...]
+    examples: tuple[tuple[str, dict[str, ConfigurationValue]], ...]
+
+
+@dataclass(frozen=True)
+class Lifecycle:
+    initialize: bool = False
+    shutdown: bool = False
+
+
+@dataclass(frozen=True)
 class Plugin:
     format_version: int
     abi_version: int
@@ -100,3 +137,5 @@ class Plugin:
     deployment_root: str
     operations: tuple[Operation, ...]
     enums: tuple[Enum, ...] = ()
+    configuration: Configuration | None = None
+    lifecycle: Lifecycle = Lifecycle()

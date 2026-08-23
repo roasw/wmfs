@@ -14,6 +14,74 @@ interface = "ReferencePlugin"
 root = ".."
 worker = "wmfs-reference-worker"
 
+[lifecycle]
+initialize = true
+shutdown = true
+
+[configuration]
+schema_version = 1
+type = "object"
+description = "Initialization settings for the reference numerical plugin."
+additional_properties = false
+
+[configuration.properties.threads]
+type = "integer"
+description = "Maximum number of kernel threads."
+default = 1
+minimum = 1
+maximum = 64
+
+[configuration.properties.precision]
+type = "string"
+description = "Numerical precision policy for supported kernels."
+default = "balanced"
+enum = ["fast", "balanced", "accurate"]
+min_length = 4
+max_length = 8
+
+[configuration.properties.emit_diagnostics]
+type = "boolean"
+description = "Enable plugin diagnostic records when logging is available."
+default = false
+
+[configuration.properties.tags]
+type = "array"
+description = "Bounded labels attached to diagnostic records."
+default = []
+min_items = 0
+max_items = 8
+items = { type = "string", min_length = 1, max_length = 24 }
+
+[configuration.properties.solver]
+type = "object"
+description = "SVD solver controls."
+additional_properties = false
+required = ["algorithm"]
+
+[configuration.properties.solver.properties.algorithm]
+type = "string"
+description = "SVD algorithm family."
+enum = ["divideAndConquer", "qrIteration"]
+
+[configuration.properties.solver.properties.tolerance]
+type = "number"
+description = "Relative convergence tolerance."
+default = 1.0e-7
+minimum = 0.0
+maximum = 1.0
+
+[configuration.examples.conservative]
+threads = 1
+precision = "accurate"
+emit_diagnostics = false
+tags = ["production"]
+solver = { algorithm = "qrIteration", tolerance = 1.0e-10 }
+
+[configuration.examples.throughput]
+threads = 8
+precision = "fast"
+solver = { algorithm = "divideAndConquer" }
+
 [[enums]]
 name = "IndexOrder"
 values = ["rowMajor", "columnMajor"]

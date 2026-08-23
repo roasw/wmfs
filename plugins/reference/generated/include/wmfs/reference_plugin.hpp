@@ -7,8 +7,13 @@
 
 #define WMFS_REFERENCE_ABI_VERSION UINT32_C(1)
 #define WMFS_REFERENCE_PROTOCOL_VERSION UINT32_C(11)
+#define WMFS_REFERENCE_CONFIGURATION_SCHEMA_VERSION UINT32_C(1)
+#define WMFS_REFERENCE_HAS_INITIALIZE 1
+#define WMFS_REFERENCE_HAS_SHUTDOWN 1
 #define WMFS_REFERENCE_INTERFACE_FINGERPRINT                                   \
-    "sha256:2f39cb403bd717ad108c0c60a7fc6990d348bd20f9a855836ac22cf2a8f3a8f4"
+    "sha256:b734e7a8e8d52ed04df2074b8d936e5c441d6d17f836997d3df9ba964d07cabd"
+#define WMFS_REFERENCE_CONFIGURATION_FINGERPRINT                               \
+    "sha256:7487dddfb9cbe8c7e33d14e6d12dffe1aba04cf1bc190ed9b2cdae7fea6159cf"
 
 namespace wmfs {
 namespace reference {
@@ -26,6 +31,35 @@ enum class IndexOrder : std::int64_t {
     rowMajor = 0,
     columnMajor = 1,
 };
+
+namespace configuration {
+
+constexpr char threads_key[] = "threads";
+
+constexpr char precision_key[] = "precision";
+
+enum class Precision : std::uint32_t {
+    fast = 0,
+    balanced = 1,
+    accurate = 2,
+};
+
+constexpr char emit_diagnostics_key[] = "emit_diagnostics";
+
+constexpr char tags_key[] = "tags";
+
+constexpr char solver_key[] = "solver";
+
+constexpr char solver_algorithm_key[] = "algorithm";
+
+enum class SolverAlgorithm : std::uint32_t {
+    divideAndConquer = 0,
+    qrIteration = 1,
+};
+
+constexpr char solver_tolerance_key[] = "tolerance";
+
+} // namespace configuration
 
 template <typename T> struct dtype_tag {};
 
