@@ -49,3 +49,10 @@ under `docs/_static/diagrams` are committed so readers do not need D2. Run
 `bash docs/generate-diagrams.sh . --check` to verify freshness. The Nix development
 shell supplies the pinned D2 executable, and every documentation build checks
 the committed SVGs before invoking Sphinx.
+
+GitHub Pages publishes master documentation under `latest/` and release
+snapshots under `versions/<tag>/`. A master build checks the `gh-pages` branch
+and backfills only missing semantic-version tags; it never rebuilds an existing
+version directory. A tag push publishes that tag once. The site root is a
+generated version index. Use the workflow's optional `version` input to backfill
+an unpublished historical tag manually.

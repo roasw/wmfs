@@ -3,8 +3,16 @@ on:
   push:
     branches:
       - master
+    tags:
+      - "[0-9]*.[0-9]*.[0-9]*"
+      - "v[0-9]*.[0-9]*.[0-9]*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Unpublished semantic-version tag to backfill"
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -29,10 +37,66 @@ jobs:
       - name: Check pinned worker environment
         run: nix flake check ./environments/nixos-25.05 -L
       - name: Build documentation site
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          nix build .#checks.x86_64-linux.documentation --out-link docs-result
           mkdir site
-          cp -RL docs-result/. site/
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages || true
+          if [[ -n "$VERSION" ]]; then
+            [[ "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            git rev-parse --verify "refs/tags/$VERSION"
+            destination="versions/$VERSION"
+            if git cat-file -e "refs/remotes/origin/gh-pages:$destination/index.html" 2>/dev/null; then
+              echo "preserving published documentation for $VERSION"
+            else
+              worktree="$RUNNER_TEMP/wmfs-docs-$VERSION"
+              git worktree add --detach "$worktree" "$VERSION"
+              nix build "path:$worktree#checks.x86_64-linux.documentation" \
+                --out-link "$worktree/docs-result"
+              documentation="$worktree/docs-result"
+            fi
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            destination="versions/${GITHUB_REF_NAME}"
+            if git cat-file -e "refs/remotes/origin/gh-pages:$destination/index.html" 2>/dev/null; then
+              echo "preserving published documentation for ${GITHUB_REF_NAME}"
+            else
+              nix build .#checks.x86_64-linux.documentation --out-link docs-result
+              documentation="docs-result"
+            fi
+          else
+            nix build .#checks.x86_64-linux.documentation --out-link docs-result
+            documentation="docs-result"
+            destination="latest"
+          fi
+          if [[ -n "${documentation:-}" ]]; then
+            mkdir -p "site/$destination"
+            cp -RL "$documentation/." "site/$destination/"
+          fi
+      - name: Backfill missing tagged documentation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages || true
+          while read -r tag; do
+            [[ -n "$tag" ]] || continue
+            if git cat-file -e "refs/remotes/origin/gh-pages:versions/$tag/index.html" 2>/dev/null; then
+              echo "preserving published documentation for $tag"
+              continue
+            fi
+            worktree="$RUNNER_TEMP/wmfs-docs-$tag"
+            git worktree add --detach "$worktree" "$tag"
+            nix build "path:$worktree#checks.x86_64-linux.documentation" \
+              --out-link "$worktree/docs-result"
+            mkdir -p "site/versions/$tag"
+            cp -RL "$worktree/docs-result/." "site/versions/$tag/"
+            git worktree remove --force "$worktree"
+          done < <(git tag --list --sort=version:refname \
+            '[0-9]*.[0-9]*.[0-9]*' 'v[0-9]*.[0-9]*.[0-9]*')
+      - name: Build documentation version index
+        if: github.event_name != 'pull_request'
+        run: |
+          mapfile -t tags < <(git tag --list --sort=version:refname \
+            '[0-9]*.[0-9]*.[0-9]*' 'v[0-9]*.[0-9]*.[0-9]*')
+          python docs/build_version_index.py site "${tags[@]}"
       - name: Upload documentation site
         uses: actions/upload-artifact@v4
         with:
@@ -42,14 +106,19 @@ jobs:
           retention-days: 7
   publish:
     name: Publish documentation
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.version != '' || github.ref == 'refs/heads/master')
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download documentation site
         uses: actions/download-artifact@v4
         with:
@@ -61,4 +130,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
           publish_dir: ./site
-          force_orphan: true
+          keep_files: true

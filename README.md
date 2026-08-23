@@ -2,6 +2,10 @@
 
 Documentation: <https://roasw.github.io/wmfs/>
 
+The site root lists available versions. The current master build is published
+under <https://roasw.github.io/wmfs/latest/>, while immutable tagged snapshots
+use paths such as <https://roasw.github.io/wmfs/versions/0.1.0/>.
+
 Architecture: [diagram-driven project overview](docs/architecture-overview.md)
 
 `wmfs` is a prototype scientific-computing runtime for transparently running

@@ -27,6 +27,7 @@ TEST_LAYERS = {
     "package": {
         "test_benchmark.py",
         "test_bundled.py",
+        "test_documentation_versions.py",
         "test_version.py",
     },
     "native": {"test_native_session.py"},
