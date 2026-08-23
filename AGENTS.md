@@ -25,6 +25,59 @@
 - Build C++ out of tree under the ignored `build` directory.
 - Commit messages must follow the rules in `.gitlint`.
 
+## Engineering Principles
+
+### Type Safety Where Representable
+
+Prefer typed declarations and generated validation over convention, free-form
+strings, or unchecked dictionaries whenever the value domain is known.
+
+- The interface definition declares tensor dtype relationships, shape
+  relationships, mutability, scalar types, finite option enums, output arity,
+  and configuration schemas.
+- Use generated enums for finite algorithm choices rather than passing string
+  names through the C++ boundary.
+- One operation ID may support multiple declared dtype variants. Generated
+  C++11 code performs validated dtype dispatch into typed overloads or templates;
+  Python stubs expose the corresponding accepted types without creating
+  separate operation names per dtype.
+- `wmfs-tool` rejects inconsistent defaults, examples, dtype variables, shape
+  references, VJPs, and configuration schemas at build time.
+- The runtime validates untrusted manifests, startup frames, ring records,
+  capabilities, and configuration values again at process boundaries.
+- Keep opaque bytes or free-form JSON only for genuinely open-ended data. Do not
+  weaken a type that can be represented in the interface merely to simplify an
+  adapter.
+
+Type safety must not introduce C++ ABI coupling. Generated boundary records use
+fixed-width, standard-layout values; typed C++ wrappers are source-level C++11
+conveniences around those records.
+
+### Optional Abstractions Need A Bypass
+
+Every optional framework abstraction must have a supported disabled or direct
+path whose nominal steady-state cost is zero, or as close to zero as the
+language and ABI permit. Select the path during build or initialization rather
+than repeatedly rediscovering it in the operation hot path.
+
+Examples:
+
+- local and bundled execution bypass worker launch, rings, FD transfer, shared
+  allocation, isolated VJPs, and transport error translation;
+- disabled logging creates no channel or queue, performs no serialization or
+  allocation, and allows expensive message construction to be skipped with
+  `enabled()`;
+- disabled profiling performs no clock reads or metric record construction;
+- known outputs bypass dynamic planning;
+- cached mappings bypass repeated FD transfer and `mmap`;
+- absent configuration is canonical `{}` and creates no per-operation work.
+
+Do not hide unavoidable costs behind the word "zero-cost." Document and
+benchmark initialization, one-time registration, indirect calls, validation,
+and any remaining branch. Tests for a bypass must assert the absence of the
+relevant subprocesses, FDs, mappings, allocations, serialization, locks,
+syscalls, and clock reads, not only that the returned value is correct.
+
 ## Test Layout
 
 - Keep package unit tests with the package they test:
@@ -187,8 +240,12 @@ A plugin should explicitly describe:
 - input tensors;
 - output tensors;
 - scalar parameters;
+- accepted tensor dtypes and shared dtype variables;
+- finite scalar options as enums where applicable;
 - read-only versus mutable inputs where applicable.
 - output shape and dtype expressions when they are known from inputs and scalars.
+- optional initialization configuration schema, defaults, descriptions, and
+  examples.
 
 Read-only must be the default.
 
@@ -262,6 +319,40 @@ Configuration rules:
   plugin session;
 - configuration bytes and secrets must not be copied into diagnostics or logs
   by default.
+
+When a plugin accepts configuration, its `interface.toml` declares a typed WMFS
+configuration-schema v1 subset. The supported subset initially includes nested
+objects, Boolean, integer, number, string, homogeneous arrays, required fields,
+defaults, enums, numeric bounds, string/array length bounds, descriptions, and
+`additional_properties = false`.
+
+TOML is the authoring format for the interface and may also be used by an
+application for human-written configuration. Python loads that TOML into a
+normal mapping before runtime configuration. The process boundary still uses
+canonical JSON bytes: do not require a TOML parser in the generated C++11 ABI.
+Plugins may choose any C++11-compatible JSON parser internally, and future
+generated typed accessors may hide parsing without changing the wire format.
+
+`wmfs-tool` validates the schema, defaults, and named examples at build time and
+emits them into the manifest with a configuration-schema version and
+fingerprint distinct from the operation-interface fingerprint. The runtime
+validates application configuration against the generated schema before worker
+launch. The plugin still validates semantic constraints during initialization.
+
+Configuration introspection is manifest-driven and does not require launching
+or importing the worker:
+
+```python
+wmfs.list_configurable()
+wmfs.list_configurable("reference")
+wmfs.runtime.validate_config("reference", config)
+```
+
+The returned metadata includes field types, requirements, defaults, bounds,
+enum values, descriptions, and validated examples. The worker startup handshake
+advertises only the configuration-schema version and fingerprint and confirms
+acceptance of the supplied configuration; it does not resend the complete
+schema on every startup.
 
 Python initialization receives the decoded object and a logger:
 
@@ -744,9 +835,10 @@ Implementation status:
 - [ ] Milestone 13: verify every plugin interface and implementation can be
   built for local, bundled, and isolated execution without mode-specific
   generated interface files.
-- [ ] Milestone 14: implement mode-neutral initialization hooks, canonical JSON
-  configuration, and optional centralized, null, and worker-file loggers for
-  both Python and C++ plugins.
+- [ ] Milestone 14: implement mode-neutral initialization hooks, typed
+  configuration schemas and introspection, canonical JSON configuration, and
+  optional centralized, null, and worker-file loggers for both Python and C++
+  plugins.
 
 ### Milestone 1
 
