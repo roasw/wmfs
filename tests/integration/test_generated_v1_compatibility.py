@@ -128,7 +128,7 @@ def test_frozen_v1_headers_and_stub_compile_as_cpp11(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("field", "value", "diagnostic"),
     [
-        ("formatVersion", 2, "Manifest formatVersion is 2, but runtime requires 1"),
+        ("formatVersion", 3, "runtime supports 1 and 2"),
         ("abiVersion", 2, "Manifest abiVersion is 2, but runtime requires 1"),
         (
             "generator",

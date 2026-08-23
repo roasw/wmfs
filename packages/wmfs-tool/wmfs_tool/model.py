@@ -8,6 +8,20 @@ ScalarDefault: TypeAlias = bool | float | int | str | None
 class TensorParameter:
     name: str
     access: str = "read_only"
+    dtype_variable: str | None = None
+    dtypes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DTypeVariable:
+    name: str
+    dtypes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Enum:
+    name: str
+    values: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -16,6 +30,8 @@ class ScalarParameter:
     kind: str
     required: bool
     default: ScalarDefault
+    enum: str | None = None
+    enum_values: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -35,6 +51,7 @@ class DType:
     input: int | None = None
     scalar: int | None = None
     value: str | None = None
+    variable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +82,7 @@ class Operation:
     outputs: tuple[Output, ...]
     scalars: tuple[ScalarParameter, ...]
     vjp: Vjp | None
+    dtype_variables: tuple[DTypeVariable, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,3 +99,4 @@ class Plugin:
     interface: str
     deployment_root: str
     operations: tuple[Operation, ...]
+    enums: tuple[Enum, ...] = ()

@@ -7,12 +7,19 @@ const protocolVersion :UInt16 = 11;
 enum TensorAccess { readOnly @0; readWrite @1; }
 enum ScalarKind { boolean @0; float64 @1; int64 @2; text @3; }
 
-struct TensorParameter { name @0 :Text; access @1 :TensorAccess = readOnly; }
+struct TensorParameter {
+  name @0 :Text;
+  access @1 :TensorAccess = readOnly;
+  dtypeVariable @2 :Text;
+  dtypes @3 :List(Tensor.DType);
+}
 struct ScalarParameter {
   name @0 :Text;
   kind @1 :ScalarKind;
   required @2 :Bool = true;
   default @3 :ScalarDefault;
+  enumName @4 :Text;
+  enumValues @5 :List(Text);
 }
 struct ScalarDefault {
   union { none @0 :Void; boolean @1 :Bool; float64 @2 :Float64; int64 @3 :Int64; text @4 :Text; }
@@ -33,7 +40,7 @@ struct DimensionExpression {
 }
 struct PromoteTensorScalar { tensorInput @0 :UInt16; scalarParameter @1 :UInt16; }
 struct DTypeExpression {
-  union { fixed @0 :Tensor.DType; input @1 :UInt16; promoteTensorScalar @2 :PromoteTensorScalar; }
+  union { fixed @0 :Tensor.DType; input @1 :UInt16; promoteTensorScalar @2 :PromoteTensorScalar; variable @3 :Text; }
 }
 struct KnownOutput {
   union { dimensions @0 :List(DimensionExpression); sameShapeAsInput @1 :UInt16; }
@@ -58,13 +65,16 @@ struct OperationMetadata {
   outputPlans @5 :List(OutputPlan);
   vjp @6 :VjpPlan;
   internal @7 :Bool = false;
+  dtypeVariables @8 :List(DTypeVariable);
 }
+struct DTypeVariable { name @0 :Text; dtypes @1 :List(Tensor.DType); }
 struct PluginMetadata {
   name @0 :Text;
   version @1 :Text;
   protocolVersion @2 :UInt16;
   operations @3 :List(OperationMetadata);
   fingerprint @4 :UInt64;
+  metadataVersion @5 :UInt16 = 1;
 }
 struct EnvironmentMetadata {
   pythonVersion @0 :Text;

@@ -25,7 +25,7 @@ def test_finds_reference_plugin_manifest() -> None:
     assert manifests[0].name == "reference"
     assert manifests[0].interface == "ReferencePlugin"
     assert manifests[0].schema_path.is_file()
-    assert manifests[0].metadata.fingerprint == 0x549FB18B7A4B6C75
+    assert manifests[0].metadata.fingerprint == 0xF6ED5672A8A496CB
 
 
 def test_discovers_operations_from_generated_manifest() -> None:
@@ -44,6 +44,8 @@ def test_discovers_operations_from_generated_manifest() -> None:
     assert svd_metadata.scalar_parameters[0].kind == "boolean"
     assert not svd_metadata.scalar_parameters[0].required
     assert svd_metadata.scalar_parameters[0].default is True
+    assert svd_metadata.dtype_variables[0].dtypes == ("float32", "float64")
+    assert svd_metadata.tensor_inputs[0].dtype_variable == "T"
     assert svd_metadata.operation_id == 2
     assert [item.name for item in svd_metadata.output_plans] == ["u", "s", "vh"]
     assert svd_metadata.vjp is None
@@ -55,6 +57,17 @@ def test_discovers_operations_from_generated_manifest() -> None:
     assert matmul_vjp.output_cotangents == (0,)
     assert matmul_vjp.input_gradients == (0, 1)
     assert registry.operation("matmul_vjp").internal
+    nonzero = registry.operation("nonzero")
+    assert nonzero.tensor_inputs[0].dtypes == (
+        "float32",
+        "float64",
+        "int64",
+        "uint8",
+    )
+    assert nonzero.scalar_parameters[0].enum_values == (
+        "rowMajor",
+        "columnMajor",
+    )
 
 
 def test_runtime_registers_discovered_operations() -> None:

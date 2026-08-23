@@ -10,6 +10,7 @@ from wmfs.protocol.schema import PROTOCOL_VERSION
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
+    DTypeVariable,
     InputAxis,
     KnownOutput,
     OperationMetadata,
@@ -23,9 +24,7 @@ from wmfs.registry import (
     VjpMetadata,
 )
 
-_FORMAT_VERSION = 1
 _ABI_VERSION = 1
-_GENERATOR = "wmfs-tool/1"
 _SHA256 = re.compile(r"^sha256:([0-9a-f]{64})$")
 _METADATA_FINGERPRINT = re.compile(r"^0x([0-9a-f]{16})$")
 
@@ -51,26 +50,33 @@ def load_manifest(path: Path) -> PluginManifest:
     except json.JSONDecodeError as error:
         raise ValueError(f"Invalid JSON in plugin manifest {path}: {error}") from error
     data = _object(document, "manifest")
+    format_version = _integer(data.get("formatVersion"), "manifest.formatVersion")
+    if format_version not in {1, 2}:
+        raise ValueError(
+            f"Manifest formatVersion is {format_version!r}, but runtime supports 1 and 2"
+        )
+    fields = {
+        "abiVersion",
+        "deployment",
+        "formatVersion",
+        "generator",
+        "interfaceFingerprint",
+        "metadataFingerprint",
+        "operationCount",
+        "operations",
+        "plugin",
+        "protocolVersion",
+    }
+    if format_version == 2:
+        fields.add("enums")
     _keys(
         data,
-        {
-            "abiVersion",
-            "deployment",
-            "formatVersion",
-            "generator",
-            "interfaceFingerprint",
-            "metadataFingerprint",
-            "operationCount",
-            "operations",
-            "plugin",
-            "protocolVersion",
-        },
+        fields,
         "manifest",
     )
-    _require_equal(data, "formatVersion", _FORMAT_VERSION)
     _require_equal(data, "abiVersion", _ABI_VERSION)
     _require_equal(data, "protocolVersion", PROTOCOL_VERSION)
-    _require_equal(data, "generator", _GENERATOR)
+    _require_equal(data, "generator", f"wmfs-tool/{format_version}")
 
     operations = _array(data["operations"], "manifest.operations")
     count = _integer(data["operationCount"], "manifest.operationCount")
@@ -94,9 +100,11 @@ def load_manifest(path: Path) -> PluginManifest:
         version=version,
         protocol_version=PROTOCOL_VERSION,
         operations=tuple(
-            _operation(item, index) for index, item in enumerate(operations)
+            _operation(item, index, format_version)
+            for index, item in enumerate(operations)
         ),
         fingerprint=metadata_fingerprint,
+        metadata_version=format_version,
     )
     validate_plugin_metadata(metadata)
 
@@ -155,12 +163,13 @@ def discover_plugin_manifests(
     return registry, manifests
 
 
-def _operation(value: Any, index: int) -> OperationMetadata:
+def _operation(value: Any, index: int, format_version: int) -> OperationMetadata:
     where = f"manifest.operations[{index}]"
     item = _object(value, where)
-    _keys(
-        item, {"id", "inputs", "internal", "name", "outputs", "scalars", "vjp"}, where
-    )
+    fields = {"id", "inputs", "internal", "name", "outputs", "scalars", "vjp"}
+    if format_version == 2:
+        fields.add("dtype_variables")
+    _keys(item, fields, where)
     inputs = _array(item["inputs"], f"{where}.inputs")
     outputs = _array(item["outputs"], f"{where}.outputs")
     scalars = _array(item["scalars"], f"{where}.scalars")
@@ -170,39 +179,91 @@ def _operation(value: Any, index: int) -> OperationMetadata:
     )
     return OperationMetadata(
         name=_string(item["name"], f"{where}.name"),
-        tensor_inputs=tuple(_tensor(value, f"{where}.inputs") for value in inputs),
+        tensor_inputs=tuple(
+            _tensor(value, f"{where}.inputs", format_version) for value in inputs
+        ),
         tensor_outputs=tuple(
             TensorParameter(name, "readOnly") for name in output_names
         ),
         scalar_parameters=tuple(
-            _scalar(value, f"{where}.scalars") for value in scalars
+            _scalar(value, f"{where}.scalars", format_version) for value in scalars
         ),
         operation_id=_integer(item["id"], f"{where}.id"),
         output_plans=tuple(_output(value, f"{where}.outputs") for value in outputs),
         vjp=_vjp(item["vjp"], f"{where}.vjp"),
         internal=_boolean(item["internal"], f"{where}.internal"),
+        dtype_variables=(
+            tuple(
+                _dtype_variable(value, f"{where}.dtype_variables")
+                for value in _array(item["dtype_variables"], f"{where}.dtype_variables")
+            )
+            if format_version == 2
+            else ()
+        ),
     )
 
 
-def _tensor(value: Any, where: str) -> TensorParameter:
+def _tensor(value: Any, where: str, format_version: int) -> TensorParameter:
     item = _object(value, where)
-    _keys(item, {"access", "name"}, where)
+    fields = {"access", "name"}
+    if format_version == 2:
+        fields.update({"dtype_variable", "dtypes"})
+    _keys(item, fields, where)
     access = _string(item["access"], f"{where}.access")
     try:
         decoded_access = {"read_only": "readOnly", "read_write": "readWrite"}[access]
     except KeyError:
         raise ValueError(f"{where}.access has unsupported value {access!r}") from None
-    return TensorParameter(_string(item["name"], f"{where}.name"), decoded_access)
+    if format_version == 1:
+        return TensorParameter(_string(item["name"], f"{where}.name"), decoded_access)
+    variable = item["dtype_variable"]
+    return TensorParameter(
+        _string(item["name"], f"{where}.name"),
+        decoded_access,
+        _string(variable, f"{where}.dtype_variable") if variable is not None else None,
+        tuple(
+            _string(value, f"{where}.dtypes")
+            for value in _array(item["dtypes"], f"{where}.dtypes")
+        ),
+    )
 
 
-def _scalar(value: Any, where: str) -> ScalarParameter:
+def _scalar(value: Any, where: str, format_version: int) -> ScalarParameter:
     item = _object(value, where)
-    _keys(item, {"default", "kind", "name", "required"}, where)
+    fields = {"default", "kind", "name", "required"}
+    if format_version == 2:
+        fields.update({"enum", "enum_values"})
+    _keys(item, fields, where)
     return ScalarParameter(
         name=_string(item["name"], f"{where}.name"),
         kind=_string(item["kind"], f"{where}.kind"),
         required=_boolean(item["required"], f"{where}.required"),
         default=item["default"],
+        enum_name=(
+            _string(item["enum"], f"{where}.enum")
+            if format_version == 2 and item["enum"] is not None
+            else None
+        ),
+        enum_values=(
+            tuple(
+                _string(value, f"{where}.enum_values")
+                for value in _array(item["enum_values"], f"{where}.enum_values")
+            )
+            if format_version == 2
+            else ()
+        ),
+    )
+
+
+def _dtype_variable(value: Any, where: str) -> DTypeVariable:
+    item = _object(value, where)
+    _keys(item, {"dtypes", "name"}, where)
+    return DTypeVariable(
+        _string(item["name"], f"{where}.name"),
+        tuple(
+            _string(value, f"{where}.dtypes")
+            for value in _array(item["dtypes"], f"{where}.dtypes")
+        ),
     )
 
 
@@ -280,7 +341,10 @@ def _dimension(value: Any, where: str) -> DimensionExpression:
 
 def _dtype(value: Any, where: str) -> DTypeExpression:
     item = _object(value, where)
-    _keys(item, {"input", "kind", "scalar", "value"}, where)
+    fields = {"input", "kind", "scalar", "value"}
+    if "variable" in item:
+        fields.add("variable")
+    _keys(item, fields, where)
     kind = _string(item["kind"], f"{where}.kind")
     if kind == "input":
         return DTypeExpression(kind, _integer(item["input"], f"{where}.input"))
@@ -294,6 +358,8 @@ def _dtype(value: Any, where: str) -> DTypeExpression:
                 _integer(item["scalar"], f"{where}.scalar"),
             ),
         )
+    if kind == "variable":
+        return DTypeExpression(kind, _string(item["variable"], f"{where}.variable"))
     raise ValueError(f"{where} has unsupported dtype kind {kind!r}")
 
 

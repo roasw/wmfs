@@ -6,6 +6,8 @@ from typing import Any, NoReturn
 from wmfs_tool.model import (
     Dimension,
     DType,
+    DTypeVariable,
+    Enum,
     Operation,
     Output,
     Plugin,
@@ -16,7 +18,7 @@ from wmfs_tool.model import (
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SCALAR_KINDS = {"boolean": bool, "float64": float, "int64": int, "text": str}
-SUPPORTED_OUTPUT_DTYPES = frozenset({"float32", "float64", "int64", "uint8"})
+SUPPORTED_DTYPES = frozenset({"float32", "float64", "int64", "uint8"})
 
 
 class InterfaceError(ValueError):
@@ -42,6 +44,7 @@ def load_interface(path: Path) -> Plugin:
             "plugin",
             "deployment",
             "operations",
+            "enums",
         },
         "interface",
     )
@@ -61,6 +64,10 @@ def load_interface(path: Path) -> Plugin:
     )
     operations_data = _list(
         _required(root, "operations", "interface"), "interface.operations"
+    )
+    enums = tuple(
+        _enum(value, f"interface.enums[{index}]")
+        for index, value in enumerate(_list(root.get("enums", []), "interface.enums"))
     )
     result = Plugin(
         format_version=_integer(
@@ -100,22 +107,40 @@ def load_interface(path: Path) -> Plugin:
             "deployment.root",
         ),
         operations=tuple(
-            _operation(item, index) for index, item in enumerate(operations_data)
+            _operation(item, index, enums) for index, item in enumerate(operations_data)
         ),
+        enums=enums,
     )
     _validate(result)
     return result
 
 
-def _operation(value: Any, index: int) -> Operation:
+def _operation(value: Any, index: int, enums: tuple[Enum, ...]) -> Operation:
     where = f"operations[{index}]"
     item = _table(value, where)
     _keys(
-        item, {"id", "name", "internal", "inputs", "outputs", "scalars", "vjp"}, where
+        item,
+        {
+            "id",
+            "name",
+            "internal",
+            "inputs",
+            "outputs",
+            "scalars",
+            "vjp",
+            "dtype_variables",
+        },
+        where,
     )
     inputs = _list(item.get("inputs", []), f"{where}.inputs")
     outputs = _list(_required(item, "outputs", where), f"{where}.outputs")
     scalars = _list(item.get("scalars", []), f"{where}.scalars")
+    dtype_variables = tuple(
+        _dtype_variable(item, f"{where}.dtype_variables[{i}]")
+        for i, item in enumerate(
+            _list(item.get("dtype_variables", []), f"{where}.dtype_variables")
+        )
+    )
     return Operation(
         operation_id=_integer(_required(item, "id", where), f"{where}.id"),
         name=_identifier(_required(item, "name", where), f"{where}.name"),
@@ -127,44 +152,119 @@ def _operation(value: Any, index: int) -> Operation:
             _output(value, f"{where}.outputs[{i}]") for i, value in enumerate(outputs)
         ),
         scalars=tuple(
-            _scalar(value, f"{where}.scalars[{i}]") for i, value in enumerate(scalars)
+            _scalar(value, f"{where}.scalars[{i}]", enums)
+            for i, value in enumerate(scalars)
         ),
         vjp=_vjp(item["vjp"], f"{where}.vjp") if "vjp" in item else None,
+        dtype_variables=dtype_variables,
     )
 
 
 def _tensor(value: Any, where: str) -> TensorParameter:
     item = _table(value, where)
-    _keys(item, {"name", "access"}, where)
+    _keys(item, {"name", "access", "dtype"}, where)
     access = _string(item.get("access", "read_only"), f"{where}.access")
     if access not in {"read_only", "read_write"}:
         _fail(where, "access must be 'read_only' or 'read_write'")
+    variable = None
+    dtypes: tuple[str, ...] = ()
+    if "dtype" in item:
+        constraint = _table(item["dtype"], f"{where}.dtype")
+        if set(constraint) == {"variable"}:
+            variable = _identifier(constraint["variable"], f"{where}.dtype.variable")
+        elif set(constraint) in ({"fixed"}, {"one_of"}):
+            values = constraint.get("fixed", constraint.get("one_of"))
+            dtypes = (
+                _dtypes(values, f"{where}.dtype")
+                if isinstance(values, list)
+                else _dtypes([values], f"{where}.dtype")
+            )
+        else:
+            _fail(where, "dtype must declare variable or a finite fixed set")
     return TensorParameter(
-        _identifier(_required(item, "name", where), f"{where}.name"), access
+        _identifier(_required(item, "name", where), f"{where}.name"),
+        access,
+        variable,
+        dtypes,
     )
 
 
-def _scalar(value: Any, where: str) -> ScalarParameter:
+def _scalar(value: Any, where: str, enums: tuple[Enum, ...]) -> ScalarParameter:
     item = _table(value, where)
-    _keys(item, {"name", "kind", "required", "default"}, where)
-    kind = _string(_required(item, "kind", where), f"{where}.kind")
-    if kind not in _SCALAR_KINDS:
-        _fail(where, f"unknown scalar kind {kind!r}")
+    _keys(item, {"name", "kind", "required", "default", "enum"}, where)
+    raw_kind = _required(item, "kind", where)
+    enum_name = None
+    if isinstance(raw_kind, dict):
+        _keys(raw_kind, {"enum"}, f"{where}.kind")
+        enum_name = _identifier(
+            _required(raw_kind, "enum", where), f"{where}.kind.enum"
+        )
+        kind = "int64"
+    else:
+        kind = _string(raw_kind, f"{where}.kind")
+        if kind == "enum":
+            enum_name = _identifier(_required(item, "enum", where), f"{where}.enum")
+            kind = "int64"
+        elif kind not in _SCALAR_KINDS:
+            _fail(where, f"unknown scalar kind {kind!r}")
     required = _boolean(item.get("required", True), f"{where}.required")
     default = item.get("default")
     if required and "default" in item:
         _fail(where, "required scalar cannot have a default")
     if not required and "default" not in item:
         _fail(where, "optional scalar requires a default")
-    expected = _SCALAR_KINDS[kind]
-    if default is not None and (type(default) is not expected):
-        _fail(where, f"default does not match scalar kind {kind!r}")
+    enum_values: tuple[str, ...] = ()
+    if enum_name is not None:
+        declarations = {item.name: item for item in enums}
+        if enum_name not in declarations:
+            _fail(where, f"references unknown enum {enum_name!r}")
+        enum_values = declarations[enum_name].values
+        if default is not None and default not in enum_values:
+            _fail(where, f"default is not a member of enum {enum_name!r}")
+    else:
+        expected = _SCALAR_KINDS[kind]
+        if default is not None and (type(default) is not expected):
+            _fail(where, f"default does not match scalar kind {kind!r}")
     return ScalarParameter(
         _identifier(_required(item, "name", where), f"{where}.name"),
         kind,
         required,
         default,
+        enum_name,
+        enum_values,
     )
+
+
+def _enum(value: Any, where: str) -> Enum:
+    item = _table(value, where)
+    _keys(item, {"name", "values"}, where)
+    values = tuple(
+        _identifier(value, f"{where}.values")
+        for value in _list(_required(item, "values", where), f"{where}.values")
+    )
+    if not values or len(values) != len(set(values)):
+        _fail(where, "enum values must be non-empty and unique")
+    return Enum(_identifier(_required(item, "name", where), f"{where}.name"), values)
+
+
+def _dtype_variable(value: Any, where: str) -> DTypeVariable:
+    item = _table(value, where)
+    _keys(item, {"name", "dtypes"}, where)
+    return DTypeVariable(
+        _identifier(_required(item, "name", where), f"{where}.name"),
+        _dtypes(_required(item, "dtypes", where), f"{where}.dtypes"),
+    )
+
+
+def _dtypes(value: Any, where: str) -> tuple[str, ...]:
+    values = tuple(_string(item, where) for item in _list(value, where))
+    if (
+        not values
+        or len(values) != len(set(values))
+        or any(item not in SUPPORTED_DTYPES for item in values)
+    ):
+        _fail(where, "dtypes must be a unique non-empty supported set")
+    return values
 
 
 def _output(value: Any, where: str) -> Output:
@@ -257,13 +357,17 @@ def _dtype(value: Any, where: str) -> DType:
         return DType("input", input=_integer(item["input"], f"{where}.input"))
     if set(item) == {"fixed"}:
         return DType("fixed", value=_string(item["fixed"], f"{where}.fixed"))
+    if set(item) == {"variable"}:
+        return DType(
+            "variable", variable=_identifier(item["variable"], f"{where}.variable")
+        )
     if set(item) == {"promote_tensor", "scalar"}:
         return DType(
             "promote_tensor_scalar",
             input=_integer(item["promote_tensor"], where),
             scalar=_integer(item["scalar"], where),
         )
-    _fail(where, "dtype must be input, fixed, or promote_tensor plus scalar")
+    _fail(where, "dtype must be input, variable, fixed, or promote_tensor plus scalar")
 
 
 def _vjp(value: Any, where: str) -> Vjp:
@@ -295,9 +399,9 @@ def _vjp(value: Any, where: str) -> Vjp:
 
 
 def _validate(plugin: Plugin) -> None:
-    if plugin.format_version != 1:
+    if plugin.format_version != 2:
         raise InterfaceError(
-            f"unsupported format_version {plugin.format_version}; expected 1"
+            f"unsupported format_version {plugin.format_version}; expected 2"
         )
     if plugin.abi_version != 1:
         raise InterfaceError(
@@ -315,7 +419,22 @@ def _validate(plugin: Plugin) -> None:
         raise InterfaceError("operation IDs must be unique positive integers")
     if len(names) != len(plugin.operations):
         raise InterfaceError("operation names must be unique")
+    if len({item.name for item in plugin.enums}) != len(plugin.enums):
+        raise InterfaceError("enum names must be unique")
     for operation in plugin.operations:
+        variables = {item.name: item for item in operation.dtype_variables}
+        if len(variables) != len(operation.dtype_variables):
+            raise InterfaceError(
+                f"operation {operation.name!r} has duplicate dtype variables"
+            )
+        for tensor in operation.inputs:
+            if (
+                tensor.dtype_variable is not None
+                and tensor.dtype_variable not in variables
+            ):
+                raise InterfaceError(
+                    f"operation {operation.name!r} references an unknown dtype variable"
+                )
         parameter_names = [item.name for item in operation.inputs] + [
             item.name for item in operation.scalars
         ]
@@ -340,6 +459,13 @@ def _validate(plugin: Plugin) -> None:
             _validate_output_references(operation, output)
         if operation.vjp is not None:
             _validate_vjp(plugin, operation)
+        for variable in variables.values():
+            if not any(
+                item.dtype_variable == variable.name for item in operation.inputs
+            ):
+                raise InterfaceError(
+                    f"operation {operation.name!r} dtype variable {variable.name!r} is unused"
+                )
 
 
 def _validate_vjp(plugin: Plugin, operation: Operation) -> None:
@@ -375,6 +501,87 @@ def _validate_vjp(plugin: Plugin, operation: Operation) -> None:
         raise InterfaceError(
             f"operation {operation.name!r} VJP target signature does not match its plan"
         )
+    source_tensors = [
+        *(_input_dtype(operation, index) for index in vjp.saved_inputs),
+        *(_output_dtype(operation, index) for index in vjp.saved_outputs),
+        *(_output_dtype(operation, index) for index in vjp.output_cotangents),
+    ]
+    target_inputs = [_input_dtype(target, index) for index in range(len(target.inputs))]
+    source_gradients = [_input_dtype(operation, index) for index in vjp.input_gradients]
+    target_outputs = [
+        _output_dtype(target, index) for index in range(len(target.outputs))
+    ]
+    if not _dtype_signatures_match(
+        source_tensors, target_inputs
+    ) or not _dtype_signatures_match(source_gradients, target_outputs):
+        raise InterfaceError(
+            f"operation {operation.name!r} VJP dtype constraints do not match"
+        )
+    for target_scalar, source_index in zip(
+        target.scalars, vjp.scalar_parameters, strict=True
+    ):
+        source_scalar = operation.scalars[source_index]
+        if (
+            target_scalar.kind,
+            target_scalar.enum,
+            target_scalar.enum_values,
+        ) != (
+            source_scalar.kind,
+            source_scalar.enum,
+            source_scalar.enum_values,
+        ):
+            raise InterfaceError(
+                f"operation {operation.name!r} VJP scalar constraints do not match"
+            )
+
+
+def _input_dtype(operation: Operation, index: int) -> tuple[frozenset[str], str | None]:
+    tensor = operation.inputs[index]
+    if tensor.dtype_variable is not None:
+        variable = next(
+            item
+            for item in operation.dtype_variables
+            if item.name == tensor.dtype_variable
+        )
+        return frozenset(variable.dtypes), tensor.dtype_variable
+    return frozenset(tensor.dtypes), None
+
+
+def _output_dtype(
+    operation: Operation, index: int
+) -> tuple[frozenset[str], str | None]:
+    dtype = operation.outputs[index].dtype
+    if dtype is None or dtype.kind == "promote_tensor_scalar":
+        return SUPPORTED_DTYPES, None
+    if dtype.kind == "fixed":
+        return frozenset((str(dtype.value),)), None
+    if dtype.kind == "input":
+        assert dtype.input is not None
+        return _input_dtype(operation, dtype.input)
+    assert dtype.variable is not None
+    variable = next(
+        item for item in operation.dtype_variables if item.name == dtype.variable
+    )
+    return frozenset(variable.dtypes), dtype.variable
+
+
+def _dtype_signatures_match(
+    source: list[tuple[frozenset[str], str | None]],
+    target: list[tuple[frozenset[str], str | None]],
+) -> bool:
+    if [item[0] for item in source] != [item[0] for item in target]:
+        return False
+    for left in range(len(source)):
+        for right in range(left):
+            source_shared = (
+                source[left][1] is not None and source[left][1] == source[right][1]
+            )
+            target_shared = (
+                target[left][1] is not None and target[left][1] == target[right][1]
+            )
+            if source_shared != target_shared:
+                return False
+    return True
 
 
 def _validate_output_references(operation: Operation, output: Output) -> None:
@@ -433,12 +640,15 @@ def _validate_output_references(operation: Operation, output: Output) -> None:
             raise InterfaceError(
                 f"operation {operation.name!r} dtype references an unknown scalar"
             )
-        if (
-            output.dtype.kind == "fixed"
-            and output.dtype.value not in SUPPORTED_OUTPUT_DTYPES
-        ):
+        if output.dtype.kind == "fixed" and output.dtype.value not in SUPPORTED_DTYPES:
             raise InterfaceError(
                 f"operation {operation.name!r} has an unsupported fixed dtype"
+            )
+        if output.dtype.kind == "variable" and output.dtype.variable not in {
+            item.name for item in operation.dtype_variables
+        }:
+            raise InterfaceError(
+                f"operation {operation.name!r} dtype references an unknown variable"
             )
 
 

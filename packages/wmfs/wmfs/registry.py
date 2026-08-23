@@ -1,6 +1,7 @@
 from wmfs.protocol.metadata import (
     DimensionExpression,
     DTypeExpression,
+    DTypeVariable,
     EnvironmentMetadata,
     InputAxis,
     KnownOutput,
@@ -16,6 +17,7 @@ from wmfs.protocol.metadata import (
 
 __all__ = [
     "DTypeExpression",
+    "DTypeVariable",
     "DimensionExpression",
     "EnvironmentMetadata",
     "InputAxis",

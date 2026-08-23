@@ -75,6 +75,41 @@ def test_invocation_binding_rejects_ambiguous_arguments_and_autograd_out() -> No
     assert bound.out is not None
 
 
+def test_invocation_binding_enforces_dtype_variables_and_enum_ranges() -> None:
+    matmul = _operation("matmul")
+    left = torch.ones((2, 2), dtype=torch.float32)
+
+    assert bind_invocation(
+        matmul, (left, left), {}, None, collect_metrics=False
+    ).tensor_inputs
+    with pytest.raises(TypeError, match="dtype variable"):
+        bind_invocation(
+            matmul,
+            (left, left.to(torch.float64)),
+            {},
+            None,
+            collect_metrics=False,
+        )
+    with pytest.raises(TypeError, match="unsupported dtype"):
+        bind_invocation(
+            matmul,
+            (left.to(torch.bool), left.to(torch.bool)),
+            {},
+            None,
+            collect_metrics=False,
+        )
+
+    nonzero = _operation("nonzero")
+    default = bind_invocation(nonzero, (left,), {}, None, collect_metrics=False)
+    column_major = bind_invocation(
+        nonzero, (left, "columnMajor"), {}, None, collect_metrics=False
+    )
+    assert default.scalars == (0,)
+    assert column_major.scalars == (1,)
+    with pytest.raises(ValueError, match="IndexOrder"):
+        bind_invocation(nonzero, (left, "diagonal"), {}, None, collect_metrics=False)
+
+
 def test_shared_output_planning_handles_fresh_and_reused_results() -> None:
     operation = _operation("add_scalar")
     source = torch.arange(4, dtype=torch.float32)

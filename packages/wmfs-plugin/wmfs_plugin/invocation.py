@@ -39,6 +39,66 @@ class InvocationContext:
     _scalar_indices: dict[str, int] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        variables = {item.name: item for item in self.operation.dtype_variables}
+        bindings: dict[str, torch.dtype] = {}
+        for parameter, tensor in zip(self.operation.tensor_inputs, self.inputs):
+            if parameter.dtype_variable is None and not parameter.dtypes:
+                continue
+            dtype = str(tensor.dtype).removeprefix("torch.")
+            if parameter.dtype_variable is not None:
+                variable = variables[parameter.dtype_variable]
+                if dtype not in variable.dtypes:
+                    raise TypeError(
+                        f"Tensor {parameter.name!r} has unsupported dtype {dtype!r}"
+                    )
+                previous = bindings.setdefault(variable.name, tensor.dtype)
+                if previous != tensor.dtype:
+                    raise TypeError(
+                        f"Tensor {parameter.name!r} violates dtype variable {variable.name!r}"
+                    )
+            elif parameter.dtypes and dtype not in parameter.dtypes:
+                raise TypeError(
+                    f"Tensor {parameter.name!r} has unsupported dtype {dtype!r}"
+                )
+        for parameter, value in zip(self.operation.scalar_parameters, self.scalars):
+            if parameter.enum_name is not None and (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or not 0 <= value < len(parameter.enum_values)
+            ):
+                raise ValueError(
+                    f"Scalar {parameter.name!r} is outside enum {parameter.enum_name!r}"
+                )
+        if len(self.outputs) == len(self.operation.output_plans):
+            for output, plan in zip(
+                self.outputs, self.operation.output_plans, strict=True
+            ):
+                if plan.known is None:
+                    continue
+                expression = plan.known.dtype
+                if expression.kind == "fixed":
+                    expected = str(expression.value)
+                elif expression.kind == "input":
+                    expected = str(
+                        self.inputs[int(expression.value)].dtype
+                    ).removeprefix("torch.")
+                elif expression.kind == "variable":
+                    expected = str(bindings[str(expression.value)]).removeprefix(
+                        "torch."
+                    )
+                else:
+                    promotion = expression.value
+                    expected = str(
+                        torch.result_type(
+                            self.inputs[promotion.tensor_input],
+                            self.scalars[promotion.scalar_parameter],
+                        )
+                    ).removeprefix("torch.")
+                actual = str(output.dtype).removeprefix("torch.")
+                if actual != expected:
+                    raise ValueError(
+                        f"Output {plan.name!r} has dtype {actual!r}, expected {expected!r}"
+                    )
         object.__setattr__(
             self,
             "_input_indices",

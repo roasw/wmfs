@@ -14,7 +14,7 @@ PLUGIN_NAME = "reference"
 API_NAMESPACE = PLUGIN_NAME
 PLUGIN_VERSION = "0.1.0"
 PROTOCOL_VERSION = 11
-METADATA_FINGERPRINT = 0x549FB18B7A4B6C75
+METADATA_FINGERPRINT = 0xF6ED5672A8A496CB
 
 
 class GeneratedOperation(NamedTuple):
@@ -78,7 +78,7 @@ OPERATIONS = (
         "nonzero",
         ("a",),
         ("indices",),
-        (),
+        ("order",),
         ("indices",),
         False,
     ),
@@ -136,7 +136,7 @@ def _adapt_add_scalar_vjp(implementation: Implementation) -> OperationHandler:
 
 def _adapt_nonzero(implementation: Implementation) -> OperationHandler:
     def handler(context: InvocationContext) -> None:
-        implementation(context.inputs[0], context.outputs[0])
+        implementation(context.inputs[0], context.scalars[0], context.outputs[0])
 
     return handler
 

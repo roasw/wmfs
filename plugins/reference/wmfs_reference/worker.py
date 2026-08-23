@@ -42,10 +42,10 @@ def _add_scalar(a: torch.Tensor, value: float, result: torch.Tensor) -> None:
     kernels.add_scalar(a, value, out=result)
 
 
-def _nonzero(a: torch.Tensor, indices: torch.Tensor) -> None:
+def _nonzero(a: torch.Tensor, order: int, indices: torch.Tensor) -> None:
     expected = (int(torch.count_nonzero(a)), a.ndim)
     _validate_output(indices, expected, torch.int64)
-    kernels.nonzero(a, out=indices)
+    kernels.nonzero(a, order, out=indices)
 
 
 def _plan_nonzero(context: InvocationContext) -> dict[str, OutputSpec]:

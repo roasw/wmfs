@@ -8,7 +8,7 @@
 #define WMFS_REFERENCE_ABI_VERSION UINT32_C(1)
 #define WMFS_REFERENCE_PROTOCOL_VERSION UINT32_C(11)
 #define WMFS_REFERENCE_INTERFACE_FINGERPRINT                                   \
-    "sha256:b0f2005fae597c883fc5caf85c3b78f88996b0141b5c7a71bdd9d7163efc3123"
+    "sha256:2f39cb403bd717ad108c0c60a7fc6990d348bd20f9a855836ac22cf2a8f3a8f4"
 
 namespace wmfs {
 namespace reference {
@@ -21,6 +21,26 @@ enum operation_id : std::uint32_t {
     add_scalar_vjp = UINT32_C(5),
     nonzero = UINT32_C(6),
 };
+
+enum class IndexOrder : std::int64_t {
+    rowMajor = 0,
+    columnMajor = 1,
+};
+
+template <typename T> struct dtype_tag {};
+
+template <typename T>
+std::int32_t matmul_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
+template <typename T>
+std::int32_t svd_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
+template <typename T>
+std::int32_t add_scalar_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
+template <typename T>
+std::int32_t matmul_vjp_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
+template <typename T>
+std::int32_t add_scalar_vjp_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
+template <typename T>
+std::int32_t nonzero_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
 
 } // namespace reference
 } // namespace wmfs

@@ -98,6 +98,7 @@ def bind_invocation(
         raise RuntimeError("Isolated out does not support autograd inputs")
     scalar_start = perf_counter_ns() if collect_metrics else 0
     scalars = bind_scalars(operation, args, kwargs)
+    _validate_tensor_dtypes(operation, tensors)
     scalar_binding_ns = perf_counter_ns() - scalar_start if collect_metrics else 0
     return BoundInvocation(
         operation=operation,
@@ -231,6 +232,19 @@ def bind_scalars(
 
 
 def _coerce_scalar(parameter: ScalarParameter, value: object) -> object:
+    if parameter.enum_name is not None:
+        if isinstance(value, str):
+            try:
+                return parameter.enum_values.index(value)
+            except ValueError:
+                pass
+        if isinstance(value, int) and not isinstance(value, bool):
+            integer = int(value)
+            if 0 <= integer < len(parameter.enum_values):
+                return integer
+        raise ValueError(
+            f"Scalar {parameter.name!r} must be a member of enum {parameter.enum_name!r}"
+        )
     if parameter.kind == "boolean":
         if not isinstance(value, bool):
             raise TypeError(f"Scalar {parameter.name!r} must be Boolean")
@@ -248,6 +262,33 @@ def _coerce_scalar(parameter: ScalarParameter, value: object) -> object:
             raise TypeError(f"Scalar {parameter.name!r} must be text")
         return value
     raise TypeError(f"Scalar {parameter.name!r} has an unknown kind")
+
+
+def _validate_tensor_dtypes(
+    operation: OperationMetadata, tensors: tuple[torch.Tensor, ...]
+) -> None:
+    bindings: dict[str, torch.dtype] = {}
+    variables = {item.name: item for item in operation.dtype_variables}
+    for parameter, tensor in zip(operation.tensor_inputs, tensors, strict=True):
+        dtype = str(tensor.dtype).removeprefix("torch.")
+        if parameter.dtype_variable is not None:
+            variable = variables[parameter.dtype_variable]
+            if dtype not in variable.dtypes:
+                raise TypeError(
+                    f"Tensor {parameter.name!r} has unsupported dtype {dtype!r}; "
+                    f"expected one of {variable.dtypes}"
+                )
+            previous = bindings.setdefault(variable.name, tensor.dtype)
+            if previous != tensor.dtype:
+                raise TypeError(
+                    f"Tensor {parameter.name!r} must use dtype variable {variable.name!r} "
+                    f"bound to {str(previous).removeprefix('torch.')}"
+                )
+        elif parameter.dtypes and dtype not in parameter.dtypes:
+            raise TypeError(
+                f"Tensor {parameter.name!r} has unsupported dtype {dtype!r}; "
+                f"expected one of {parameter.dtypes}"
+            )
 
 
 def _python_parameter_name(name: str) -> str:

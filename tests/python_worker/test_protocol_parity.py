@@ -22,6 +22,7 @@ def test_runtime_and_worker_metadata_models_have_parity() -> None:
     names = (
         "TensorParameter",
         "ScalarParameter",
+        "DTypeVariable",
         "InputAxis",
         "SelectDimension",
         "DimensionExpression",

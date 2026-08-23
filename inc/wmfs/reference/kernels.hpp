@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 
+#include <cstdint>
 #include <tuple>
 
 namespace wmfs::reference {
@@ -26,7 +27,8 @@ at::Tensor add_scalar(const at::Tensor &a, double value);
 at::Tensor &add_scalar_out(const at::Tensor &a, double value, at::Tensor &out);
 
 /// @brief Return nonzero indices in runtime-owned dynamic storage.
-at::Tensor &nonzero_out(const at::Tensor &a, at::Tensor &out);
+at::Tensor &nonzero_out(const at::Tensor &a, std::int64_t order,
+                        at::Tensor &out);
 
 /// @brief Compute the first-order vector-Jacobian product for matrix multiply.
 std::tuple<at::Tensor, at::Tensor>

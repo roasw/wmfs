@@ -6,13 +6,14 @@ const pluginMetadata :Runtime.PluginMetadata = (
   name = "reference",
   version = "0.1.0",
   protocolVersion = 11,
-  fingerprint = 0x549fb18b7a4b6c75,
+  fingerprint = 0xf6ed5672a8a496cb,
+  metadataVersion = 2,
   operations = [
     (
       name = "matmul",
       tensorInputs = [
-        (name = "a"),
-        (name = "b"),
+        (name = "a", dtypeVariable = "T"),
+        (name = "b", dtypeVariable = "T"),
       ],
       tensorOutputs = [(name = "result")],
       operationId = 1,
@@ -24,7 +25,7 @@ const pluginMetadata :Runtime.PluginMetadata = (
               (inputAxis = (input = 0, axis = 0)),
               (inputAxis = (input = 1, axis = 1)),
             ],
-            dtype = (input = 0),
+            dtype = (variable = "T"),
           ),
         ),
       ],
@@ -36,10 +37,13 @@ const pluginMetadata :Runtime.PluginMetadata = (
           inputGradients = [0, 1],
         ),
       ),
+      dtypeVariables = [
+        (name = "T", dtypes = [float32, float64, int64, uint8]),
+      ],
     ),
     (
       name = "svd",
-      tensorInputs = [(name = "a")],
+      tensorInputs = [(name = "a", dtypeVariable = "T")],
       tensorOutputs = [
         (name = "u"),
         (name = "s"),
@@ -73,7 +77,7 @@ const pluginMetadata :Runtime.PluginMetadata = (
                 ),
               ),
             ],
-            dtype = (input = 0),
+            dtype = (variable = "T"),
           ),
         ),
         (
@@ -87,7 +91,7 @@ const pluginMetadata :Runtime.PluginMetadata = (
                 ],
               ),
             ],
-            dtype = (input = 0),
+            dtype = (variable = "T"),
           ),
         ),
         (
@@ -108,14 +112,15 @@ const pluginMetadata :Runtime.PluginMetadata = (
               ),
               (inputAxis = (input = 0, axis = 1)),
             ],
-            dtype = (input = 0),
+            dtype = (variable = "T"),
           ),
         ),
       ],
+      dtypeVariables = [(name = "T", dtypes = [float32, float64])],
     ),
     (
       name = "add_scalar",
-      tensorInputs = [(name = "a")],
+      tensorInputs = [(name = "a", dtypeVariable = "T")],
       tensorOutputs = [(name = "result")],
       scalarParameters = [(name = "value", kind = float64)],
       operationId = 3,
@@ -137,13 +142,16 @@ const pluginMetadata :Runtime.PluginMetadata = (
           inputGradients = [0],
         ),
       ),
+      dtypeVariables = [
+        (name = "T", dtypes = [float32, float64, int64, uint8]),
+      ],
     ),
     (
       name = "matmul_vjp",
       tensorInputs = [
-        (name = "a"),
-        (name = "b"),
-        (name = "resultCotangent"),
+        (name = "a", dtypeVariable = "T"),
+        (name = "b", dtypeVariable = "T"),
+        (name = "resultCotangent", dtypeVariable = "T"),
       ],
       tensorOutputs = [
         (name = "aGradient"),
@@ -153,32 +161,50 @@ const pluginMetadata :Runtime.PluginMetadata = (
       outputPlans = [
         (
           name = "aGradient",
-          known = (sameShapeAsInput = 0, dtype = (input = 0)),
+            known = (sameShapeAsInput = 0, dtype = (variable = "T")),
         ),
         (
           name = "bGradient",
-          known = (sameShapeAsInput = 1, dtype = (input = 1)),
+            known = (sameShapeAsInput = 1, dtype = (variable = "T")),
         ),
       ],
       internal = true,
+      dtypeVariables = [
+        (name = "T", dtypes = [float32, float64, int64, uint8]),
+      ],
     ),
     (
       name = "add_scalar_vjp",
-      tensorInputs = [(name = "resultCotangent")],
+      tensorInputs = [(name = "resultCotangent", dtypeVariable = "T")],
       tensorOutputs = [(name = "aGradient")],
       operationId = 5,
       outputPlans = [
         (
           name = "aGradient",
-          known = (sameShapeAsInput = 0, dtype = (input = 0)),
+            known = (sameShapeAsInput = 0, dtype = (variable = "T")),
         ),
       ],
       internal = true,
+      dtypeVariables = [
+        (name = "T", dtypes = [float32, float64, int64, uint8]),
+      ],
     ),
     (
       name = "nonzero",
-      tensorInputs = [(name = "a")],
+      tensorInputs = [
+        (name = "a", dtypes = [float32, float64, int64, uint8]),
+      ],
       tensorOutputs = [(name = "indices")],
+      scalarParameters = [
+        (
+          name = "order",
+          kind = int64,
+          required = false,
+          default = (text = "rowMajor"),
+          enumName = "IndexOrder",
+          enumValues = ["rowMajor", "columnMajor"],
+        ),
+      ],
       operationId = 6,
       outputPlans = [(name = "indices", dynamic = void)],
     ),

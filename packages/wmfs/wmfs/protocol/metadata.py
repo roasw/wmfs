@@ -13,6 +13,8 @@ SUPPORTED_OUTPUT_DTYPES = frozenset({"float32", "float64", "int64", "uint8"})
 class TensorParameter:
     name: str
     access: str
+    dtype_variable: str | None = None
+    dtypes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,14 @@ class ScalarParameter:
     kind: str
     required: bool
     default: bool | float | int | str | None
+    enum_name: str | None = None
+    enum_values: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DTypeVariable:
+    name: str
+    dtypes: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -87,6 +97,7 @@ class OperationMetadata:
     output_plans: tuple[OutputPlan, ...]
     vjp: VjpMetadata | None = None
     internal: bool = False
+    dtype_variables: tuple[DTypeVariable, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,6 +107,7 @@ class PluginMetadata:
     protocol_version: int
     operations: tuple[OperationMetadata, ...]
     fingerprint: int
+    metadata_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -115,6 +127,7 @@ def metadata_from_reader(
         protocol_version=int(metadata.protocolVersion),
         fingerprint=int(metadata.fingerprint),
         operations=tuple(_operation_from_reader(item) for item in metadata.operations),
+        metadata_version=int(getattr(metadata, "metadataVersion", 1)),
     )
     validate_plugin_metadata(plugin, validate_fingerprint=validate_fingerprint)
     return plugin
@@ -123,8 +136,21 @@ def metadata_from_reader(
 def canonical_metadata_bytes(plugin: PluginMetadata) -> bytes:
     document = asdict(plugin)
     del document["fingerprint"]
+    encoding = _FINGERPRINT_ENCODING
+    if plugin.metadata_version == 1:
+        del document["metadata_version"]
+        for operation in document["operations"]:
+            operation.pop("dtype_variables")
+            for tensor in (*operation["tensor_inputs"], *operation["tensor_outputs"]):
+                tensor.pop("dtype_variable")
+                tensor.pop("dtypes")
+            for scalar in operation["scalar_parameters"]:
+                scalar.pop("enum_name")
+                scalar.pop("enum_values")
+    else:
+        encoding = "wmfs-plugin-metadata-v2"
     return json.dumps(
-        {"encoding": _FINGERPRINT_ENCODING, "metadata": document},
+        {"encoding": encoding, "metadata": document},
         ensure_ascii=True,
         allow_nan=False,
         separators=(",", ":"),
@@ -153,6 +179,8 @@ def validate_plugin_metadata(
     for operation in plugin.operations:
         validate_operation_metadata(operation)
         _validate_vjp(operation, by_id)
+    if plugin.metadata_version not in {1, 2}:
+        raise ValueError("Plugin metadata version is unsupported")
     expected = metadata_fingerprint(plugin)
     if validate_fingerprint and plugin.fingerprint != expected:
         raise ValueError(
@@ -185,10 +213,32 @@ def validate_operation_metadata(operation: OperationMetadata) -> None:
             raise ValueError(f"Required scalar {scalar.name!r} cannot have a default")
         if not scalar.required and scalar.default is None:
             raise ValueError(f"Optional scalar {scalar.name!r} requires a default")
-        if scalar.default is not None and not _scalar_matches_kind(
-            scalar.default, scalar.kind
+        if (
+            scalar.enum_name is None
+            and scalar.default is not None
+            and not _scalar_matches_kind(scalar.default, scalar.kind)
         ):
             raise ValueError(f"Scalar {scalar.name!r} has an invalid default")
+        if scalar.enum_name is not None:
+            if scalar.kind != "int64" or not scalar.enum_values:
+                raise ValueError(f"Scalar {scalar.name!r} has an invalid enum")
+            if len(scalar.enum_values) != len(set(scalar.enum_values)):
+                raise ValueError(f"Scalar {scalar.name!r} has duplicate enum values")
+            if scalar.default is not None and scalar.default not in scalar.enum_values:
+                raise ValueError(f"Scalar {scalar.name!r} has an invalid enum default")
+    variables = {item.name: item for item in operation.dtype_variables}
+    if len(variables) != len(operation.dtype_variables):
+        raise ValueError(f"Operation {operation.name!r} has duplicate dtype variables")
+    for variable in variables.values():
+        _validate_dtypes(variable.dtypes, f"Dtype variable {variable.name!r}")
+    for parameter in operation.tensor_inputs:
+        if parameter.dtype_variable is not None:
+            if parameter.dtype_variable not in variables:
+                raise ValueError(
+                    f"Tensor {parameter.name!r} has an unknown dtype variable"
+                )
+        elif parameter.dtypes:
+            _validate_dtypes(parameter.dtypes, f"Tensor {parameter.name!r}")
     for parameter, plan in zip(
         operation.tensor_outputs, operation.output_plans, strict=True
     ):
@@ -216,7 +266,12 @@ def _operation_from_reader(operation: object) -> OperationMetadata:
     return OperationMetadata(
         str(operation.name),
         tuple(
-            TensorParameter(str(item.name), str(item.access))
+            TensorParameter(
+                str(item.name),
+                str(item.access),
+                str(item.dtypeVariable) or None,
+                tuple(str(value) for value in item.dtypes),
+            )
             for item in operation.tensorInputs
         ),
         tuple(
@@ -229,6 +284,8 @@ def _operation_from_reader(operation: object) -> OperationMetadata:
                 str(item.kind),
                 bool(item.required),
                 _scalar_default_from_reader(item.default),
+                str(item.enumName) or None,
+                tuple(str(value) for value in item.enumValues),
             )
             for item in operation.scalarParameters
         ),
@@ -236,6 +293,10 @@ def _operation_from_reader(operation: object) -> OperationMetadata:
         tuple(_output_plan_from_reader(item) for item in operation.outputPlans),
         vjp,
         bool(operation.internal),
+        tuple(
+            DTypeVariable(str(item.name), tuple(str(value) for value in item.dtypes))
+            for item in operation.dtypeVariables
+        ),
     )
 
 
@@ -288,6 +349,8 @@ def _dtype_from_reader(expression: object) -> DTypeExpression:
         value: object = str(expression.fixed)
     elif kind == "input":
         value = int(expression.input)
+    elif kind == "variable":
+        value = str(expression.variable)
     else:
         value = PromoteTensorScalar(
             int(expression.promoteTensorScalar.tensorInput),
@@ -329,6 +392,9 @@ def _validate_known_output(plan: OutputPlan, operation: OperationMetadata) -> No
         )
         if operation.scalar_parameters[promotion.scalar_parameter].kind == "text":
             raise ValueError("Text scalars cannot participate in dtype promotion")
+    elif dtype.kind == "variable":
+        if dtype.value not in {item.name for item in operation.dtype_variables}:
+            raise ValueError(f"Output plan {plan.name!r} has an unknown dtype variable")
     else:
         raise ValueError(f"Output plan {plan.name!r} has an unknown dtype expression")
 
@@ -427,3 +493,12 @@ def _scalar_matches_kind(value: object, kind: str) -> bool:
     if kind == "int64":
         return isinstance(value, int) and not isinstance(value, bool)
     return isinstance(value, str)
+
+
+def _validate_dtypes(dtypes: tuple[str, ...], label: str) -> None:
+    if (
+        not dtypes
+        or len(dtypes) != len(set(dtypes))
+        or any(item not in SUPPORTED_OUTPUT_DTYPES for item in dtypes)
+    ):
+        raise ValueError(f"{label} has an invalid supported dtype set")

@@ -18,8 +18,11 @@ def add_scalar(a: torch.Tensor, value: float, *, out: torch.Tensor) -> torch.Ten
     return torch.add(a, value, out=out)
 
 
-def nonzero(a: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
-    return out.copy_(torch.nonzero(a))
+def nonzero(a: torch.Tensor, order: int = 0, *, out: torch.Tensor) -> torch.Tensor:
+    result = torch.nonzero(a)
+    if order == 1:
+        result = result.flip(1)
+    return out.copy_(result)
 
 
 def matmul_vjp(

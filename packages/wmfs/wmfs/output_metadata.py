@@ -33,7 +33,9 @@ def evaluate_outputs(
             )
         if not shape or len(shape) > _MAX_RANK or any(item <= 0 for item in shape):
             raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
-        results.append((shape, _evaluate_dtype(known.dtype, inputs, scalars)))
+        results.append(
+            (shape, _evaluate_dtype(known.dtype, operation, inputs, scalars))
+        )
     return tuple(results)
 
 
@@ -130,6 +132,7 @@ def _evaluate_dimension(
 
 def _evaluate_dtype(
     expression: DTypeExpression,
+    operation: OperationMetadata,
     inputs: Sequence[ManagedTensor],
     scalars: Sequence[object],
 ) -> str:
@@ -137,6 +140,11 @@ def _evaluate_dtype(
         return str(expression.value)
     if expression.kind == "input":
         return inputs[int(expression.value)].descriptor.dtype
+    if expression.kind == "variable":
+        for index, parameter in enumerate(operation.tensor_inputs):
+            if parameter.dtype_variable == expression.value:
+                return inputs[index].descriptor.dtype
+        raise ValueError(f"Dtype variable {expression.value!r} is not bound")
     promotion = expression.value
     scalar = scalars[promotion.scalar_parameter]
     if isinstance(scalar, str):

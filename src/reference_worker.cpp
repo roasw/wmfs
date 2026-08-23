@@ -250,6 +250,11 @@ class ReferenceServer final : public ReferencePlugin::Server {
                     "Operation has no dynamic output planner");
             require(invocation.getInputs().size() == 1,
                     "Output planning has an invalid input count");
+            require(invocation.getScalars().size() == 1 &&
+                        invocation.getScalars()[0].isInt64() &&
+                        invocation.getScalars()[0].getInt64() >= 0 &&
+                        invocation.getScalars()[0].getInt64() <= 1,
+                    "Output planning has an invalid enum scalar");
             auto invocation_id = invocation.getInvocationId();
             auto input =
                 buffers_.tensor(invocation.getInputs()[0], invocation_id);
@@ -449,9 +454,14 @@ void execute_ring(const wmfs_ring_record_v1 &command,
         add_scalar_vjp_out(inputs[0].tensor(), outputs[0].tensor());
         break;
     case 6:
-        require(inputs.size() == 1 && outputs.size() == 1,
+        require(inputs.size() == 1 && outputs.size() == 1 &&
+                    command.scalar_count == 1 &&
+                    command.scalars[0].kind == WMFS_RING_SCALAR_INT64 &&
+                    command.scalars[0].bits <= 1,
                 "Invalid nonzero invocation");
-        nonzero_out(inputs[0].tensor(), outputs[0].tensor());
+        nonzero_out(inputs[0].tensor(),
+                    static_cast<std::int64_t>(command.scalars[0].bits),
+                    outputs[0].tensor());
         break;
     default:
         throw std::invalid_argument("Unknown operation ID");
@@ -526,7 +536,10 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
                 }
             }
             if (command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS) {
-                require(command.operation_id == 6 && inputs.size() == 1,
+                require(command.operation_id == 6 && inputs.size() == 1 &&
+                            command.scalar_count == 1 &&
+                            command.scalars[0].kind == WMFS_RING_SCALAR_INT64 &&
+                            command.scalars[0].bits <= 1,
                         "Operation has no dynamic output planner");
                 const auto count =
                     at::count_nonzero(inputs[0].tensor()).item<std::int64_t>();

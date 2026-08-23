@@ -5,10 +5,12 @@ import pytest
 from wmfs_plugin.metadata import (
     DimensionExpression,
     DTypeExpression,
+    DTypeVariable,
     KnownOutput,
     OperationMetadata,
     OutputPlan,
     PluginMetadata,
+    ScalarParameter,
     TensorParameter,
     VjpMetadata,
     canonical_metadata_bytes,
@@ -170,3 +172,67 @@ def test_fingerprint_is_canonical_and_excludes_declared_value() -> None:
     assert metadata_fingerprint(replace(plugin, fingerprint=123)) == fingerprint
     with pytest.raises(ValueError, match="fingerprint"):
         validate_plugin_metadata(replace(plugin, fingerprint=fingerprint ^ 1))
+
+
+def test_v2_metadata_fingerprint_covers_dtype_and_enum_contracts() -> None:
+    operation = replace(
+        _operation(),
+        tensor_inputs=(TensorParameter("input", "readOnly", "T"),),
+        dtype_variables=(DTypeVariable("T", ("float32", "float64")),),
+        scalar_parameters=(
+            ScalarParameter(
+                "mode",
+                "int64",
+                False,
+                "fast",
+                "Mode",
+                ("fast", "accurate"),
+            ),
+        ),
+        output_plans=(
+            OutputPlan(
+                "result",
+                KnownOutput("sameShapeAsInput", 0, DTypeExpression("variable", "T")),
+            ),
+        ),
+    )
+    plugin = PluginMetadata(
+        "example", "1.0.0", PROTOCOL_VERSION, (operation,), 0, metadata_version=2
+    )
+    fingerprint = metadata_fingerprint(plugin)
+
+    assert canonical_metadata_bytes(plugin).startswith(
+        b'{"encoding":"wmfs-plugin-metadata-v2"'
+    )
+    changed = replace(
+        plugin,
+        operations=(
+            replace(
+                operation,
+                dtype_variables=(DTypeVariable("T", ("float32",)),),
+            ),
+        ),
+    )
+    assert metadata_fingerprint(changed) != fingerprint
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        replace(
+            _operation(),
+            tensor_inputs=(TensorParameter("input", "readOnly", "Missing"),),
+        ),
+        replace(
+            _operation(),
+            scalar_parameters=(
+                ScalarParameter("mode", "int64", False, "missing", "Mode", ("ok",)),
+            ),
+        ),
+    ],
+)
+def test_operation_validation_rejects_invalid_dtype_and_enum_metadata(
+    operation: OperationMetadata,
+) -> None:
+    with pytest.raises(ValueError, match="unknown dtype variable|enum default"):
+        validate_operation_metadata(operation)

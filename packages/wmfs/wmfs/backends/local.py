@@ -26,8 +26,14 @@ def _svd(
     return torch.linalg.svd(a, full_matrices=full_matrices, out=out)
 
 
-def _nonzero(a: torch.Tensor, *, out: torch.Tensor | None = None) -> torch.Tensor:
+def _nonzero(
+    a: torch.Tensor, order: int = 0, *, out: torch.Tensor | None = None
+) -> torch.Tensor:
     result = torch.nonzero(a)
+    if int(order) == 1:
+        result = result.flip(1)
+    elif int(order) != 0:
+        raise ValueError("Scalar 'order' is outside enum 'IndexOrder'")
     return result if out is None else out.copy_(result)
 
 

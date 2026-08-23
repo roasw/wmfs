@@ -6,21 +6,45 @@
         "schema": "../schemas/wmfs-reference/reference.capnp",
         "worker": "wmfs-reference-worker"
     },
-    "formatVersion": 1,
-    "generator": "wmfs-tool/1",
-    "interfaceFingerprint": "sha256:b0f2005fae597c883fc5caf85c3b78f88996b0141b5c7a71bdd9d7163efc3123",
-    "metadataFingerprint": "0x549fb18b7a4b6c75",
+    "enums": [
+        {
+            "name": "IndexOrder",
+            "values": [
+                "rowMajor",
+                "columnMajor"
+            ]
+        }
+    ],
+    "formatVersion": 2,
+    "generator": "wmfs-tool/2",
+    "interfaceFingerprint": "sha256:2f39cb403bd717ad108c0c60a7fc6990d348bd20f9a855836ac22cf2a8f3a8f4",
+    "metadataFingerprint": "0xf6ed5672a8a496cb",
     "operationCount": 6,
     "operations": [
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 1,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 },
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "b"
                 }
             ],
@@ -50,10 +74,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "result",
                     "same_shape_as_input": null
@@ -78,10 +103,21 @@
             }
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 2,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 }
             ],
@@ -146,10 +182,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "u",
                     "same_shape_as_input": null
@@ -187,10 +224,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "s",
                     "same_shape_as_input": null
@@ -253,10 +291,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "vh",
                     "same_shape_as_input": null
@@ -265,6 +304,8 @@
             "scalars": [
                 {
                     "default": true,
+                    "enum": null,
+                    "enum_values": [],
                     "kind": "boolean",
                     "name": "fullMatrices",
                     "required": false
@@ -273,10 +314,23 @@
             "vjp": null
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 3,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 }
             ],
@@ -290,7 +344,8 @@
                         "input": 0,
                         "kind": "promote_tensor_scalar",
                         "scalar": 0,
-                        "value": null
+                        "value": null,
+                        "variable": null
                     },
                     "name": "result",
                     "same_shape_as_input": 0
@@ -299,6 +354,8 @@
             "scalars": [
                 {
                     "default": null,
+                    "enum": null,
+                    "enum_values": [],
                     "kind": "float64",
                     "name": "value",
                     "required": true
@@ -318,18 +375,35 @@
             }
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 4,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 },
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "b"
                 },
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "resultCotangent"
                 }
             ],
@@ -340,10 +414,11 @@
                     "allocation": "known",
                     "dimensions": [],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "aGradient",
                     "same_shape_as_input": 0
@@ -352,10 +427,11 @@
                     "allocation": "known",
                     "dimensions": [],
                     "dtype": {
-                        "input": 1,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "bGradient",
                     "same_shape_as_input": 1
@@ -365,10 +441,23 @@
             "vjp": null
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 5,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "resultCotangent"
                 }
             ],
@@ -379,10 +468,11 @@
                     "allocation": "known",
                     "dimensions": [],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "aGradient",
                     "same_shape_as_input": 0
@@ -392,10 +482,18 @@
             "vjp": null
         },
         {
+            "dtype_variables": [],
             "id": 6,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": null,
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
                     "name": "a"
                 }
             ],
@@ -410,7 +508,19 @@
                     "same_shape_as_input": null
                 }
             ],
-            "scalars": [],
+            "scalars": [
+                {
+                    "default": "rowMajor",
+                    "enum": "IndexOrder",
+                    "enum_values": [
+                        "rowMajor",
+                        "columnMajor"
+                    ],
+                    "kind": "int64",
+                    "name": "order",
+                    "required": false
+                }
+            ],
             "vjp": null
         }
     ],
