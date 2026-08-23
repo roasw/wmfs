@@ -1,0 +1,25 @@
+name: Generated interface GCC 4.8 compatibility
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gcc48-generated-interface:
+    name: GCC 4.8.5 generated interfaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Verify generated interfaces with system GCC
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --workdir /workspace \
+            --entrypoint /bin/bash \
+            quay.io/pypa/manylinux2014_x86_64:latest \
+            tests/compatibility/gcc48_compile.sh

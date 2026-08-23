@@ -686,6 +686,7 @@ def _cpp_stub(plugin: Plugin) -> str:
         for item in plugin.operations
         if any(output.allocation == "dynamic" for output in item.outputs)
     )
+    unused_output_capacity = "    (void)output_capacity;\n" if not planner_cases else ""
     features = (1 if plugin.lifecycle.initialize else 0) | (
         2 if plugin.lifecycle.shutdown else 0
     )
@@ -738,7 +739,7 @@ int32_t dispatch(const wmfs_invocation_v1 *invocation) {{
 int32_t plan_outputs(const wmfs_invocation_v1 *invocation,
                      wmfs_output_plan_v1 *outputs, uint32_t output_capacity,
                      uint32_t *output_count) {{
-    if (invocation == 0 || outputs == 0 || output_count == 0 ||
+{unused_output_capacity}    if (invocation == 0 || outputs == 0 || output_count == 0 ||
         invocation->struct_size < sizeof(wmfs_invocation_v1)) {{
         return WMFS_STATUS_INVALID_ARGUMENT;
     }}

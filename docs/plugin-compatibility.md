@@ -25,3 +25,19 @@ changes require a new major version and a startup diagnostic. Cap'n Proto is not
 part of the stable per-operation ABI: it is currently a startup/control
 implementation detail. The stable operation boundary is the generated plugin
 ABI plus the fixed-width ring format.
+
+## GCC 4.8 compatibility boundary
+
+Generated plugin-facing C ABI headers, C++11 wrappers, and generated dispatch
+stubs are compiled in CI with the CentOS 7 system GCC 4.8.5. The check covers
+the current reference artifacts, the mode-neutral fixture, and the immutable
+generated-v1 fixture, including dtype dispatch, configuration declarations,
+lifecycle hooks, and logging declarations. It deliberately does not build the
+reference worker, numerical implementation, runtime, or other private native
+code; those components use the project's normal modern compiler baseline.
+
+`tests/compatibility/gcc48_compile.sh` uses `/usr/bin/gcc` for C99/C11 probes
+and `/usr/bin/g++ -std=c++11 -Wall -Wextra -Werror` for generated C++ artifacts.
+It fails unless both system compilers report exactly version 4.8.5. The GitHub
+Actions job runs it in the maintained `manylinux2014_x86_64` image without
+installing packages from the retired CentOS 7 network repositories.
