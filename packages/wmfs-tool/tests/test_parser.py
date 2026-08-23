@@ -61,3 +61,55 @@ def test_parser_rejects_unsupported_format(tmp_path: Path) -> None:
 
     with pytest.raises(InterfaceError, match="unsupported format_version"):
         load_interface(path)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int64", "uint8"])
+def test_parser_accepts_supported_fixed_output_dtypes(
+    tmp_path: Path, dtype: str
+) -> None:
+    path = tmp_path / "interface.toml"
+    path.write_text(
+        INTERFACE.read_text(encoding="utf-8").replace(
+            "dtype = { input = 0 }", f'dtype = {{ fixed = "{dtype}" }}', 1
+        )
+    )
+
+    load_interface(path)
+
+
+def test_parser_rejects_fixed_dtype_unsupported_by_shared_storage(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "interface.toml"
+    path.write_text(
+        INTERFACE.read_text(encoding="utf-8").replace(
+            "dtype = { input = 0 }", 'dtype = { fixed = "int32" }', 1
+        )
+    )
+
+    with pytest.raises(InterfaceError, match="unsupported fixed dtype"):
+        load_interface(path)
+
+
+@pytest.mark.parametrize(
+    "expression, message",
+    [
+        ("{ constant = 0 }", "constant dimension must be positive"),
+        (
+            "{ maximum = { values = [{ constant = 1 }, { constant = 2 }] } }",
+            "unknown dimension expression 'maximum'",
+        ),
+    ],
+)
+def test_parser_rejects_unsupported_known_output_dimensions(
+    tmp_path: Path, expression: str, message: str
+) -> None:
+    path = tmp_path / "interface.toml"
+    path.write_text(
+        INTERFACE.read_text(encoding="utf-8").replace(
+            "{ input_axis = { input = 0, axis = 0 } }", expression, 1
+        )
+    )
+
+    with pytest.raises(InterfaceError, match=message):
+        load_interface(path)

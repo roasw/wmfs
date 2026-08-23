@@ -1,8 +1,13 @@
 import pytest
 
+from wmfs.protocol.metadata import validate_operation_metadata
 from wmfs.registry import (
+    DimensionExpression,
+    DTypeExpression,
+    KnownOutput,
     OperationMetadata,
     OperationRegistry,
+    OutputPlan,
     PluginMetadata,
     TensorParameter,
     VjpMetadata,
@@ -93,3 +98,50 @@ def test_registry_resolves_internal_vjp_by_plugin_operation_id() -> None:
 
     assert registry.operation_names == ("forward",)
     assert registry.operation_by_id("example", 2) is vjp
+
+
+def _known_output_operation(plan: OutputPlan) -> OperationMetadata:
+    return OperationMetadata(
+        name="operation",
+        tensor_inputs=(TensorParameter("input", "readOnly"),),
+        tensor_outputs=(TensorParameter("result", "readOnly"),),
+        scalar_parameters=(),
+        operation_id=1,
+        output_plans=(plan,),
+    )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int64", "uint8"])
+def test_metadata_accepts_supported_fixed_output_dtypes(dtype: str) -> None:
+    plan = OutputPlan(
+        "result", KnownOutput("sameShapeAsInput", 0, DTypeExpression("fixed", dtype))
+    )
+
+    validate_operation_metadata(_known_output_operation(plan))
+
+
+@pytest.mark.parametrize("dtype", ["bool", "int32", "float16"])
+def test_metadata_rejects_unsupported_fixed_output_dtypes(dtype: str) -> None:
+    plan = OutputPlan(
+        "result", KnownOutput("sameShapeAsInput", 0, DTypeExpression("fixed", dtype))
+    )
+
+    with pytest.raises(ValueError, match="invalid dtype"):
+        validate_operation_metadata(_known_output_operation(plan))
+
+
+@pytest.mark.parametrize("kind, value", [("constant", 0), ("maximum", ())])
+def test_metadata_rejects_unsupported_output_dimensions(
+    kind: str, value: object
+) -> None:
+    plan = OutputPlan(
+        "result",
+        KnownOutput(
+            "dimensions",
+            (DimensionExpression(kind, value),),
+            DTypeExpression("fixed", "float32"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="positive|Unknown output dimension"):
+        validate_operation_metadata(_known_output_operation(plan))

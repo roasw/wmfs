@@ -16,6 +16,7 @@ from wmfs_tool.model import (
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SCALAR_KINDS = {"boolean": bool, "float64": float, "int64": int, "text": str}
+SUPPORTED_OUTPUT_DTYPES = frozenset({"float32", "float64", "int64", "uint8"})
 
 
 class InterfaceError(ValueError):
@@ -212,8 +213,8 @@ def _dimension(value: Any, where: str) -> Dimension:
     kind, body = next(iter(item.items()))
     if kind == "constant":
         constant = _integer(body, f"{where}.constant")
-        if constant < 0:
-            _fail(where, "constant dimension must be non-negative")
+        if constant <= 0:
+            _fail(where, "constant dimension must be positive")
         return Dimension("constant", axis=constant)
     body = _table(body, f"{where}.{kind}")
     if kind == "input_axis":
@@ -223,7 +224,7 @@ def _dimension(value: Any, where: str) -> Dimension:
             input=_integer(_required(body, "input", where), where),
             axis=_integer(_required(body, "axis", where), where),
         )
-    if kind in {"minimum", "maximum"}:
+    if kind == "minimum":
         _keys(body, {"values"}, where)
         values = _list(_required(body, "values", where), where)
         if len(values) < 2:
@@ -432,20 +433,12 @@ def _validate_output_references(operation: Operation, output: Output) -> None:
             raise InterfaceError(
                 f"operation {operation.name!r} dtype references an unknown scalar"
             )
-        if output.dtype.kind == "fixed" and output.dtype.value not in {
-            "bool",
-            "int8",
-            "uint8",
-            "int16",
-            "int32",
-            "int64",
-            "float16",
-            "float32",
-            "float64",
-            "bfloat16",
-        }:
+        if (
+            output.dtype.kind == "fixed"
+            and output.dtype.value not in SUPPORTED_OUTPUT_DTYPES
+        ):
             raise InterfaceError(
-                f"operation {operation.name!r} has an unknown fixed dtype"
+                f"operation {operation.name!r} has an unsupported fixed dtype"
             )
 
 

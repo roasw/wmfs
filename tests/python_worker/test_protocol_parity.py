@@ -42,6 +42,72 @@ def test_runtime_and_worker_metadata_models_have_parity() -> None:
         )
 
 
+def test_runtime_and_worker_output_validation_have_parity() -> None:
+    assert (
+        runtime_metadata.SUPPORTED_OUTPUT_DTYPES
+        == (worker_metadata.SUPPORTED_OUTPUT_DTYPES)
+        == frozenset({"float32", "float64", "int64", "uint8"})
+    )
+
+    for dtype in (*runtime_metadata.SUPPORTED_OUTPUT_DTYPES, "int32"):
+        accepted = []
+        for metadata in (runtime_metadata, worker_metadata):
+            output = metadata.TensorParameter("result", "readOnly")
+            operation = metadata.OperationMetadata(
+                "operation",
+                (metadata.TensorParameter("input", "readOnly"),),
+                (output,),
+                (),
+                1,
+                (
+                    metadata.OutputPlan(
+                        output.name,
+                        metadata.KnownOutput(
+                            "sameShapeAsInput",
+                            0,
+                            metadata.DTypeExpression("fixed", dtype),
+                        ),
+                    ),
+                ),
+            )
+            try:
+                metadata.validate_operation_metadata(operation)
+            except ValueError:
+                accepted.append(False)
+            else:
+                accepted.append(True)
+        assert accepted == [dtype != "int32"] * 2
+
+    for kind, value in (("constant", 0), ("maximum", ())):
+        rejected = []
+        for metadata in (runtime_metadata, worker_metadata):
+            output = metadata.TensorParameter("result", "readOnly")
+            operation = metadata.OperationMetadata(
+                "operation",
+                (metadata.TensorParameter("input", "readOnly"),),
+                (output,),
+                (),
+                1,
+                (
+                    metadata.OutputPlan(
+                        output.name,
+                        metadata.KnownOutput(
+                            "dimensions",
+                            (metadata.DimensionExpression(kind, value),),
+                            metadata.DTypeExpression("fixed", "float32"),
+                        ),
+                    ),
+                ),
+            )
+            try:
+                metadata.validate_operation_metadata(operation)
+            except ValueError:
+                rejected.append(True)
+            else:
+                rejected.append(False)
+        assert rejected == [True, True]
+
+
 def test_runtime_and_worker_ring_abis_and_codecs_have_parity() -> None:
     constants = (
         "MAGIC",

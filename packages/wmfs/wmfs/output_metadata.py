@@ -3,6 +3,7 @@ from collections.abc import Sequence
 import torch
 
 from wmfs.memory.buffers import BufferManager, ManagedTensor
+from wmfs.protocol.metadata import SUPPORTED_OUTPUT_DTYPES
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -47,7 +48,7 @@ def complete_outputs(
             raise ValueError("Worker planned an unknown or statically known output")
         if not shape or len(shape) > _MAX_RANK or any(item <= 0 for item in shape):
             raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
-        if dtype not in {"float32", "float64", "int64", "uint8"}:
+        if dtype not in SUPPORTED_OUTPUT_DTYPES:
             raise ValueError(f"Operation {operation.name!r} produced an invalid dtype")
         results[index] = (shape, dtype)
     if any(item is None for item in results):

@@ -159,7 +159,7 @@ def _metadata_dimension(dimension: Any) -> dict[str, Any]:
         value: Any = dimension.axis
     elif dimension.kind == "input_axis":
         value = {"axis": dimension.axis, "input": dimension.input}
-    elif dimension.kind in {"minimum", "maximum"}:
+    elif dimension.kind == "minimum":
         value = [_metadata_dimension(item) for item in dimension.operands]
     else:
         value = {

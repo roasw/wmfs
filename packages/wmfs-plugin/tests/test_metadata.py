@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from wmfs_plugin.metadata import (
+    DimensionExpression,
     DTypeExpression,
     KnownOutput,
     OperationMetadata,
@@ -13,6 +14,7 @@ from wmfs_plugin.metadata import (
     canonical_metadata_bytes,
     metadata_fingerprint,
     metadata_from_reader,
+    validate_operation_metadata,
     validate_plugin_metadata,
 )
 from wmfs_plugin.schema import PROTOCOL_VERSION, load_runtime_schema
@@ -91,6 +93,47 @@ def test_plugin_validation_rejects_invalid_output_expression() -> None:
 
     with pytest.raises(ValueError, match="invalid tensor input"):
         validate_plugin_metadata(plugin)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int64", "uint8"])
+def test_operation_validation_accepts_supported_fixed_output_dtypes(dtype: str) -> None:
+    operation = _operation()
+    plan = OutputPlan(
+        "result", KnownOutput("sameShapeAsInput", 0, DTypeExpression("fixed", dtype))
+    )
+
+    validate_operation_metadata(replace(operation, output_plans=(plan,)))
+
+
+@pytest.mark.parametrize("dtype", ["bool", "int32", "float16"])
+def test_operation_validation_rejects_unsupported_fixed_output_dtypes(
+    dtype: str,
+) -> None:
+    operation = _operation()
+    plan = OutputPlan(
+        "result", KnownOutput("sameShapeAsInput", 0, DTypeExpression("fixed", dtype))
+    )
+
+    with pytest.raises(ValueError, match="invalid dtype"):
+        validate_operation_metadata(replace(operation, output_plans=(plan,)))
+
+
+@pytest.mark.parametrize("kind, value", [("constant", 0), ("maximum", ())])
+def test_operation_validation_rejects_unsupported_output_dimensions(
+    kind: str, value: object
+) -> None:
+    operation = _operation()
+    plan = OutputPlan(
+        "result",
+        KnownOutput(
+            "dimensions",
+            (DimensionExpression(kind, value),),
+            DTypeExpression("fixed", "float32"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="positive|Unknown output dimension"):
+        validate_operation_metadata(replace(operation, output_plans=(plan,)))
 
 
 def test_plugin_validation_rejects_missing_vjp_operation() -> None:

@@ -6,6 +6,7 @@ _MAX_EXPRESSION_DEPTH = 16
 _MAX_OUTPUTS = 8
 _MAX_RANK = 16
 _FINGERPRINT_ENCODING = "wmfs-plugin-metadata-v1"
+SUPPORTED_OUTPUT_DTYPES = frozenset({"float32", "float64", "int64", "uint8"})
 
 
 @dataclass(frozen=True)
@@ -311,7 +312,7 @@ def _validate_known_output(plan: OutputPlan, operation: OperationMetadata) -> No
         raise ValueError(f"Output plan {plan.name!r} has an unknown shape expression")
     dtype = known.dtype
     if dtype.kind == "fixed":
-        if dtype.value not in {"float32", "float64", "int64", "uint8"}:
+        if dtype.value not in SUPPORTED_OUTPUT_DTYPES:
             raise ValueError(f"Output plan {plan.name!r} has an invalid dtype")
     elif dtype.kind == "input":
         _validate_index(int(dtype.value), len(operation.tensor_inputs), "tensor input")
