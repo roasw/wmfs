@@ -1,0 +1,80 @@
+{
+    "abiVersion": 1,
+    "configuration": null,
+    "deployment": {
+        "bundledNamespace": "wmfs_mode_neutral",
+        "entrySymbol": "wmfs_mode_neutral_plugin_get_api",
+        "interface": "ModeNeutralPlugin",
+        "localProvider": "wmfs_mode_neutral.kernels",
+        "root": "..",
+        "schema": "../schemas/mode-neutral.capnp",
+        "worker": "wmfs-mode-neutral-worker"
+    },
+    "enums": [],
+    "formatVersion": 2,
+    "generator": "wmfs-tool/2",
+    "interfaceFingerprint": "sha256:3d99fd50a9bfeb293cb4304513908266af4519bc7965f262015554d58743f3f9",
+    "lifecycle": {
+        "initialize": false,
+        "shutdown": false
+    },
+    "metadataFingerprint": "0x0c529403fe42b21f",
+    "operationCount": 1,
+    "operations": [
+        {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64"
+                    ],
+                    "name": "T"
+                }
+            ],
+            "id": 101,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
+                    "name": "a"
+                }
+            ],
+            "internal": false,
+            "name": "scale",
+            "outputs": [
+                {
+                    "allocation": "known",
+                    "dimensions": [],
+                    "dtype": {
+                        "input": null,
+                        "kind": "variable",
+                        "scalar": null,
+                        "value": null,
+                        "variable": "T"
+                    },
+                    "name": "result",
+                    "same_shape_as_input": 0
+                }
+            ],
+            "scalars": [
+                {
+                    "default": null,
+                    "enum": null,
+                    "enum_values": [],
+                    "kind": "float64",
+                    "name": "factor",
+                    "required": true
+                }
+            ],
+            "vjp": null
+        }
+    ],
+    "plugin": {
+        "name": "mode_neutral",
+        "namespace": "mode_neutral",
+        "pythonModule": "wmfs_mode_neutral",
+        "version": "0.1.0"
+    },
+    "protocolVersion": 11
+}

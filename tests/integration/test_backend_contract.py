@@ -1,4 +1,8 @@
+import mmap
 import os
+import socket
+import subprocess
+import time
 from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
@@ -46,6 +50,7 @@ def backend(request: pytest.FixtureRequest) -> tuple[Runtime, BackendCapabilitie
         pytest.skip("the native control extension was not compiled")
 
     runtime = Runtime()
+    runtime.load_plugins(PLUGIN_DIRECTORY)
     if capabilities.control_mode is not None:
         runtime.configure_control(capabilities.control_mode)
         runtime.discover_plugins(PLUGIN_DIRECTORY)
@@ -176,7 +181,58 @@ def test_close_restores_reusable_unconfigured_runtime(
     runtime.close()
 
     assert runtime.backend_name is None
+    runtime.load_plugins(PLUGIN_DIRECTORY)
     runtime.use_backend("local")
     torch.testing.assert_close(
         runtime.invoke("add_scalar", torch.ones(2), 2.0), torch.full((2,), 3.0)
     )
+
+
+@pytest.mark.parametrize("name", ["local", "bundled"])
+def test_in_process_initialization_and_calls_create_no_isolated_resources(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if name == "bundled" and not BUNDLED_AVAILABLE:
+        pytest.skip("bundled plugins were not compiled")
+    calls: list[str] = []
+
+    def forbidden(resource: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            calls.append(resource)
+            raise AssertionError(f"in-process backend created {resource}")
+
+        return fail
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden("subprocess"))
+    monkeypatch.setattr(socket, "socketpair", forbidden("socketpair"))
+    monkeypatch.setattr(mmap, "mmap", forbidden("mmap"))
+    for attribute in ("memfd_create", "eventfd"):
+        if hasattr(os, attribute):
+            monkeypatch.setattr(os, attribute, forbidden(attribute))
+
+    candidate = Runtime()
+    candidate.load_plugins(PLUGIN_DIRECTORY)
+    started = time.perf_counter_ns()
+    candidate.use_backend(name)
+    initialization_ns = time.perf_counter_ns() - started
+    source = torch.arange(8.0).reshape(2, 4)[:, ::2]
+    result = candidate.invoke("add_scalar", source, 1.0)
+    candidate.close()
+
+    torch.testing.assert_close(result, source + 1.0)
+    assert not source.is_contiguous()
+    assert initialization_ns < 5_000_000_000
+    assert calls == []
+
+
+def test_dynamic_output_and_views_match_across_backends(
+    backend: tuple[Runtime, BackendCapabilities],
+) -> None:
+    runtime, _capabilities = backend
+    source = torch.tensor([[0.0, 1.0, 0.0, 2.0], [3.0, 0.0, 4.0, 0.0]])[:, ::2]
+
+    indices = runtime.invoke("nonzero", source)
+
+    torch.testing.assert_close(indices, torch.nonzero(source))
+    assert indices.dtype == torch.int64
+    assert indices.shape == (2, 2)

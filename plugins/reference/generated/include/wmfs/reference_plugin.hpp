@@ -7,9 +7,11 @@
 
 #define WMFS_REFERENCE_ABI_VERSION UINT32_C(1)
 #define WMFS_REFERENCE_PROTOCOL_VERSION UINT32_C(11)
+#define WMFS_REFERENCE_PLUGIN_VERSION "0.1.0"
 #define WMFS_REFERENCE_CONFIGURATION_SCHEMA_VERSION UINT32_C(1)
 #define WMFS_REFERENCE_HAS_INITIALIZE 1
 #define WMFS_REFERENCE_HAS_SHUTDOWN 1
+#define WMFS_REFERENCE_METADATA_FINGERPRINT UINT64_C(0xf6ed5672a8a496cb)
 #define WMFS_REFERENCE_INTERFACE_FINGERPRINT                                   \
     "sha256:b734e7a8e8d52ed04df2074b8d936e5c441d6d17f836997d3df9ba964d07cabd"
 #define WMFS_REFERENCE_CONFIGURATION_FINGERPRINT                               \
@@ -18,7 +20,7 @@
 namespace wmfs {
 namespace reference {
 
-enum operation_id : std::uint32_t {
+enum class operation_id : std::uint32_t {
     matmul = UINT32_C(1),
     svd = UINT32_C(2),
     add_scalar = UINT32_C(3),
@@ -76,10 +78,15 @@ std::int32_t add_scalar_vjp_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
 template <typename T>
 std::int32_t nonzero_typed(dtype_tag<T>, const wmfs_invocation_v1 *);
 
+template <typename T>
+std::int32_t nonzero_plan_typed(dtype_tag<T>, const wmfs_invocation_v1 *,
+                                wmfs_output_plan_v1 *, std::uint32_t,
+                                std::uint32_t *);
+
 } // namespace reference
 } // namespace wmfs
 
 extern "C" const wmfs_plugin_api_v1 *
-wmfs_plugin_get_api(std::uint32_t abi_version);
+wmfs_reference_plugin_get_api(std::uint32_t abi_version);
 
 #endif

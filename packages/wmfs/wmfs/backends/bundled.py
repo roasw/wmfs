@@ -3,23 +3,52 @@ from typing import Callable
 
 import torch
 
+from wmfs.plugins import PluginManifest
+from wmfs.registry import OperationMetadata, OperationRegistry
 from wmfs.tensors import TensorFactory, native_tensor
-
-_OPERATION_NAMES = ("add_scalar", "matmul", "svd")
 
 
 class BundledBackend:
-    """Execute build-selected plugin operations in the application process."""
+    """Execute build-selected generated plugin catalogs in process."""
 
     def __init__(self) -> None:
-        self._operations: (
-            dict[str, tuple[Callable[..., object], Callable[..., object]]] | None
-        ) = None
+        self._operations: dict[
+            str, tuple[Callable[..., object], Callable[..., object], OperationMetadata]
+        ] = {}
 
     @property
     def operation_names(self) -> tuple[str, ...]:
-        """Return operations compiled into the bundled plugin."""
-        return _OPERATION_NAMES
+        return tuple(sorted(name for name in self._operations if "." not in name))
+
+    def initialize(
+        self,
+        manifests: tuple[PluginManifest, ...],
+        registry: OperationRegistry,
+    ) -> None:
+        module = import_module("wmfs._bundled")
+        compiled = set(module.plugins)
+        operations: dict[
+            str, tuple[Callable[..., object], Callable[..., object], OperationMetadata]
+        ] = {}
+        for manifest in manifests:
+            if manifest.name not in compiled or manifest.bundled_namespace is None:
+                continue
+            namespace = getattr(torch.ops, manifest.bundled_namespace)
+            for metadata in manifest.metadata.operations:
+                if metadata.internal:
+                    continue
+                packet = getattr(namespace, metadata.name)
+                operations[f"{manifest.name}.{metadata.name}"] = (
+                    packet.default,
+                    packet.out,
+                    metadata,
+                )
+        for name in registry.operation_names:
+            plugin = registry.plugin_for_operation(name)
+            qualified = f"{plugin}.{name}"
+            if qualified in operations:
+                operations[name] = operations[qualified]
+        self._operations = operations
 
     def invoke(
         self,
@@ -29,21 +58,49 @@ class BundledBackend:
         out: object | None = None,
         **kwargs: object,
     ) -> object:
-        operations = self._load_operations()
         try:
-            function, out_function = operations[operation]
+            function, out_function, metadata = self._operations[operation]
         except KeyError:
             raise ValueError(f"Unknown operation {operation!r}") from None
-
         if out is None:
-            return function(*args, **kwargs)
-        if operation == "svd":
-            if not isinstance(out, tuple) or len(out) != 3:
-                raise ValueError("svd requires a tuple of three output tensors")
-            out_function(*args, **kwargs, u=out[0], s=out[1], vh=out[2])
-        else:
-            out_function(*args, **kwargs, out=out)
+            return function(*args, **self._scalar_kwargs(metadata, kwargs))
+        outputs = out if isinstance(out, tuple) else (out,)
+        if len(outputs) != len(metadata.tensor_outputs):
+            raise ValueError(
+                f"{metadata.name} requires {len(metadata.tensor_outputs)} output tensors"
+            )
+        output_kwargs = (
+            {"out": outputs[0]}
+            if len(outputs) == 1
+            else {
+                item.name: value
+                for item, value in zip(metadata.tensor_outputs, outputs, strict=True)
+            }
+        )
+        out_function(*args, **self._scalar_kwargs(metadata, kwargs), **output_kwargs)
         return out
+
+    @staticmethod
+    def _scalar_kwargs(
+        metadata: OperationMetadata, kwargs: dict[str, object]
+    ) -> dict[str, object]:
+        result = dict(kwargs)
+        for parameter in metadata.scalar_parameters:
+            python_name = "".join(
+                ("_" + character.lower()) if character.isupper() else character
+                for character in parameter.name
+            )
+            if parameter.enum_name is not None and python_name in result:
+                try:
+                    result[python_name] = parameter.enum_values.index(
+                        str(result[python_name])
+                    )
+                except ValueError:
+                    raise ValueError(
+                        f"Scalar {python_name!r} is outside enum "
+                        f"{parameter.enum_name!r}"
+                    ) from None
+        return result
 
     def construct_tensor(
         self,
@@ -55,7 +112,6 @@ class BundledBackend:
         requires_grad: bool,
         generator: torch.Generator | None,
     ) -> torch.Tensor:
-        """Construct an ordinary tensor without loading the bundled plugin."""
         return native_tensor(
             factory,
             shape,
@@ -64,26 +120,3 @@ class BundledBackend:
             requires_grad=requires_grad,
             generator=generator,
         )
-
-    def _load_operations(
-        self,
-    ) -> dict[str, tuple[Callable[..., object], Callable[..., object]]]:
-        if self._operations is None:
-            module = import_module("wmfs._bundled")
-            if "reference" not in module.plugins:
-                raise RuntimeError("The reference plugin is not bundled")
-            self._operations = {
-                "add_scalar": (
-                    torch.ops.wmfs_reference.add_scalar.default,
-                    torch.ops.wmfs_reference.add_scalar.out,
-                ),
-                "matmul": (
-                    torch.ops.wmfs_reference.matmul.default,
-                    torch.ops.wmfs_reference.matmul.out,
-                ),
-                "svd": (
-                    torch.ops.wmfs_reference.svd.default,
-                    torch.ops.wmfs_reference.svd.out,
-                ),
-            }
-        return self._operations

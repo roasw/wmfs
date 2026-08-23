@@ -27,6 +27,7 @@ at::Tensor add_scalar(const at::Tensor &a, double value);
 at::Tensor &add_scalar_out(const at::Tensor &a, double value, at::Tensor &out);
 
 /// @brief Return nonzero indices in runtime-owned dynamic storage.
+at::Tensor nonzero(const at::Tensor &a, std::int64_t order);
 at::Tensor &nonzero_out(const at::Tensor &a, std::int64_t order,
                         at::Tensor &out);
 

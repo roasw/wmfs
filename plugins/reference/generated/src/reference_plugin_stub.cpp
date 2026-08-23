@@ -229,6 +229,47 @@ int32_t dispatch(const wmfs_invocation_v1 *invocation) {
     }
 }
 
+int32_t plan_outputs(const wmfs_invocation_v1 *invocation,
+                     wmfs_output_plan_v1 *outputs, uint32_t output_capacity,
+                     uint32_t *output_count) {
+    if (invocation == 0 || outputs == 0 || output_count == 0 ||
+        invocation->struct_size < sizeof(wmfs_invocation_v1)) {
+        return WMFS_STATUS_INVALID_ARGUMENT;
+    }
+    switch (invocation->operation_id) {
+    case UINT32_C(6):
+        if (invocation->input_count != UINT32_C(1) ||
+            invocation->output_count != UINT32_C(0) ||
+            invocation->scalar_count != UINT32_C(1) ||
+            (invocation->input_count && invocation->inputs == 0) ||
+            (invocation->scalar_count && invocation->scalars == 0)) {
+            return WMFS_STATUS_INVALID_ARGUMENT;
+        }
+        switch (invocation->inputs[0].dtype) {
+        case WMFS_DTYPE_FLOAT32:
+            return wmfs::reference::nonzero_plan_typed(
+                wmfs::reference::dtype_tag<float>(), invocation, outputs,
+                output_capacity, output_count);
+        case WMFS_DTYPE_FLOAT64:
+            return wmfs::reference::nonzero_plan_typed(
+                wmfs::reference::dtype_tag<double>(), invocation, outputs,
+                output_capacity, output_count);
+        case WMFS_DTYPE_INT64:
+            return wmfs::reference::nonzero_plan_typed(
+                wmfs::reference::dtype_tag<std::int64_t>(), invocation, outputs,
+                output_capacity, output_count);
+        case WMFS_DTYPE_UINT8:
+            return wmfs::reference::nonzero_plan_typed(
+                wmfs::reference::dtype_tag<std::uint8_t>(), invocation, outputs,
+                output_capacity, output_count);
+        default:
+            return WMFS_STATUS_UNSUPPORTED;
+        }
+    default:
+        return WMFS_STATUS_UNSUPPORTED;
+    }
+}
+
 const wmfs_plugin_api_v1 API = {sizeof(wmfs_plugin_api_v1),
                                 WMFS_REFERENCE_ABI_VERSION,
                                 WMFS_REFERENCE_PROTOCOL_VERSION,
@@ -236,9 +277,11 @@ const wmfs_plugin_api_v1 API = {sizeof(wmfs_plugin_api_v1),
                                 "reference",
                                 "0.1.0",
                                 WMFS_REFERENCE_INTERFACE_FINGERPRINT,
-                                &dispatch};
+                                &dispatch,
+                                &plan_outputs};
 } // namespace
 
-extern "C" const wmfs_plugin_api_v1 *wmfs_plugin_get_api(uint32_t abi_version) {
+extern "C" const wmfs_plugin_api_v1 *
+wmfs_reference_plugin_get_api(uint32_t abi_version) {
     return abi_version == WMFS_REFERENCE_ABI_VERSION ? &API : 0;
 }

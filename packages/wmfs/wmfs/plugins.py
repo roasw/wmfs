@@ -45,6 +45,9 @@ class PluginManifest:
     root: Path
     configuration: ConfigurationMetadata | None = None
     configuration_bytes: bytes = EMPTY_CONFIGURATION_BYTES
+    local_provider: str | None = None
+    bundled_namespace: str | None = None
+    entry_symbol: str | None = None
 
 
 def load_manifest(path: Path) -> PluginManifest:
@@ -123,10 +126,14 @@ def load_manifest(path: Path) -> PluginManifest:
     )
 
     deployment = _object(data["deployment"], "manifest.deployment")
-    _keys(
-        deployment,
-        {"interface", "root", "schema", "worker"},
-        "manifest.deployment",
+    deployment_fields = {"interface", "root", "schema", "worker"}
+    deployment_optional = (
+        {"localProvider", "bundledNamespace", "entrySymbol"}
+        if format_version == 2
+        else set()
+    )
+    _keys_with_optional(
+        deployment, deployment_fields, deployment_optional, "manifest.deployment"
     )
     manifest_directory = path.parent.resolve()
     root = (
@@ -148,6 +155,21 @@ def load_manifest(path: Path) -> PluginManifest:
         worker=_string(deployment["worker"], "deployment.worker"),
         root=root,
         configuration=configuration,
+        local_provider=(
+            _string(deployment["localProvider"], "deployment.localProvider")
+            if "localProvider" in deployment
+            else None
+        ),
+        bundled_namespace=(
+            _string(deployment["bundledNamespace"], "deployment.bundledNamespace")
+            if "bundledNamespace" in deployment
+            else None
+        ),
+        entry_symbol=(
+            _string(deployment["entrySymbol"], "deployment.entrySymbol")
+            if "entrySymbol" in deployment
+            else None
+        ),
     )
 
 

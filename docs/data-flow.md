@@ -148,7 +148,7 @@ Read in this order:
    profiling, completion, and dispatch.
 1. `src/reference_mapped_buffers.cpp`, `MappedBufferCache::tensor`: descriptor
    validation and zero-copy ATen views.
-1. `plugins/reference/generated/reference_dispatch.inc`: generated operation ID
+1. `plugins/reference/generated/src/reference_plugin_stub.cpp`: generated operation ID
    and scalar adaptation.
 1. `src/reference_kernels.cpp`: transport-independent numerical kernels.
 1. `inc/wmfs/reference/kernels.hpp`: documented native kernel API.

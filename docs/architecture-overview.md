@@ -91,7 +91,7 @@ runtime reads the manifest without running the tool or importing plugin code.
 - Generated artifacts have explicit format, ABI, protocol, generator, and
   fingerprint fields; old supported artifacts remain deployment inputs.
 - The generated C ABI is future/plugin-facing. The current C++ reference worker
-  uses `reference_dispatch.inc` for its compatibility RPC methods; its normal
+  uses the generated stable plugin entry table for compatibility RPC methods; its normal
   ring dispatch remains worker-specific and is not the same boundary.
 
 **Read the implementation**
@@ -102,7 +102,7 @@ runtime reads the manifest without running the tool or importing plugin code.
   deterministic output set, fingerprints, ABI, and adapters.
 - [`plugins/reference/generated/manifest.json`](../plugins/reference/generated/manifest.json):
   runtime deployment metadata.
-- [`plugins/reference/generated/reference_dispatch.inc`](../plugins/reference/generated/reference_dispatch.inc):
+- [`plugins/reference/generated/src/reference_plugin_stub.cpp`](../plugins/reference/generated/src/reference_plugin_stub.cpp):
   generated compatibility RPC dispatch.
 - [`tests/integration/test_generated_v1_compatibility.py`](../tests/integration/test_generated_v1_compatibility.py):
   old generated artifact compatibility.

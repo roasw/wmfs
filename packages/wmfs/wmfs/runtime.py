@@ -148,6 +148,9 @@ class Runtime:
         configurations = {name: EMPTY_CONFIGURATION_BYTES for name in loaded}
         with self._condition:
             self._ensure_open()
+            if self._backend_name in {"local", "bundled"}:
+                initialize = getattr(self._backends[self._backend_name], "initialize")
+                initialize(manifests, registry)
             self._registry = registry
             self._manifests = loaded
             self._plugin_configurations = configurations
@@ -333,6 +336,8 @@ class Runtime:
                     f"Unknown backend {name!r}; available backends: {available}"
                 )
             previous_names = self._operation_names_locked()
+            if name in {"local", "bundled"}:
+                self._initialize_in_process_backend_locked(name)
             self._backend_name = name
             if self._operation_names_locked() != previous_names:
                 self._operation_generation += 1
@@ -576,12 +581,11 @@ class Runtime:
         )
 
     def _backend_operation(self, operation: str, backend: Backend) -> str:
-        if backend is self._backends.get("isolated"):
-            return operation
-        try:
-            return self._registry.operation(operation).name
-        except KeyError:
-            return operation
+        return operation
+
+    def _initialize_in_process_backend_locked(self, name: str) -> None:
+        initialize = getattr(self._backends[name], "initialize")
+        initialize(tuple(self._manifests.values()), self._registry)
 
     def _selected_backend_locked(self) -> Backend:
         if self._backend_name is None:

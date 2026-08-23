@@ -1,8 +1,12 @@
+from pathlib import Path
+
 import pytest
 import torch
 
 import wmfs
 import wmfs.api
+
+REFERENCE = Path(__file__).parents[3] / "plugins/reference"
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +32,7 @@ def test_operations_are_absent_before_discovery_or_backend_selection() -> None:
 
 
 def test_selecting_local_backend_publishes_its_operations() -> None:
+    wmfs.runtime.load_plugins(REFERENCE)
     wmfs.runtime.use_backend("local")
 
     assert wmfs.runtime.operation_names == ("add_scalar", "matmul", "nonzero", "svd")
@@ -41,6 +46,7 @@ def test_selecting_local_backend_publishes_its_operations() -> None:
 
 
 def test_dynamic_operation_is_stable_until_catalog_changes() -> None:
+    wmfs.runtime.load_plugins(REFERENCE)
     wmfs.runtime.use_backend("local")
     operation = wmfs.matmul
 
@@ -49,6 +55,7 @@ def test_dynamic_operation_is_stable_until_catalog_changes() -> None:
     assert wmfs.matmul is operation
 
     wmfs.runtime.close()
+    wmfs.runtime.load_plugins(REFERENCE)
     wmfs.runtime.use_backend("local")
     assert wmfs.matmul is not operation
     with pytest.raises(RuntimeError, match="stale plugin catalog"):

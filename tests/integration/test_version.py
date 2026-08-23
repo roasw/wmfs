@@ -16,6 +16,7 @@ def test_distribution_versions_are_derived_from_git() -> None:
         ROOT / "pyproject.toml",
         ROOT / "packages/wmfs-plugin/pyproject.toml",
         ROOT / "plugins/reference/pyproject.toml",
+        ROOT / "plugins/reference-worker/pyproject.toml",
     )
     for project in projects:
         metadata = tomllib.loads(project.read_text())["project"]
@@ -26,10 +27,15 @@ def test_distribution_versions_are_derived_from_git() -> None:
         "dependencies"
     ]
     assert all(not item.startswith("wmfs-plugin") for item in runtime_dependencies)
-    worker_dependencies = tomllib.loads(projects[2].read_text())["project"][
+    local_dependencies = tomllib.loads(projects[2].read_text())["project"][
         "dependencies"
     ]
+    worker_dependencies = tomllib.loads(projects[3].read_text())["project"][
+        "dependencies"
+    ]
+    assert "wmfs-plugin" not in local_dependencies
     assert "wmfs-plugin" in worker_dependencies
+    assert "wmfs-reference" in worker_dependencies
     assert not any(item.startswith("wmfs-plugin==") for item in worker_dependencies)
 
     root_metadata = tomllib.loads(projects[0].read_text())
@@ -88,8 +94,8 @@ def test_plugin_protocol_version_is_independent() -> None:
         ROOT / "plugins/reference/wmfs_reference/_generated.py"
     ).read_text()
     generated_cpp = (
-        ROOT / "plugins/reference/generated/reference_dispatch.inc"
+        ROOT / "plugins/reference/generated/src/reference_plugin_stub.cpp"
     ).read_text()
     assert f'PLUGIN_VERSION = "{plugin_version}"' in generated_python
-    assert f'WMFS_PLUGIN_VERSION[] = "{plugin_version}"' in generated_cpp
+    assert f'"{plugin_version}",' in generated_cpp
     assert PROTOCOL_VERSION > 0

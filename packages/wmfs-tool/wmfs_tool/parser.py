@@ -76,7 +76,14 @@ def load_interface(path: Path) -> Plugin:
     )
     _keys(
         deployment,
-        {"schema", "interface", "root", "worker"},
+        {
+            "schema",
+            "interface",
+            "root",
+            "worker",
+            "local_provider",
+            "bundled_namespace",
+        },
         "interface.deployment",
     )
     operations_data = _list(
@@ -128,6 +135,16 @@ def load_interface(path: Path) -> Plugin:
         deployment_root=_string(
             _required(deployment, "root", "interface.deployment"),
             "deployment.root",
+        ),
+        local_provider=(
+            _dotted_name(deployment["local_provider"], "deployment.local_provider")
+            if "local_provider" in deployment
+            else None
+        ),
+        bundled_namespace=(
+            _identifier(deployment["bundled_namespace"], "deployment.bundled_namespace")
+            if "bundled_namespace" in deployment
+            else None
         ),
         operations=tuple(
             _operation(item, index, enums) for index, item in enumerate(operations_data)
@@ -1114,6 +1131,13 @@ def _identifier(value: Any, where: str) -> str:
     result = _string(value, where)
     if not _IDENTIFIER.fullmatch(result):
         _fail(where, "expected a portable identifier")
+    return result
+
+
+def _dotted_name(value: Any, where: str) -> str:
+    result = _string(value, where)
+    if not result or any(not _IDENTIFIER.fullmatch(part) for part in result.split(".")):
+        _fail(where, "must be a dotted Python module name")
     return result
 
 

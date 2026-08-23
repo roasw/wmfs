@@ -1,57 +1,49 @@
+from importlib import import_module
+from typing import Callable
+
 import torch
 
+from wmfs.plugins import PluginManifest
+from wmfs.registry import OperationRegistry
 from wmfs.tensors import TensorFactory, native_tensor
 
 
-def _add_scalar(
-    a: torch.Tensor, value: object, *, out: torch.Tensor | None = None
-) -> torch.Tensor:
-    if isinstance(value, bool) or not isinstance(value, (float, int)):
-        raise TypeError("Scalar 'value' must be numeric")
-    return torch.add(a, float(value), out=out)
-
-
-def _matmul(
-    a: torch.Tensor, b: torch.Tensor, *, out: torch.Tensor | None = None
-) -> torch.Tensor:
-    return torch.matmul(a, b, out=out)
-
-
-def _svd(
-    a: torch.Tensor,
-    full_matrices: bool = True,
-    *,
-    out: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    return torch.linalg.svd(a, full_matrices=full_matrices, out=out)
-
-
-def _nonzero(
-    a: torch.Tensor, order: int = 0, *, out: torch.Tensor | None = None
-) -> torch.Tensor:
-    result = torch.nonzero(a)
-    if int(order) == 1:
-        result = result.flip(1)
-    elif int(order) != 0:
-        raise ValueError("Scalar 'order' is outside enum 'IndexOrder'")
-    return result if out is None else out.copy_(result)
-
-
-_OPERATIONS = {
-    "add_scalar": _add_scalar,
-    "matmul": _matmul,
-    "nonzero": _nonzero,
-    "svd": _svd,
-}
-
-
 class LocalBackend:
-    """Execute operations directly in the application process."""
+    """Execute manifest-selected ordinary Torch providers in process."""
+
+    def __init__(self) -> None:
+        self._operations: dict[str, Callable[..., object]] = {}
 
     @property
     def operation_names(self) -> tuple[str, ...]:
-        """Return the operations implemented by this backend."""
-        return tuple(sorted(_OPERATIONS))
+        return tuple(sorted(name for name in self._operations if "." not in name))
+
+    def initialize(
+        self,
+        manifests: tuple[PluginManifest, ...],
+        registry: OperationRegistry,
+    ) -> None:
+        operations: dict[str, Callable[..., object]] = {}
+        for manifest in manifests:
+            if manifest.local_provider is None:
+                continue
+            provider = import_module(manifest.local_provider)
+            for metadata in manifest.metadata.operations:
+                if metadata.internal:
+                    continue
+                implementation = getattr(provider, metadata.name, None)
+                if not callable(implementation):
+                    raise RuntimeError(
+                        f"Local provider {manifest.local_provider!r} does not "
+                        f"implement {metadata.name!r}"
+                    )
+                operations[f"{manifest.name}.{metadata.name}"] = implementation
+        for name in registry.operation_names:
+            plugin = registry.plugin_for_operation(name)
+            qualified = f"{plugin}.{name}"
+            if qualified in operations:
+                operations[name] = operations[qualified]
+        self._operations = operations
 
     def invoke(
         self,
@@ -62,7 +54,7 @@ class LocalBackend:
         **kwargs: object,
     ) -> object:
         try:
-            function = _OPERATIONS[operation]
+            function = self._operations[operation]
         except KeyError:
             raise ValueError(f"Unknown operation {operation!r}") from None
         return function(*args, out=out, **kwargs)
@@ -77,7 +69,6 @@ class LocalBackend:
         requires_grad: bool,
         generator: torch.Generator | None,
     ) -> torch.Tensor:
-        """Construct an ordinary tensor with the selected Torch factory."""
         return native_tensor(
             factory,
             shape,

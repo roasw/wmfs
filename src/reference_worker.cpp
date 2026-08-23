@@ -2,6 +2,7 @@
 #include "wmfs/reference/mapped_buffers.hpp"
 #include "wmfs/ring.hpp"
 #include "wmfs/unique_fd.hpp"
+#include <wmfs/reference_plugin.hpp>
 
 #include <ATen/ops/count_nonzero.h>
 #include <c10/core/InferenceMode.h>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -153,7 +155,131 @@ void require(bool condition, const char *message) {
     }
 }
 
-#include "reference_dispatch.inc"
+constexpr char WMFS_PLUGIN_VERSION[] = WMFS_REFERENCE_PLUGIN_VERSION;
+constexpr std::uint64_t WMFS_METADATA_FINGERPRINT =
+    WMFS_REFERENCE_METADATA_FINGERPRINT;
+
+std::uint32_t abi_dtype(at::ScalarType dtype) {
+    switch (dtype) {
+    case at::kFloat:
+        return WMFS_DTYPE_FLOAT32;
+    case at::kDouble:
+        return WMFS_DTYPE_FLOAT64;
+    case at::kLong:
+        return WMFS_DTYPE_INT64;
+    case at::kByte:
+        return WMFS_DTYPE_UINT8;
+    default:
+        throw std::invalid_argument("Unsupported tensor dtype");
+    }
+}
+
+wmfs_tensor_v1 abi_tensor(at::Tensor &tensor) {
+    require(tensor.dim() <= static_cast<std::int64_t>(WMFS_PLUGIN_MAX_RANK),
+            "Tensor rank exceeds plugin ABI limit");
+    wmfs_tensor_v1 result{};
+    result.struct_size = sizeof(result);
+    result.dtype = abi_dtype(tensor.scalar_type());
+    result.rank = static_cast<std::uint32_t>(tensor.dim());
+    result.byte_length = tensor.nbytes();
+    result.data = tensor.data_ptr();
+    for (std::uint32_t index = 0; index < result.rank; ++index) {
+        result.shape[index] = tensor.size(index);
+        result.strides[index] = tensor.stride(index);
+    }
+    return result;
+}
+
+void dispatch_entry(std::uint32_t operation_id,
+                    std::vector<TensorLease> &inputs,
+                    std::vector<TensorLease> &outputs,
+                    const std::vector<wmfs_scalar_v1> &scalars) {
+    std::vector<wmfs_tensor_v1> input_values;
+    std::vector<wmfs_tensor_v1> output_values;
+    input_values.reserve(inputs.size());
+    output_values.reserve(outputs.size());
+    for (auto &input : inputs)
+        input_values.push_back(abi_tensor(input.tensor()));
+    for (auto &output : outputs)
+        output_values.push_back(abi_tensor(output.tensor()));
+    wmfs_invocation_v1 invocation{};
+    invocation.struct_size = sizeof(invocation);
+    invocation.operation_id = operation_id;
+    invocation.input_count = static_cast<std::uint32_t>(input_values.size());
+    invocation.output_count = static_cast<std::uint32_t>(output_values.size());
+    invocation.scalar_count = static_cast<std::uint32_t>(scalars.size());
+    invocation.inputs = input_values.data();
+    invocation.outputs = output_values.data();
+    invocation.scalars = scalars.data();
+    const auto *api = wmfs_reference_plugin_get_api(WMFS_PLUGIN_ABI_VERSION);
+    require(api != nullptr,
+            "Generated plugin entry table rejected ABI version");
+    const auto status = api->dispatch(&invocation);
+    require(status == WMFS_STATUS_OK,
+            "Generated plugin dispatch rejected invocation");
+}
+
+std::vector<wmfs_output_plan_v1>
+plan_entry(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
+           const std::vector<wmfs_scalar_v1> &scalars) {
+    std::vector<wmfs_tensor_v1> input_values;
+    input_values.reserve(inputs.size());
+    for (auto &input : inputs)
+        input_values.push_back(abi_tensor(input.tensor()));
+    wmfs_invocation_v1 invocation{};
+    invocation.struct_size = sizeof(invocation);
+    invocation.operation_id = operation_id;
+    invocation.input_count = static_cast<std::uint32_t>(input_values.size());
+    invocation.scalar_count = static_cast<std::uint32_t>(scalars.size());
+    invocation.inputs = input_values.data();
+    invocation.scalars = scalars.data();
+    std::vector<wmfs_output_plan_v1> outputs(WMFS_PLUGIN_MAX_OUTPUTS);
+    std::uint32_t count = 0;
+    const auto *api = wmfs_reference_plugin_get_api(WMFS_PLUGIN_ABI_VERSION);
+    require(api != nullptr &&
+                api->struct_size >= offsetof(wmfs_plugin_api_v1, plan_outputs) +
+                                        sizeof(api->plan_outputs) &&
+                api->plan_outputs != nullptr,
+            "Generated plugin has no output planner");
+    const auto status =
+        api->plan_outputs(&invocation, outputs.data(), outputs.size(), &count);
+    require(status == WMFS_STATUS_OK && count <= outputs.size(),
+            "Generated output planner rejected invocation");
+    outputs.resize(count);
+    return outputs;
+}
+
+void execute_known(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
+                   std::vector<TensorLease> &outputs,
+                   capnp::List<ScalarArgument>::Reader scalars) {
+    std::vector<wmfs_scalar_v1> values;
+    values.reserve(scalars.size());
+    for (auto scalar : scalars) {
+        wmfs_scalar_v1 value{};
+        value.struct_size = sizeof(value);
+        value.parameter_index = scalar.getParameter();
+        if (scalar.isBoolean()) {
+            value.kind = WMFS_SCALAR_BOOLEAN;
+            value.bits = scalar.getBoolean();
+        } else if (scalar.isFloat64()) {
+            value.kind = WMFS_SCALAR_FLOAT64;
+            const auto number = scalar.getFloat64();
+            std::memcpy(&value.bits, &number, sizeof(number));
+        } else if (scalar.isInt64()) {
+            value.kind = WMFS_SCALAR_INT64;
+            value.bits = static_cast<std::uint64_t>(scalar.getInt64());
+        } else {
+            auto text = scalar.getText();
+            value.kind = WMFS_SCALAR_TEXT;
+            value.text = text.cStr();
+            value.text_length = text.size();
+        }
+        values.push_back(value);
+    }
+    dispatch_entry(operation_id, inputs, outputs, values);
+}
+
+DType dtype_to_capnp(std::uint32_t dtype);
 
 class ReferenceServer final : public ReferencePlugin::Server {
   public:
@@ -246,25 +372,44 @@ class ReferenceServer final : public ReferencePlugin::Server {
     kj::Promise<void> planOutputs(PlanOutputsContext context) override {
         return translate_errors([&] {
             auto invocation = context.getParams().getInvocation();
-            require(invocation.getOperationId() == 6,
-                    "Operation has no dynamic output planner");
-            require(invocation.getInputs().size() == 1,
-                    "Output planning has an invalid input count");
-            require(invocation.getScalars().size() == 1 &&
-                        invocation.getScalars()[0].isInt64() &&
-                        invocation.getScalars()[0].getInt64() >= 0 &&
-                        invocation.getScalars()[0].getInt64() <= 1,
-                    "Output planning has an invalid enum scalar");
             auto invocation_id = invocation.getInvocationId();
-            auto input =
-                buffers_.tensor(invocation.getInputs()[0], invocation_id);
+            std::vector<TensorLease> inputs;
+            for (auto descriptor : invocation.getInputs())
+                inputs.push_back(buffers_.tensor(descriptor, invocation_id));
+            std::vector<wmfs_scalar_v1> scalars;
+            for (auto scalar : invocation.getScalars()) {
+                wmfs_scalar_v1 value{};
+                value.struct_size = sizeof(value);
+                value.parameter_index = scalar.getParameter();
+                value.kind = scalar.isInt64()     ? WMFS_SCALAR_INT64
+                             : scalar.isBoolean() ? WMFS_SCALAR_BOOLEAN
+                                                  : WMFS_SCALAR_FLOAT64;
+                if (scalar.isFloat64()) {
+                    const auto number = scalar.getFloat64();
+                    std::memcpy(&value.bits, &number, sizeof(number));
+                } else {
+                    value.bits =
+                        scalar.isInt64()
+                            ? static_cast<std::uint64_t>(scalar.getInt64())
+                            : scalar.getBoolean();
+                }
+                scalars.push_back(value);
+            }
             auto outcome = context.getResults().initOutcome();
-            std::int64_t count;
             try {
-                count = at::count_nonzero(input.tensor()).item<std::int64_t>();
-                if (count == 0)
-                    throw std::invalid_argument(
-                        "nonzero does not yet support an empty result");
+                auto planned =
+                    plan_entry(invocation.getOperationId(), inputs, scalars);
+                outcome.setSuccess();
+                auto outputs = context.getResults().initOutputs(planned.size());
+                for (std::size_t index = 0; index < planned.size(); ++index) {
+                    outputs[index].setOutput(planned[index].output_index);
+                    auto shape = outputs[index].initShape(planned[index].rank);
+                    for (std::uint32_t axis = 0; axis < planned[index].rank;
+                         ++axis)
+                        shape.set(axis, planned[index].shape[axis]);
+                    outputs[index].setDtype(
+                        dtype_to_capnp(planned[index].dtype));
+                }
             } catch (const OperationFailure &error) {
                 auto result = outcome.initOperationError();
                 result.setType(error.type);
@@ -276,13 +421,6 @@ class ReferenceServer final : public ReferencePlugin::Server {
                 result.setMessage(error.what_without_backtrace());
                 return;
             }
-            outcome.setSuccess();
-            auto outputs = context.getResults().initOutputs(1);
-            outputs[0].setOutput(0);
-            auto shape = outputs[0].initShape(2);
-            shape.set(0, static_cast<std::uint64_t>(count));
-            shape.set(1, static_cast<std::uint64_t>(input.tensor().dim()));
-            outputs[0].setDtype(DType::INT64);
         });
     }
 
@@ -415,57 +553,21 @@ TensorLease ring_tensor(MappedBufferCache &buffers,
 void execute_ring(const wmfs_ring_record_v1 &command,
                   std::vector<TensorLease> &inputs,
                   std::vector<TensorLease> &outputs) {
-    switch (command.operation_id) {
-    case 1:
-        require(inputs.size() == 2 && outputs.size() == 1 &&
-                    command.scalar_count == 0,
-                "Invalid matmul invocation");
-        matmul_out(inputs[0].tensor(), inputs[1].tensor(), outputs[0].tensor());
-        break;
-    case 2:
-        require(inputs.size() == 1 && outputs.size() == 3 &&
-                    command.scalar_count == 1 &&
-                    command.scalars[0].kind == WMFS_RING_SCALAR_BOOLEAN &&
-                    command.scalars[0].parameter_index == 0,
-                "Invalid svd invocation");
-        svd_out(inputs[0].tensor(), command.scalars[0].bits != 0,
-                outputs[0].tensor(), outputs[1].tensor(), outputs[2].tensor());
-        break;
-    case 3: {
-        require(inputs.size() == 1 && outputs.size() == 1 &&
-                    command.scalar_count == 1 &&
-                    command.scalars[0].kind == WMFS_RING_SCALAR_FLOAT64,
-                "Invalid add_scalar invocation");
-        double value;
-        std::memcpy(&value, &command.scalars[0].bits, sizeof(value));
-        add_scalar_out(inputs[0].tensor(), value, outputs[0].tensor());
-        break;
+    std::vector<wmfs_scalar_v1> scalars;
+    scalars.reserve(command.scalar_count);
+    for (std::uint16_t index = 0; index < command.scalar_count; ++index) {
+        const auto &source = command.scalars[index];
+        wmfs_scalar_v1 value{};
+        value.struct_size = sizeof(value);
+        value.parameter_index = source.parameter_index;
+        value.bits = source.bits;
+        value.kind =
+            source.kind == WMFS_RING_SCALAR_BOOLEAN   ? WMFS_SCALAR_BOOLEAN
+            : source.kind == WMFS_RING_SCALAR_FLOAT64 ? WMFS_SCALAR_FLOAT64
+                                                      : WMFS_SCALAR_INT64;
+        scalars.push_back(value);
     }
-    case 4:
-        require(inputs.size() == 3 && outputs.size() == 2,
-                "Invalid matmul_vjp invocation");
-        matmul_vjp_out(inputs[0].tensor(), inputs[1].tensor(),
-                       inputs[2].tensor(), outputs[0].tensor(),
-                       outputs[1].tensor());
-        break;
-    case 5:
-        require(inputs.size() == 1 && outputs.size() == 1,
-                "Invalid add_scalar_vjp invocation");
-        add_scalar_vjp_out(inputs[0].tensor(), outputs[0].tensor());
-        break;
-    case 6:
-        require(inputs.size() == 1 && outputs.size() == 1 &&
-                    command.scalar_count == 1 &&
-                    command.scalars[0].kind == WMFS_RING_SCALAR_INT64 &&
-                    command.scalars[0].bits <= 1,
-                "Invalid nonzero invocation");
-        nonzero_out(inputs[0].tensor(),
-                    static_cast<std::int64_t>(command.scalars[0].bits),
-                    outputs[0].tensor());
-        break;
-    default:
-        throw std::invalid_argument("Unknown operation ID");
-    }
+    dispatch_entry(command.operation_id, inputs, outputs, scalars);
 }
 
 void set_error(wmfs_ring_record_v1 &completion, std::uint32_t status,
@@ -536,23 +638,32 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
                 }
             }
             if (command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS) {
-                require(command.operation_id == 6 && inputs.size() == 1 &&
-                            command.scalar_count == 1 &&
-                            command.scalars[0].kind == WMFS_RING_SCALAR_INT64 &&
-                            command.scalars[0].bits <= 1,
-                        "Operation has no dynamic output planner");
-                const auto count =
-                    at::count_nonzero(inputs[0].tensor()).item<std::int64_t>();
-                if (count == 0)
-                    throw std::invalid_argument(
-                        "nonzero does not yet support an empty result");
-                completion.planned_output_count = 1;
-                completion.planned_outputs[0].dtype = WMFS_RING_DTYPE_INT64;
-                completion.planned_outputs[0].rank = 2;
-                completion.planned_outputs[0].output_index = 0;
-                completion.planned_outputs[0].shape[0] = count;
-                completion.planned_outputs[0].shape[1] =
-                    inputs[0].tensor().dim();
+                std::vector<wmfs_scalar_v1> scalars;
+                for (std::uint16_t index = 0; index < command.scalar_count;
+                     ++index) {
+                    wmfs_scalar_v1 value{};
+                    value.struct_size = sizeof(value);
+                    value.parameter_index =
+                        command.scalars[index].parameter_index;
+                    value.kind = WMFS_SCALAR_INT64;
+                    value.bits = command.scalars[index].bits;
+                    scalars.push_back(value);
+                }
+                auto planned =
+                    plan_entry(command.operation_id, inputs, scalars);
+                completion.planned_output_count = planned.size();
+                for (std::size_t index = 0; index < planned.size(); ++index) {
+                    completion.planned_outputs[index].dtype =
+                        planned[index].dtype;
+                    completion.planned_outputs[index].rank =
+                        planned[index].rank;
+                    completion.planned_outputs[index].output_index =
+                        planned[index].output_index;
+                    for (std::uint32_t axis = 0; axis < planned[index].rank;
+                         ++axis)
+                        completion.planned_outputs[index].shape[axis] =
+                            planned[index].shape[axis];
+                }
             } else if (command.kind == WMFS_RING_COMMAND_INVOKE) {
                 const auto kernel = std::chrono::steady_clock::now();
                 execute_ring(command, inputs, outputs);

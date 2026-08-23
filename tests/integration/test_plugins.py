@@ -16,6 +16,7 @@ from wmfs.runtime import Runtime
 from wmfs.transport.worker_process import WorkerSession
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
+MODE_NEUTRAL_FIXTURE = Path(__file__).parents[1] / "fixtures/mode_neutral"
 
 
 def test_finds_reference_plugin_manifest() -> None:
@@ -33,6 +34,7 @@ def test_discovers_operations_from_generated_manifest() -> None:
 
     assert registry.plugin_names == ("reference",)
     assert registry.operation_names == ("add_scalar", "matmul", "nonzero", "svd")
+
     assert registry.plugin("reference").protocol_version == 11
     assert registry.plugin("reference").fingerprint != 0
 
@@ -68,6 +70,24 @@ def test_discovers_operations_from_generated_manifest() -> None:
         "rowMajor",
         "columnMajor",
     )
+
+
+def test_non_reference_fixture_loads_without_runtime_catalog_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(MODE_NEUTRAL_FIXTURE))
+    candidate = Runtime()
+    candidate.load_plugins(MODE_NEUTRAL_FIXTURE)
+    candidate.use_backend("local")
+    source = torch.arange(6.0).reshape(2, 3).T
+    output = torch.empty_like(source)
+
+    assert candidate.plugin_names == ("mode_neutral",)
+    assert candidate.operation_names == ("scale",)
+    assert candidate.invoke("mode_neutral.scale", source, 2.5, out=output) is output
+    torch.testing.assert_close(output, source * 2.5)
+    assert not source.is_contiguous()
+    candidate.close()
 
 
 def test_runtime_registers_discovered_operations() -> None:

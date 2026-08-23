@@ -1,6 +1,7 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
+from pathlib import Path
 
 import pytest
 import torch
@@ -47,6 +48,7 @@ def test_close_waits_for_accepted_call_and_rejects_calls_while_closing() -> None
         closing.result(timeout=2)
 
     candidate.use_backend("local")
+    candidate.load_plugins(Path(__file__).parents[3] / "plugins/reference")
     torch.testing.assert_close(
         candidate.invoke("add_scalar", torch.ones(1), 2.0), torch.full((1,), 3.0)
     )

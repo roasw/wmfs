@@ -21,7 +21,7 @@ from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.local import LocalBackend
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
-from wmfs.registry import PluginMetadata
+from wmfs.registry import OperationRegistry, PluginMetadata
 from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import WorkerSession
 
@@ -213,8 +213,11 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             f"found {len(manifests)}"
         )
     manifest = manifests[0]
+    registry = OperationRegistry()
+    registry.register(manifest.metadata)
     local = LocalBackend()
-    bundled = _bundled_backend(config)
+    local.initialize(manifests, registry)
+    bundled = _bundled_backend(config, manifests, registry)
     with BufferManager(
         mode=config.memory_mode, arena_bytes=config.arena_bytes
     ) as discovery_buffers:
@@ -1203,8 +1206,15 @@ def _overhead(
     }
 
 
-def _bundled_backend(config: BenchmarkConfig) -> Any:
+def _bundled_backend(
+    config: BenchmarkConfig,
+    manifests: tuple[Any, ...],
+    registry: OperationRegistry,
+) -> Any:
     backend = config.bundled_backend or BundledBackend()
+    initialize = getattr(backend, "initialize", None)
+    if initialize is not None:
+        initialize(manifests, registry)
     try:
         backend.invoke("add_scalar", torch.zeros(1, dtype=config.dtype), 0.0)
     except (ImportError, RuntimeError) as error:

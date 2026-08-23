@@ -74,6 +74,7 @@ in
   bundled-package = packages.bundled-check;
   benchmark-package = benchmark;
   plugin-package = packages.wmfs-plugin;
+  reference-local-package = packages.reference-local;
   tool-package = packages.wmfs-tool;
   tool-tests =
     pkgs.runCommand "wmfs-tool-tests"
@@ -231,6 +232,9 @@ in
         wmfs-tool generate --check \
           --interface ${source}/plugins/reference/interface.toml \
           --output ${source}/plugins/reference/generated
+        wmfs-tool generate --check \
+          --interface ${source}/tests/fixtures/mode_neutral/interface.toml \
+          --output ${source}/tests/fixtures/mode_neutral/generated
         touch $out
       '';
 

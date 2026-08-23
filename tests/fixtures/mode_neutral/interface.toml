@@ -1,0 +1,38 @@
+format_version = 2
+abi_version = 1
+protocol_version = 11
+
+[plugin]
+name = "mode_neutral"
+version = "0.1.0"
+namespace = "mode_neutral"
+python_module = "wmfs_mode_neutral"
+
+[deployment]
+schema = "../schemas/mode-neutral.capnp"
+interface = "ModeNeutralPlugin"
+root = ".."
+worker = "wmfs-mode-neutral-worker"
+local_provider = "wmfs_mode_neutral.kernels"
+bundled_namespace = "wmfs_mode_neutral"
+
+[[operations]]
+id = 101
+name = "scale"
+
+[[operations.dtype_variables]]
+name = "T"
+dtypes = ["float32", "float64"]
+
+[[operations.inputs]]
+name = "a"
+dtype = { variable = "T" }
+
+[[operations.scalars]]
+name = "factor"
+kind = "float64"
+
+[[operations.outputs]]
+name = "result"
+same_shape_as_input = 0
+dtype = { variable = "T" }

@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 from importlib.util import find_spec
+from pathlib import Path
 
 import pytest
 import torch
@@ -10,6 +11,7 @@ import wmfs
 from wmfs import runtime
 
 BUNDLED_AVAILABLE = find_spec("wmfs._bundled") is not None
+PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 if os.environ.get("WMFS_REQUIRE_BUNDLED") == "1" and not BUNDLED_AVAILABLE:
     raise RuntimeError("The bundled package check requires wmfs._bundled")
 
@@ -34,6 +36,7 @@ def add_scalar(*args: object, **kwargs: object) -> object:
 @pytest.fixture
 def bundled_runtime() -> None:
     runtime.close()
+    runtime.load_plugins(PLUGIN_DIRECTORY)
     runtime.use_backend("bundled")
     try:
         yield
@@ -41,7 +44,7 @@ def bundled_runtime() -> None:
         runtime.close()
 
 
-def test_bundled_extension_loads_only_when_selected() -> None:
+def test_bundled_extension_loads_during_explicit_initialization() -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -52,13 +55,15 @@ from importlib.util import find_spec
 
 import torch
 import wmfs
+import os
+from pathlib import Path
 
 assert find_spec("wmfs._bundled") is not None
 assert "wmfs._bundled" not in sys.modules
+wmfs.runtime.load_plugins(Path(os.environ["WMFS_TEST_PLUGIN_DIRECTORY"]))
 wmfs.runtime.use_backend("bundled")
-assert "wmfs._bundled" not in sys.modules
+assert "wmfs._bundled" in sys.modules
 value = wmfs.ones(1)
-assert "wmfs._bundled" not in sys.modules
 assert not hasattr(value.untyped_storage(), "_wmfs_allocation")
 torch.testing.assert_close(wmfs.add_scalar(value, 1.0), value + 1.0)
 assert "wmfs._bundled" in sys.modules
@@ -68,6 +73,7 @@ wmfs.runtime.close()
         ],
         check=True,
         capture_output=True,
+        env={**os.environ, "WMFS_TEST_PLUGIN_DIRECTORY": str(PLUGIN_DIRECTORY)},
         text=True,
     )
 
@@ -122,10 +128,12 @@ def test_bundled_functional_operations_preserve_autograd(
 def test_runtime_close_preserves_bundled_backend() -> None:
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     runtime.close()
+    runtime.load_plugins(PLUGIN_DIRECTORY)
     runtime.use_backend("bundled")
     torch.testing.assert_close(add_scalar(value, 1.0), value + 1.0)
     runtime.close()
 
+    runtime.load_plugins(PLUGIN_DIRECTORY)
     runtime.use_backend("bundled")
     assert runtime.backend_name == "bundled"
     torch.testing.assert_close(matmul(value, value), value @ value)

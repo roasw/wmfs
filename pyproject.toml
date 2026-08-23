@@ -34,6 +34,7 @@ include = [
     "/packages/wmfs/tests/**",
     "/packages/wmfs/wmfs/protocol/schemas/**",
     "/plugins/reference/generated/**",
+    "/plugins/reference/bundled.cmake",
     "/plugins/reference/schemas/**",
     "/src/**",
     "/tests/**",

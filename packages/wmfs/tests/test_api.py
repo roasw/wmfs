@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -9,6 +11,7 @@ from wmfs.runtime import Runtime
 @pytest.fixture(autouse=True)
 def local_runtime() -> None:
     runtime.close()
+    runtime.load_plugins(Path(__file__).parents[3] / "plugins/reference")
     runtime.use_backend("local")
     try:
         yield

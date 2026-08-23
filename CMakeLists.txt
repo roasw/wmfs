@@ -110,19 +110,31 @@ if(BUILD_TESTING)
   add_test(NAME wmfs-ring COMMAND wmfs-ring-test)
 endif()
 
-set(WMFS_BUNDLE_REFERENCE OFF)
+set(WMFS_BUNDLED_PLUGIN_NAMES "")
+set(WMFS_BUNDLED_SOURCES "")
+set(WMFS_BUNDLED_LIBRARIES "")
+set(WMFS_BUNDLED_COMPILE_OPTIONS "")
+set(WMFS_BUNDLED_INCLUDE_DIRECTORIES "")
 foreach(plugin IN LISTS WMFS_BUNDLED_PLUGINS)
-  if(plugin STREQUAL "reference")
-    set(WMFS_BUNDLE_REFERENCE ON)
+  if(IS_ABSOLUTE "${plugin}")
+    set(plugin_descriptor "${plugin}")
+    get_filename_component(plugin_name "${plugin}" DIRECTORY)
+    get_filename_component(plugin_name "${plugin_name}" NAME)
   else()
-    message(FATAL_ERROR "Unknown bundled plugin: ${plugin}")
+    set(plugin_descriptor "${CMAKE_CURRENT_SOURCE_DIR}/plugins/${plugin}/bundled.cmake")
+    set(plugin_name "${plugin}")
   endif()
+  if(NOT EXISTS "${plugin_descriptor}")
+    message(FATAL_ERROR "Bundled plugin descriptor does not exist: ${plugin_descriptor}")
+  endif()
+  list(APPEND WMFS_BUNDLED_PLUGIN_NAMES "${plugin_name}")
+  include("${plugin_descriptor}")
 endforeach()
-if(WMFS_BUNDLE_REFERENCE AND NOT WMFS_BUILD_PYTHON_RUNTIME)
+if(WMFS_BUNDLED_PLUGIN_NAMES AND NOT WMFS_BUILD_PYTHON_RUNTIME)
   message(FATAL_ERROR "Bundled plugins require the Python runtime")
 endif()
 
-if(WMFS_BUILD_REFERENCE_WORKER OR WMFS_BUNDLE_REFERENCE)
+if(WMFS_BUILD_REFERENCE_WORKER AND NOT TARGET wmfs-reference-kernels)
   find_package(Torch CONFIG REQUIRED)
   add_library(wmfs-reference-kernels STATIC src/reference_kernels.cpp)
   set_target_properties(
@@ -193,16 +205,24 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
     COMPONENT runtime
   )
 
-  if(WMFS_BUNDLE_REFERENCE)
+  if(WMFS_BUNDLED_PLUGIN_NAMES)
+    list(JOIN WMFS_BUNDLED_PLUGIN_NAMES "," WMFS_BUNDLED_PLUGIN_NAMES_CSV)
     nanobind_add_module(
       wmfs-bundled-reference
       NB_STATIC
       src/bundled_module.cpp
-      src/reference_torch_ops.cpp
+      ${WMFS_BUNDLED_SOURCES}
     )
     add_library(wmfs::bundled-reference ALIAS wmfs-bundled-reference)
-    target_link_libraries(wmfs-bundled-reference PRIVATE wmfs-reference-kernels)
-    target_compile_options(wmfs-bundled-reference PRIVATE ${TORCH_CXX_FLAGS})
+    target_link_libraries(wmfs-bundled-reference PRIVATE ${WMFS_BUNDLED_LIBRARIES})
+    target_include_directories(
+      wmfs-bundled-reference PRIVATE ${WMFS_BUNDLED_INCLUDE_DIRECTORIES}
+    )
+    target_compile_options(wmfs-bundled-reference PRIVATE ${WMFS_BUNDLED_COMPILE_OPTIONS})
+    target_compile_definitions(
+      wmfs-bundled-reference
+      PRIVATE WMFS_BUNDLED_PLUGIN_NAMES="${WMFS_BUNDLED_PLUGIN_NAMES_CSV}"
+    )
     set_target_properties(
       wmfs-bundled-reference
       PROPERTIES
@@ -233,7 +253,9 @@ if(WMFS_BUILD_REFERENCE_WORKER)
   add_executable(
     wmfs-reference-worker
     src/reference_mapped_buffers.cpp
+    src/reference_plugin_entry.cpp
     src/reference_worker.cpp
+    plugins/reference/generated/src/reference_plugin_stub.cpp
     ${REFERENCE_CAPNP_SOURCES}
   )
   target_include_directories(
@@ -241,6 +263,7 @@ if(WMFS_BUILD_REFERENCE_WORKER)
     PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/generated"
+      "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/generated/include"
       "${CMAKE_CURRENT_BINARY_DIR}"
   )
   target_link_libraries(

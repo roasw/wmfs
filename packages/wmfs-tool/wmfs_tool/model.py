@@ -135,6 +135,8 @@ class Plugin:
     schema: str
     interface: str
     deployment_root: str
+    local_provider: str | None
+    bundled_namespace: str | None
     operations: tuple[Operation, ...]
     enums: tuple[Enum, ...] = ()
     configuration: Configuration | None = None
