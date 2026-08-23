@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+from wmfs_plugin import PROTOCOL_VERSION
 from wmfs_plugin.metadata import (
     DimensionExpression,
     DTypeExpression,
@@ -15,11 +16,9 @@ from wmfs_plugin.metadata import (
     VjpMetadata,
     canonical_metadata_bytes,
     metadata_fingerprint,
-    metadata_from_reader,
     validate_operation_metadata,
     validate_plugin_metadata,
 )
-from wmfs_plugin.schema import PROTOCOL_VERSION, load_runtime_schema
 
 
 def _operation(
@@ -47,36 +46,13 @@ def _operation(
     )
 
 
-def test_metadata_reader_decodes_and_validates_plugin() -> None:
-    reader = load_runtime_schema().PluginMetadata.new_message(
-        name="example",
-        version="1.0.0",
-        protocolVersion=PROTOCOL_VERSION,
-        fingerprint=0,
-        operations=[
-            {
-                "name": "identity",
-                "operationId": 1,
-                "tensorInputs": [{"name": "input", "access": "readOnly"}],
-                "tensorOutputs": [{"name": "result", "access": "readOnly"}],
-                "outputPlans": [
-                    {
-                        "name": "result",
-                        "known": {
-                            "sameShapeAsInput": 0,
-                            "dtype": {"input": 0},
-                        },
-                    }
-                ],
-            }
-        ],
+def test_metadata_fingerprint_validates_generated_catalog() -> None:
+    incomplete = PluginMetadata(
+        "example", "1.0.0", PROTOCOL_VERSION, (_operation("identity"),), 0
     )
+    metadata = replace(incomplete, fingerprint=metadata_fingerprint(incomplete))
 
-    parsed = metadata_from_reader(reader, validate_fingerprint=False)
-    reader.fingerprint = metadata_fingerprint(parsed)
-    metadata = metadata_from_reader(reader)
-
-    assert metadata.name == "example"
+    validate_plugin_metadata(metadata)
     assert metadata.operations == (_operation("identity"),)
 
 

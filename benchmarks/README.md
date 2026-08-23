@@ -25,7 +25,7 @@ retirement/reset in isolated end-to-end samples. New schema 10 reports contain
 local, bundled, and isolated samples keyed by backend. All primary samples stop
 at backend return and post-return cleanup is measured separately.
 Known outputs are preallocated from schema metadata and each operation uses the
-command/completion rings. Cap'n Proto is startup/control only. The table reports
+command/completion rings. A fixed protocol owns startup/control. The table reports
 medians; the JSON reports also contain p95, standard deviation, allocation
 statistics, and transport diagnostics. Pooled reclamation diagnostics use
 internal cumulative metric deltas and report the reclaimed-buffer population,
@@ -78,7 +78,7 @@ views, dispatch, kernel, completion, and materialization. Schema 10 also records
 an independent ring ping and a capacity-1 concurrent pressure probe. The
 pressure probe holds each ping in the worker for a recorded 1 ms so the producer
 reliably reaches capacity and reports the actual eventfd backpressure wait, while
-retaining Cap'n Proto ping as the startup/control comparison. Diagnostics are
+retaining fixed-protocol ping as the startup/control comparison. Diagnostics are
 grouped by Python frontend, ring/control, mapping/transport, allocation,
 reclamation, and kernel provenance. It does not derive a residual Python
 bookkeeping value from overlapping component timers. Profiling is opt-in on

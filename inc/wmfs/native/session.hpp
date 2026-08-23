@@ -79,14 +79,10 @@ struct InvocationProfile {
     std::uint64_t worker_kernel_ns{};       ///< Numerical kernel time.
 };
 
-/// @brief Synchronous native client for worker RPC and FD-control traffic.
-///
-/// Session serializes KJ RPC work on its implementation thread. The Python
-/// runtime owns process lifecycle and must call close before releasing the
-/// worker process.
+/// @brief Synchronous native client for fixed lifecycle and FD-control traffic.
 class Session {
   public:
-    /// @brief Adopt connected RPC/control sockets and validate the worker.
+    /// @brief Adopt connected lifecycle/control sockets.
     Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
             double startup_timeout_seconds, double request_timeout_seconds,
             double fd_transfer_timeout_seconds,
@@ -126,13 +122,13 @@ class Session {
     plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
                  const TensorDescriptors &inputs,
                  const std::vector<ScalarArgument> &scalars);
-    /// @brief Verify RPC responsiveness with a nonce round trip.
+    /// @brief Verify fixed-protocol responsiveness.
     void ping(std::uint64_t nonce);
     /// @brief Return serialized plugin metadata obtained during startup.
     std::vector<std::uint8_t> metadata();
     /// @brief Return serialized worker environment metadata.
     std::vector<std::uint8_t> environment();
-    /// @brief Close RPC/control resources. Safe to call repeatedly.
+    /// @brief Close lifecycle/control resources. Safe to call repeatedly.
     void close();
 
     /// @brief Return the number of transferred mapping descriptors.

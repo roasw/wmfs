@@ -21,7 +21,6 @@ let
     ps.breathe
     ps.myst-parser
     ps.numpy
-    ps.pycapnp
     ps.sphinx
     ps.torch
   ]);
@@ -209,23 +208,6 @@ in
         touch $out
       '';
 
-  schemas = pkgs.runCommand "wmfs-schema-check" { nativeBuildInputs = [ pkgs.capnproto ]; } ''
-    capnp compile -o- \
-      --src-prefix=${source}/packages/wmfs/wmfs/protocol/schemas \
-      --import-path=${source}/packages/wmfs/wmfs/protocol/schemas \
-      ${source}/packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp >/dev/null
-    capnp compile -o- \
-      --src-prefix=${source}/packages/wmfs/wmfs/protocol/schemas \
-      --import-path=${source}/packages/wmfs/wmfs/protocol/schemas \
-      ${source}/packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp >/dev/null
-    capnp compile -o- \
-      --src-prefix=${source}/plugins/reference/schemas \
-      --import-path=${source}/packages/wmfs/wmfs/protocol/schemas \
-      --import-path=${source}/plugins/reference/schemas \
-      ${source}/plugins/reference/schemas/wmfs-reference/reference.capnp >/dev/null
-    touch $out
-  '';
-
   generated =
     pkgs.runCommand "wmfs-generated-check" { nativeBuildInputs = [ packages.wmfs-tool ]; }
       ''
@@ -248,14 +230,12 @@ in
     src = source;
     WMFS_GIT_VERSION = versions.git;
     nativeBuildInputs = [
-      pkgs.capnproto
       pkgs.cmake
       pkgs.d2
       pkgs.doxygen
       pkgs.ninja
       documentationPython
     ];
-    buildInputs = [ pkgs.capnproto ];
     cmakeFlags = [
       "-DBUILD_TESTING=OFF"
       "-DWMFS_VERSION=${versions.git}"

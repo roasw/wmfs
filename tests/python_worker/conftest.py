@@ -55,13 +55,13 @@ def failure_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> object:
         nonlocal created
         created += 1
         pid_file = tmp_path / f"worker-{created}.pid"
-        monkeypatch.setenv("WMFS_FAILURE_WORKER_MODE", mode)
         monkeypatch.setenv("WMFS_FAILURE_WORKER_PID_FILE", os.fspath(pid_file))
         monkeypatch.setenv("WMFS_FAILURE_WORKER_PYTHONPATH", os.pathsep.join(sys.path))
         worker_path = tmp_path / f"failure-worker-{created}.py"
         source = FAILURE_WORKER_FIXTURE.read_text()
         _shebang, separator, body = source.partition("\n")
         assert separator
+        body = body.replace('FAILURE_MODE = "__MODE__"', f"FAILURE_MODE = {mode!r}")
         worker_path.write_text(f"#!{sys.executable}\n{body}")
         worker_path.chmod(0o755)
         manifest = load_manifest(REFERENCE_DIRECTORY / "generated" / "manifest.json")

@@ -42,9 +42,10 @@ def test_sdk_and_tool_packages_are_independent() -> None:
     assert "scripts" not in sdk["project"]
 
 
-def test_native_build_uses_runtime_owned_schemas() -> None:
+def test_native_build_uses_runtime_owned_fixed_protocol() -> None:
     cmake = (ROOT / "CMakeLists.txt").read_text()
-    assert "packages/wmfs/wmfs/protocol/schemas" in cmake
+    assert "src/control.cpp" in cmake
+    assert "CapnProto" not in cmake
     assert "packages/wmfs-plugin" not in cmake
 
 

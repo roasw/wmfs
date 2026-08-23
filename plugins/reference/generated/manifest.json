@@ -95,13 +95,12 @@
         },
         "schemaVersion": 1
     },
+    "controlAbiVersion": 1,
     "deployment": {
         "bundledNamespace": "wmfs_reference",
         "entrySymbol": "wmfs_reference_plugin_get_api",
-        "interface": "ReferencePlugin",
         "localProvider": "wmfs_reference.kernels",
         "root": "..",
-        "schema": "../schemas/wmfs-reference/reference.capnp",
         "worker": "wmfs-reference-worker"
     },
     "enums": [

@@ -1,7 +1,6 @@
+#include "wmfs/protocol/ring.h"
 #include "wmfs/reference/mapped_buffers.hpp"
 #include "wmfs/unique_fd.hpp"
-
-#include <capnp/message.h>
 
 #include <cerrno>
 #include <cstddef>
@@ -17,6 +16,7 @@ namespace {
 using wmfs::UniqueFd;
 using wmfs::reference::MappedBufferCache;
 using wmfs::reference::MappingSpec;
+using wmfs::reference::TensorDescriptor;
 
 constexpr std::uint64_t BUFFER_ID = 7;
 constexpr std::uint32_t GENERATION = 3;
@@ -45,19 +45,11 @@ UniqueFd make_buffer(std::size_t length) {
     return fd;
 }
 
-TensorDescriptor::Reader make_descriptor(capnp::MallocMessageBuilder &message) {
-    auto descriptor = message.initRoot<TensorDescriptor>();
-    descriptor.setBufferId(BUFFER_ID);
-    descriptor.setGeneration(GENERATION);
-    descriptor.setAllocationId(ALLOCATION_ID);
-    descriptor.setOffset(0);
-    descriptor.setByteLength(4 * sizeof(float));
-    descriptor.setDtype(DType::FLOAT32);
-    auto shape = descriptor.initShape(1);
-    shape.set(0, 4);
-    auto strides = descriptor.initStrides(1);
-    strides.set(0, sizeof(float));
-    return descriptor.asReader();
+TensorDescriptor make_descriptor() {
+    return TensorDescriptor{
+        BUFFER_ID, GENERATION,        ALLOCATION_ID,
+        0,         4 * sizeof(float), WMFS_RING_DTYPE_FLOAT32,
+        {4},       {sizeof(float)}};
 }
 
 bool is_mapped(void *address) {
@@ -79,8 +71,7 @@ void run_case(const std::string &operation) {
                           INVOCATION_ID, true, false},
               fd.release());
 
-    capnp::MallocMessageBuilder message;
-    auto descriptor = make_descriptor(message);
+    auto descriptor = make_descriptor();
     at::Tensor retained;
     {
         auto lease = cache.tensor(descriptor, INVOCATION_ID, true);

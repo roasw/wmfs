@@ -10,8 +10,8 @@ from wmfs.configuration import (
     ConfigurationMetadata,
     parse_configuration_metadata,
 )
+from wmfs.protocol import PROTOCOL_VERSION
 from wmfs.protocol.metadata import validate_plugin_metadata
-from wmfs.protocol.schema import PROTOCOL_VERSION
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -39,8 +39,8 @@ class PluginManifest:
     name: str
     version: str
     metadata: PluginMetadata
-    schema_path: Path
-    interface: str
+    schema_path: Path | None
+    interface: str | None
     worker: str
     root: Path
     configuration: ConfigurationMetadata | None = None
@@ -50,6 +50,8 @@ class PluginManifest:
     entry_symbol: str | None = None
     interface_fingerprint: bytes = b""
     startup_capabilities: int = 0
+    format_version: int = 2
+    control_abi_version: int = 1
 
 
 def load_manifest(path: Path) -> PluginManifest:
@@ -80,7 +82,7 @@ def load_manifest(path: Path) -> PluginManifest:
         "protocolVersion",
     }
     if format_version == 2:
-        fields.add("enums")
+        fields.update({"controlAbiVersion", "enums"})
     optional_fields = (
         {"configuration", "lifecycle", "startupCapabilities"}
         if format_version == 2
@@ -95,6 +97,13 @@ def load_manifest(path: Path) -> PluginManifest:
     _require_equal(data, "abiVersion", _ABI_VERSION)
     _require_equal(data, "protocolVersion", PROTOCOL_VERSION)
     _require_equal(data, "generator", f"wmfs-tool/{format_version}")
+    control_abi_version = (
+        _integer(data["controlAbiVersion"], "manifest.controlAbiVersion")
+        if format_version == 2
+        else 0
+    )
+    if format_version == 2 and control_abi_version != 1:
+        raise ValueError("Manifest control ABI is unsupported")
 
     operations = _array(data["operations"], "manifest.operations")
     count = _integer(data["operationCount"], "manifest.operationCount")
@@ -137,7 +146,11 @@ def load_manifest(path: Path) -> PluginManifest:
     )
 
     deployment = _object(data["deployment"], "manifest.deployment")
-    deployment_fields = {"interface", "root", "schema", "worker"}
+    deployment_fields = (
+        {"root", "worker"}
+        if format_version == 2
+        else {"interface", "root", "schema", "worker"}
+    )
     deployment_optional = (
         {"localProvider", "bundledNamespace", "entrySymbol"}
         if format_version == 2
@@ -151,18 +164,26 @@ def load_manifest(path: Path) -> PluginManifest:
         manifest_directory / _string(deployment["root"], "deployment.root")
     ).resolve()
     schema_path = (
-        manifest_directory / _string(deployment["schema"], "deployment.schema")
-    ).resolve()
+        (
+            manifest_directory / _string(deployment["schema"], "deployment.schema")
+        ).resolve()
+        if format_version == 1
+        else None
+    )
     if not root.is_dir():
         raise ValueError(f"Plugin deployment root does not exist: {root}")
-    if not schema_path.is_file():
+    if schema_path is not None and not schema_path.is_file():
         raise ValueError(f"Plugin deployment schema does not exist: {schema_path}")
     return PluginManifest(
         name=name,
         version=version,
         metadata=metadata,
         schema_path=schema_path,
-        interface=_string(deployment["interface"], "deployment.interface"),
+        interface=(
+            _string(deployment["interface"], "deployment.interface")
+            if format_version == 1
+            else None
+        ),
         worker=_string(deployment["worker"], "deployment.worker"),
         root=root,
         configuration=configuration,
@@ -183,6 +204,8 @@ def load_manifest(path: Path) -> PluginManifest:
         ),
         interface_fingerprint=interface_fingerprint,
         startup_capabilities=startup_capabilities,
+        format_version=format_version,
+        control_abi_version=control_abi_version,
     )
 
 
@@ -463,6 +486,7 @@ def _validate_interface_fingerprint(document: dict[str, Any]) -> bytes:
             "metadataFingerprint",
             "operationCount",
             "configuration",
+            "controlAbiVersion",
             "startupCapabilities",
         }
     }

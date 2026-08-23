@@ -121,7 +121,7 @@ class EnvironmentMetadata:
 def metadata_from_reader(
     metadata: object, *, validate_fingerprint: bool = True
 ) -> PluginMetadata:
-    """Decode and validate plugin metadata from a Cap'n Proto reader.
+    """Decode and validate plugin metadata from a generated field reader.
 
     Args:
         metadata: Reader exposing the ``PluginMetadata`` schema fields.

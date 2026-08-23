@@ -4,10 +4,20 @@
 
 #include <cstdint>
 #include <memory>
-
-#include "wmfs/tensor.capnp.h"
+#include <vector>
 
 namespace wmfs::reference {
+
+struct TensorDescriptor {
+    std::uint64_t buffer_id;
+    std::uint32_t generation;
+    std::uint64_t allocation_id;
+    std::uint64_t offset;
+    std::uint64_t byte_length;
+    std::uint32_t dtype;
+    std::vector<std::uint64_t> shape;
+    std::vector<std::int64_t> strides;
+};
 
 /// @brief Worker-side mapping metadata received from the runtime.
 struct MappingSpec {
@@ -58,7 +68,7 @@ class MappedBufferCache {
     void retire(std::uint64_t buffer_id, std::uint32_t generation,
                 std::uint64_t allocation_id);
     /// @brief Resolve a descriptor into an invocation-scoped tensor view.
-    [[nodiscard]] TensorLease tensor(TensorDescriptor::Reader descriptor,
+    [[nodiscard]] TensorLease tensor(const TensorDescriptor &descriptor,
                                      std::uint64_t invocation_id,
                                      bool require_writable = false);
     /// @brief Retire writable mappings owned by an invocation.
@@ -73,6 +83,7 @@ class MappedBufferCache {
 };
 
 /// @brief Receive batched SCM_RIGHTS mapping and retirement control messages.
-void receive_buffer_transfers(int control_fd, MappedBufferCache &cache);
+void receive_buffer_transfers(int control_fd, std::uint64_t session_generation,
+                              MappedBufferCache &cache);
 
 } // namespace wmfs::reference

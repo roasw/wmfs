@@ -1,21 +1,22 @@
 from dataclasses import fields
 from pathlib import Path
 
+import wmfs.protocol.control as runtime_control
 import wmfs.protocol.metadata as runtime_metadata
 import wmfs.transport.ring as runtime_ring
+import wmfs_plugin.control as worker_control
 import wmfs_plugin.metadata as worker_metadata
 import wmfs_plugin.ring as worker_ring
 
 ROOT = Path(__file__).parents[2]
 
 
-def test_runtime_and_worker_schemas_are_byte_identical() -> None:
-    for name in ("runtime.capnp", "tensor.capnp"):
-        assert (
-            ROOT / "packages/wmfs/wmfs/protocol/schemas/wmfs" / name
-        ).read_bytes() == (
-            ROOT / "packages/wmfs-plugin/wmfs_plugin/schemas/wmfs" / name
-        ).read_bytes()
+def test_runtime_and_worker_fixed_control_frames_are_identical() -> None:
+    assert runtime_control.MAGIC == worker_control.MAGIC
+    for kind in (runtime_control.Kind.PING, runtime_control.Kind.SHUTDOWN):
+        assert runtime_control.encode_empty(kind, request_id=7) == (
+            worker_control.encode_empty(worker_control.Kind(kind), request_id=7)
+        )
 
 
 def test_runtime_and_worker_metadata_models_have_parity() -> None:

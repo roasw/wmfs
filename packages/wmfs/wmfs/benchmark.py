@@ -81,7 +81,7 @@ _DIAGNOSTIC_PROVENANCE = {
     },
     "startup_control": {
         "metrics": ["rpc_startup_control_round_trip_ms"],
-        "boundary": "Cap'n Proto ping retained only as a startup/control baseline.",
+        "boundary": "Fixed control ping measures startup/liveness control separately.",
     },
     "mapping_transport": {
         "metrics": [
@@ -508,7 +508,7 @@ def render_table(report: dict[str, Any]) -> str:
                         _number(ring["standard_deviation_ms"]),
                     ),
                     (
-                        "Cap'n Proto startup/control ping",
+                        "fixed startup/control ping",
                         rpc["count"],
                         _number(rpc["median_ms"]),
                         _number(rpc["p95_ms"]),

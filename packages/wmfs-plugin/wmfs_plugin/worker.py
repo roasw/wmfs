@@ -1,26 +1,48 @@
 import argparse
-import asyncio
 import ctypes
+import json
 import socket
 import sys
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from time import perf_counter_ns, sleep
-from types import ModuleType
 from typing import TypeAlias
 
-import capnp
 import torch
 
+from wmfs_plugin.control import (
+    DescriptorRole,
+    ErrorResponse,
+    Kind,
+    Startup,
+    Status,
+    close_fds,
+    decode_frame,
+    decode_startup,
+    encode_empty,
+    encode_error,
+    encode_startup,
+    recvmsg_strict,
+    sendmsg_strict,
+)
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
 from wmfs_plugin.invocation import InvocationContext, OutputSpec
-from wmfs_plugin.metadata import OperationMetadata, metadata_from_reader
+from wmfs_plugin.metadata import (
+    DimensionExpression,
+    DTypeExpression,
+    DTypeVariable,
+    InputAxis,
+    KnownOutput,
+    OperationMetadata,
+    OutputPlan,
+    PromoteTensorScalar,
+    ScalarParameter,
+    SelectDimension,
+    TensorParameter,
+    VjpMetadata,
+)
 from wmfs_plugin.ring import (
-    ABI_MAJOR,
-    ABI_MINOR,
-    CAPABILITIES,
     COMMAND_INVOKE,
     COMMAND_PING,
     COMMAND_PLAN_OUTPUTS,
@@ -28,8 +50,6 @@ from wmfs_plugin.ring import (
     COMPLETION_PLAN_OUTPUTS,
     COMPLETION_PONG,
     FLAG_PROFILE,
-    HEADER_SIZE,
-    RECORD_SIZE,
     STATUS_INTERNAL_ERROR,
     STATUS_OK,
     STATUS_OPERATION_ERROR,
@@ -38,7 +58,6 @@ from wmfs_plugin.ring import (
     RingEndpoint,
     RingError,
 )
-from wmfs_plugin.schema import PROTOCOL_VERSION, load_tensor_schema, schema_root
 
 OperationHandler: TypeAlias = Callable[[InvocationContext], None]
 OutputPlanner: TypeAlias = Callable[[InvocationContext], Mapping[str, OutputSpec]]
@@ -64,106 +83,129 @@ def worker_main(
             internal VJP operations, to an invocation-context handler.
 
     Note:
-        The worker entry point is launched by WMFS and receives its RPC socket,
-        FD-control socket, schema, and interface through command-line options.
+        The worker entry point is launched by WMFS with only a bootstrap socket.
+        Generated declarations attached by ``bind_operations`` provide identity.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rpc-fd", type=int, required=True)
-    parser.add_argument("--fd-socket-fd", type=int, required=True)
-    parser.add_argument("--command-ring-fd", type=int, required=True)
-    parser.add_argument("--command-data-fd", type=int, required=True)
-    parser.add_argument("--command-space-fd", type=int, required=True)
-    parser.add_argument("--completion-ring-fd", type=int, required=True)
-    parser.add_argument("--completion-data-fd", type=int, required=True)
-    parser.add_argument("--completion-space-fd", type=int, required=True)
-    parser.add_argument("--ring-generation", type=int, required=True)
-    parser.add_argument("--schema", type=Path, required=True)
-    parser.add_argument("--interface", required=True)
-    parser.add_argument(
-        "--schema-import", type=Path, action="append", default=[], required=True
-    )
+    parser.add_argument("--bootstrap-fd", type=int, required=True)
     arguments = parser.parse_args()
-    asyncio.run(
-        capnp.run(
-            _serve(
-                arguments.rpc_fd,
-                arguments.fd_socket_fd,
-                (
-                    arguments.command_ring_fd,
-                    arguments.command_data_fd,
-                    arguments.command_space_fd,
-                ),
-                (
-                    arguments.completion_ring_fd,
-                    arguments.completion_data_fd,
-                    arguments.completion_space_fd,
-                ),
-                arguments.ring_generation,
-                arguments.schema,
-                arguments.schema_import,
-                arguments.interface,
-                operations,
-                output_planners or {},
-            )
-        )
+    _serve(
+        arguments.bootstrap_fd,
+        operations,
+        output_planners or {},
     )
 
 
-async def _serve(
-    rpc_fd: int,
-    fd_socket_fd: int,
-    command_fds: tuple[int, int, int],
-    completion_fds: tuple[int, int, int],
-    ring_generation: int,
-    plugin_schema_path: Path,
-    schema_import_paths: list[Path],
-    interface_name: str,
+def _serve(
+    bootstrap_fd: int,
     operations: Mapping[str, OperationHandler],
     output_planners: Mapping[str, OutputPlanner],
 ) -> None:
-    imports = [schema_root(), *schema_import_paths]
-    plugin_schema = capnp.load(
-        str(plugin_schema_path), imports=[str(path) for path in dict.fromkeys(imports)]
-    )
+    bootstrap = socket.socket(fileno=bootstrap_fd)
+    packet, descriptors = recvmsg_strict(bootstrap)
+    request_id = 0
+    try:
+        request_id, startup = decode_startup(packet)
+        expected_roles = (
+            DescriptorRole.COMMAND_RING,
+            DescriptorRole.COMMAND_DATA_EVENT,
+            DescriptorRole.COMMAND_SPACE_EVENT,
+            DescriptorRole.COMPLETION_RING,
+            DescriptorRole.COMPLETION_DATA_EVENT,
+            DescriptorRole.COMPLETION_SPACE_EVENT,
+            DescriptorRole.FD_CONTROL,
+        )
+        if startup.descriptor_roles != expected_roles or len(descriptors) != 7:
+            raise ValueError("STARTUP_REQUEST descriptor roles are not exact")
+        _validate_startup_identity(startup, operations)
+        config = json.loads(startup.config)
+        if not isinstance(config, dict) or _canonical_json(config) != startup.config:
+            raise ValueError("startup configuration is not a canonical JSON object")
+        command_fds = tuple(descriptors[:3])
+        completion_fds = tuple(descriptors[3:6])
+        fd_socket_fd = descriptors[6]
+        descriptors.clear()
+        environment = _canonical_json(
+            {
+                "executable": sys.executable,
+                "glibcVersion": _glibc_version(),
+                "pythonVersion": sys.version.split()[0],
+                "torchVersion": torch.__version__,
+                "configuration": config,
+            }
+        )
+        response = Startup(
+            startup.session_generation,
+            startup.interface_fingerprint,
+            startup.configuration_fingerprint,
+            startup.metadata_fingerprint,
+            startup.capabilities,
+            startup.operation_count,
+            startup.protocol_version,
+            startup.configuration_schema_version,
+            environment,
+            (),
+            startup.log_mode,
+            Status.OK,
+        )
+        sendmsg_strict(
+            bootstrap, encode_startup(response, response=True, request_id=request_id)
+        )
+    except Exception as error:
+        close_fds(descriptors)
+        try:
+            sendmsg_strict(
+                bootstrap,
+                encode_error(
+                    ErrorResponse(Status.IDENTITY_MISMATCH, str(error)[:1024]),
+                    request_id=request_id,
+                ),
+            )
+        finally:
+            bootstrap.close()
+        raise
+
     mapped_buffers = MappedBufferCache()
     fd_receiver = FdReceiver(
-        socket.socket(fileno=fd_socket_fd), load_tensor_schema(), mapped_buffers
+        socket.socket(fileno=fd_socket_fd), mapped_buffers, startup.session_generation
     )
     fd_receiver.start()
-    command_ring = RingEndpoint(*command_fds, ring_generation, False)
-    completion_ring = RingEndpoint(*completion_fds, ring_generation, True)
-    rpc_socket = socket.socket(fileno=rpc_fd)
-    stream = await capnp.AsyncIoStream.create_unix_connection(sock=rpc_socket)
-    plugin_server = _make_server(
-        plugin_schema,
-        interface_name,
-        mapped_buffers,
-        operations,
-        output_planners,
-        ring_generation=ring_generation,
-        ring_capacity=command_ring.capacity,
-    )
+    command_ring = RingEndpoint(*command_fds, startup.session_generation, False)
+    completion_ring = RingEndpoint(*completion_fds, startup.session_generation, True)
+    metadata = _metadata_from_declarations(operations)
+    compiled = _compile_operations(metadata, operations)
+    planners = _compile_planners(metadata, output_planners)
     ring_thread = threading.Thread(
         target=_ring_worker_loop,
         args=(
             command_ring,
             completion_ring,
             mapped_buffers,
-            plugin_server._ring_operations,
-            plugin_server._ring_planners,
+            compiled,
+            planners,
         ),
         daemon=True,
     )
     ring_thread.start()
-    server = capnp.TwoPartyServer(
-        stream,
-        bootstrap=plugin_server,
-    )
     try:
-        await server.on_disconnect()
+        while True:
+            packet, fds = recvmsg_strict(bootstrap)
+            if fds:
+                raise ValueError("lifecycle frame carried file descriptors")
+            frame = decode_frame(packet)
+            if frame.kind == Kind.PING:
+                request = _empty_request(packet, Kind.PING)
+                sendmsg_strict(bootstrap, encode_empty(Kind.PONG, request_id=request))
+            elif frame.kind == Kind.SHUTDOWN:
+                request = _empty_request(packet, Kind.SHUTDOWN)
+                sendmsg_strict(
+                    bootstrap, encode_empty(Kind.SHUTDOWN_ACK, request_id=request)
+                )
+                break
+            else:
+                raise ValueError("unexpected lifecycle frame")
     finally:
-        server.close()
-        stream.close()
+        bootstrap.close()
         command_ring.interrupt()
         completion_ring.interrupt()
         ring_thread.join(timeout=5)
@@ -173,110 +215,161 @@ async def _serve(
         mapped_buffers.close()
 
 
-def _make_server(
-    plugin_schema: ModuleType,
-    interface_name: str,
-    mapped_buffers: MappedBufferCache,
+def _empty_request(packet: bytes, kind: Kind) -> int:
+    frame = decode_frame(packet)
+    if frame.kind != kind or frame.payload:
+        raise ValueError("invalid empty lifecycle frame")
+    return frame.request_id
+
+
+def _canonical_json(value: object) -> bytes:
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _validate_startup_identity(
+    startup: Startup, operations: Mapping[str, OperationHandler]
+) -> None:
+    required = {
+        "configuration_fingerprint",
+        "configuration_schema_version",
+        "interface_fingerprint",
+        "metadata_fingerprint",
+        "operation_count",
+        "protocol_version",
+        "startup_capabilities",
+    }
+    if any(not hasattr(operations, name) for name in required):
+        raise ValueError("operations were not bound from generated worker declarations")
+    expected = (
+        operations.interface_fingerprint,
+        operations.configuration_fingerprint,
+        operations.metadata_fingerprint,
+        operations.startup_capabilities,
+        operations.operation_count,
+        operations.protocol_version,
+        operations.configuration_schema_version,
+    )
+    actual = (
+        startup.interface_fingerprint,
+        startup.configuration_fingerprint,
+        startup.metadata_fingerprint,
+        startup.capabilities,
+        startup.operation_count,
+        startup.protocol_version,
+        startup.configuration_schema_version,
+    )
+    if actual != expected:
+        raise ValueError("startup manifest and generated worker identity differ")
+
+
+def _metadata_from_declarations(
     handlers: Mapping[str, OperationHandler],
-    output_planners: Mapping[str, OutputPlanner] | None = None,
-    *,
-    ring_generation: int = 0,
-    ring_capacity: int = 0,
-) -> object:
-    metadata = plugin_schema.pluginMetadata
-    if int(metadata.protocolVersion) != PROTOCOL_VERSION:
-        raise RuntimeError("Worker schema does not match its protocol version")
-    parsed_metadata = metadata_from_reader(metadata)
-    operations = _compile_operations(parsed_metadata.operations, handlers)
-    planners = _compile_planners(parsed_metadata.operations, output_planners or {})
-    interface = getattr(plugin_schema, interface_name)
+) -> tuple[OperationMetadata, ...]:
+    declarations = getattr(handlers, "declarations", None)
+    if not isinstance(declarations, (list, tuple)):
+        raise ValueError("generated worker declarations are missing")
+    return tuple(_operation_declaration(item) for item in declarations)
 
-    class PluginServer(interface.Server):
-        async def getMetadata(self, _context: object, **_kwargs: object) -> object:
-            return metadata
 
-        async def getProtocolVersion(
-            self, _context: object, **_kwargs: object
-        ) -> tuple[int]:
-            return (PROTOCOL_VERSION,)
-
-        async def ping(
-            self, nonce: int, _context: object, **_kwargs: object
-        ) -> tuple[int]:
-            return (nonce,)
-
-        async def getEnvironment(
-            self, _context: object, **_kwargs: object
-        ) -> tuple[dict[str, str]]:
-            return (
-                {
-                    "pythonVersion": sys.version.split()[0],
-                    "torchVersion": torch.__version__,
-                    "glibcVersion": _glibc_version(),
-                    "executable": sys.executable,
-                },
+def _operation_declaration(item: dict[str, object]) -> OperationMetadata:
+    outputs = item["outputs"]
+    assert isinstance(outputs, (list, tuple))
+    vjp_value = item["vjp"]
+    vjp = (
+        VjpMetadata(
+            int(vjp_value["operation_id"]),
+            tuple(vjp_value["saved_inputs"]),
+            tuple(vjp_value["saved_outputs"]),
+            tuple(vjp_value["output_cotangents"]),
+            tuple(vjp_value["input_gradients"]),
+            tuple(vjp_value["scalar_parameters"]),
+        )
+        if isinstance(vjp_value, dict)
+        else None
+    )
+    return OperationMetadata(
+        name=str(item["name"]),
+        tensor_inputs=tuple(
+            TensorParameter(
+                str(value["name"]),
+                "readWrite" if value["access"] == "read_write" else "readOnly",
+                value["dtype_variable"],
+                tuple(value["dtypes"]),
             )
-
-        async def getRingHandshake(
-            self, _context: object, **_kwargs: object
-        ) -> tuple[dict[str, int]]:
-            return (
-                {
-                    "abiMajor": ABI_MAJOR,
-                    "abiMinor": ABI_MINOR,
-                    "headerSize": HEADER_SIZE,
-                    "recordSize": RECORD_SIZE,
-                    "capacity": ring_capacity,
-                    "generation": ring_generation,
-                    "capabilities": CAPABILITIES,
-                },
+            for value in item["inputs"]
+        ),
+        tensor_outputs=tuple(
+            TensorParameter(str(value["name"]), "readOnly") for value in outputs
+        ),
+        scalar_parameters=tuple(
+            ScalarParameter(
+                str(value["name"]),
+                str(value["kind"]),
+                bool(value["required"]),
+                value["default"],
+                value["enum"],
+                tuple(value["enum_values"]),
             )
+            for value in item["scalars"]
+        ),
+        operation_id=int(item["operation_id"]),
+        output_plans=tuple(_output_declaration(value) for value in outputs),
+        vjp=vjp,
+        internal=bool(item["internal"]),
+        dtype_variables=tuple(
+            DTypeVariable(str(value["name"]), tuple(value["dtypes"]))
+            for value in item["dtype_variables"]
+        ),
+    )
 
-        async def invokeKnown(
-            self,
-            invocation: object,
-            _context: object,
-            **_kwargs: object,
-        ) -> tuple[dict[str, object]]:
-            try:
-                _invoke_known(invocation, mapped_buffers, operations, profiled=False)
-            except _OperationFailure as error:
-                return ({"operationError": error.as_capnp()},)
-            return ({"success": None},)
 
-        async def invokeKnownProfiled(
-            self,
-            invocation: object,
-            _context: object,
-            **_kwargs: object,
-        ) -> tuple[dict[str, object], dict[str, int]]:
-            try:
-                metrics = _invoke_known(
-                    invocation, mapped_buffers, operations, profiled=True
-                )
-            except _OperationFailure as error:
-                return ({"operationError": error.as_capnp()}, {})
-            assert metrics is not None
-            return ({"success": None}, metrics)
+def _output_declaration(value: dict[str, object]) -> OutputPlan:
+    if value["allocation"] == "dynamic":
+        return OutputPlan(str(value["name"]), None)
+    dtype = value["dtype"]
+    assert isinstance(dtype, dict)
+    kind = str(dtype["kind"])
+    if kind == "fixed":
+        dtype_value: object = dtype["value"]
+    elif kind == "input":
+        dtype_value = int(dtype["input"])
+    elif kind == "variable":
+        dtype_value = dtype["variable"]
+    else:
+        dtype_value = PromoteTensorScalar(int(dtype["input"]), int(dtype["scalar"]))
+    same = value["same_shape_as_input"]
+    dimensions = value["dimensions"]
+    known = KnownOutput(
+        "sameShapeAsInput" if same is not None else "dimensions",
+        int(same)
+        if same is not None
+        else tuple(_dimension_declaration(item) for item in dimensions),
+        DTypeExpression(kind, dtype_value),
+    )
+    return OutputPlan(str(value["name"]), known)
 
-        async def planOutputs(
-            self,
-            invocation: object,
-            _context: object,
-            **_kwargs: object,
-        ) -> tuple[dict[str, object], list[dict[str, object]]]:
-            try:
-                outputs = _plan_outputs(
-                    invocation, mapped_buffers, operations, planners
-                )
-            except _OperationFailure as error:
-                return ({"operationError": error.as_capnp()}, [])
-            return ({"success": None}, outputs)
 
-    result = PluginServer()
-    result._ring_operations = operations
-    result._ring_planners = planners
-    return result
+def _dimension_declaration(value: dict[str, object]) -> DimensionExpression:
+    kind = str(value["kind"])
+    if kind == "constant":
+        result: object = int(value["axis"])
+    elif kind == "input_axis":
+        result = InputAxis(int(value["input"]), int(value["axis"]))
+    elif kind == "minimum":
+        result = tuple(_dimension_declaration(item) for item in value["operands"])
+    else:
+        result = SelectDimension(
+            int(value["scalar"]),
+            _dimension_declaration(value["when_true"]),
+            _dimension_declaration(value["when_false"]),
+        )
+    return DimensionExpression("inputAxis" if kind == "input_axis" else kind, result)
 
 
 def _ring_worker_loop(
@@ -374,9 +467,6 @@ class _OperationFailure(Exception):
         self.error_type = type(error).__name__
         self.message = str(error)
         super().__init__(self.message)
-
-    def as_capnp(self) -> dict[str, str]:
-        return {"type": self.error_type, "message": self.message}
 
 
 def _compile_operations(

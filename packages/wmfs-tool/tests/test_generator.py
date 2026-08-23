@@ -36,7 +36,9 @@ def test_generation_is_deterministic_and_check_detects_stale(tmp_path: Path) -> 
     assert manifest["operationCount"] == 6
     assert manifest["startupCapabilities"] == 255
     assert manifest["deployment"]["worker"] == "wmfs-reference-worker"
-    assert manifest["deployment"]["interface"] == "ReferencePlugin"
+    assert manifest["controlAbiVersion"] == 1
+    assert "interface" not in manifest["deployment"]
+    assert "schema" not in manifest["deployment"]
     assert manifest["metadataFingerprint"] == "0xf6ed5672a8a496cb"
     assert manifest["formatVersion"] == 2
     assert manifest["generator"] == "wmfs-tool/2"

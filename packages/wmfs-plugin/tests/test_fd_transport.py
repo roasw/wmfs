@@ -10,8 +10,16 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from wmfs_plugin.control import (
+    FdBatch,
+    FdEntry,
+    FdEntryKind,
+    decode_fd_ack,
+    encode_fd_batch,
+    recvmsg_strict,
+    sendmsg_strict,
+)
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
-from wmfs_plugin.schema import load_tensor_schema
 
 
 def _descriptor(**overrides: object) -> SimpleNamespace:
@@ -143,32 +151,18 @@ def test_fd_receiver_sets_close_on_exec() -> None:
         def invalidate(self) -> None:
             raise AssertionError("Unexpected invalidation")
 
-    schema = load_tensor_schema()
-    receiver = FdReceiver(receiver_socket, schema, Cache())
+    receiver = FdReceiver(receiver_socket, Cache(), 1)
     receiver.start()
     fd = _memfd()
-    message = schema.BufferTransfer.new_message(
-        transferId=1,
-        entries=[
-            {
-                "invocationId": 1,
-                "bufferId": 1,
-                "generation": 1,
-                "allocationId": 1,
-                "byteLength": 16,
-                "writable": False,
-                "arena": False,
-                "map": None,
-            }
-        ],
+    message = encode_fd_batch(
+        FdBatch(1, 1, (FdEntry(FdEntryKind.MAP, 1, 1, 1, 1, 16),)),
+        request_id=1,
     )
-    descriptors = array.array("i", [fd])
     try:
-        sender.sendmsg(
-            [message.to_bytes()],
-            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)],
-        )
-        sender.recv(4096)
+        sendmsg_strict(sender, message, (fd,))
+        response, response_fds = recvmsg_strict(sender)
+        assert not response_fds
+        assert decode_fd_ack(response)[1].transfer_id == 1
         assert received.wait(2)
         assert observed_flags[0] & fcntl.FD_CLOEXEC
     finally:
@@ -191,27 +185,17 @@ def test_fd_receiver_rejects_batch_descriptor_count_and_invalidates() -> None:
         def invalidate(self) -> None:
             invalidated.set()
 
-    schema = load_tensor_schema()
-    receiver = FdReceiver(receiver_socket, schema, Cache())
+    receiver = FdReceiver(receiver_socket, Cache(), 1)
     receiver.start()
     first = _memfd()
     second = _memfd()
-    message = schema.BufferTransfer.new_message(
-        transferId=2,
-        entries=[
-            {
-                "invocationId": 1,
-                "bufferId": 1,
-                "generation": 1,
-                "allocationId": 1,
-                "byteLength": 16,
-                "map": None,
-            }
-        ],
+    message = encode_fd_batch(
+        FdBatch(2, 1, (FdEntry(FdEntryKind.MAP, 1, 1, 1, 1, 16),)),
+        request_id=2,
     )
     try:
         sender.sendmsg(
-            [message.to_bytes()],
+            [message],
             [
                 (
                     socket.SOL_SOCKET,
@@ -220,9 +204,7 @@ def test_fd_receiver_rejects_batch_descriptor_count_and_invalidates() -> None:
                 )
             ],
         )
-        with schema.BufferTransferAck.from_bytes(sender.recv(4096)) as ack:
-            assert ack.which() == "error"
-            assert "descriptor count" in ack.error
+        assert sender.recv(4096) == b""
         assert invalidated.wait(2)
     finally:
         os.close(first)

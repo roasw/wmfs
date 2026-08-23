@@ -39,10 +39,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(WMFS_BUILD_CAPNP_PROTOCOL "Build the legacy Cap'n Proto protocol" ON)
-if(WMFS_BUILD_CAPNP_PROTOCOL)
-  find_package(CapnProto CONFIG REQUIRED)
-endif()
 find_package(Threads REQUIRED)
 
 add_library(wmfs-ring STATIC src/ring.cpp)
@@ -52,8 +48,6 @@ target_include_directories(
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc"
 )
 
-# Additive fixed-width control codec. This target deliberately has no Cap'n
-# Proto dependency and remains separate from the production protocol target.
 add_library(wmfs-control STATIC src/control.cpp)
 add_library(wmfs::control ALIAS wmfs-control)
 target_include_directories(wmfs-control PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc")
@@ -68,9 +62,6 @@ set_target_properties(
 option(WMFS_BUILD_PYTHON_RUNTIME "Build the Python runtime extension" ON)
 option(WMFS_BUILD_REFERENCE_WORKER "Build the C++ reference plugin worker" OFF)
 option(WMFS_BUILD_DOCUMENTATION "Build the unified API documentation" OFF)
-if(NOT WMFS_BUILD_CAPNP_PROTOCOL AND (WMFS_BUILD_PYTHON_RUNTIME OR WMFS_BUILD_REFERENCE_WORKER))
-  message(FATAL_ERROR "Python runtime and reference worker require the legacy Cap'n Proto protocol")
-endif()
 set(
   WMFS_BUNDLED_PLUGINS
   ""
@@ -178,29 +169,6 @@ if(WMFS_BUILD_REFERENCE_WORKER AND NOT TARGET wmfs-reference-kernels)
   target_compile_options(wmfs-reference-kernels PRIVATE ${TORCH_CXX_FLAGS})
 endif()
 
-if(WMFS_BUILD_CAPNP_PROTOCOL)
-  set(
-    WMFS_SCHEMA_ROOT
-    "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/protocol/schemas"
-  )
-  set(CAPNPC_SRC_PREFIX "${WMFS_SCHEMA_ROOT}")
-  set(CAPNPC_IMPORT_DIRS "${WMFS_SCHEMA_ROOT}")
-  capnp_generate_cpp(
-    WMFS_CAPNP_SOURCES
-    WMFS_CAPNP_HEADERS
-    packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp
-    packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp
-  )
-  add_library(wmfs-protocol STATIC ${WMFS_CAPNP_SOURCES})
-  add_library(wmfs::protocol ALIAS wmfs-protocol)
-  set_target_properties(wmfs-protocol PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_include_directories(
-    wmfs-protocol
-    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}"
-  )
-  target_link_libraries(wmfs-protocol PUBLIC CapnProto::capnp-rpc)
-endif()
-
 if(WMFS_BUILD_PYTHON_RUNTIME)
   find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
   execute_process(
@@ -227,7 +195,7 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
   )
   target_link_libraries(
     wmfs-native-runtime
-    PRIVATE wmfs::protocol CapnProto::kj-async
+    PRIVATE wmfs::control
   )
 
   install(
@@ -269,25 +237,12 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
 endif()
 
 if(WMFS_BUILD_REFERENCE_WORKER)
-  set(CAPNPC_SRC_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/schemas")
-  set(
-    CAPNPC_IMPORT_DIRS
-    "${WMFS_SCHEMA_ROOT}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/schemas"
-  )
-  capnp_generate_cpp(
-    REFERENCE_CAPNP_SOURCES
-    REFERENCE_CAPNP_HEADERS
-    plugins/reference/schemas/wmfs-reference/reference.capnp
-  )
-
   add_executable(
     wmfs-reference-worker
     src/reference_mapped_buffers.cpp
     src/reference_plugin_entry.cpp
     src/reference_worker.cpp
     plugins/reference/generated/src/reference_plugin_stub.cpp
-    ${REFERENCE_CAPNP_SOURCES}
   )
   target_include_directories(
     wmfs-reference-worker
@@ -295,15 +250,12 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       "${CMAKE_CURRENT_SOURCE_DIR}/inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/generated"
       "${CMAKE_CURRENT_SOURCE_DIR}/plugins/reference/generated/include"
-      "${CMAKE_CURRENT_BINARY_DIR}"
   )
   target_link_libraries(
     wmfs-reference-worker
     PRIVATE
-      CapnProto::capnp-rpc
-      CapnProto::kj-async
       Threads::Threads
-      wmfs::protocol
+      wmfs::control
       wmfs::ring
       wmfs-reference-kernels
   )
@@ -323,11 +275,10 @@ if(WMFS_BUILD_REFERENCE_WORKER)
       wmfs-reference-mapped-buffers-test
       PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/inc"
-        "${CMAKE_CURRENT_BINARY_DIR}"
     )
     target_link_libraries(
       wmfs-reference-mapped-buffers-test
-      PRIVATE wmfs::protocol Threads::Threads ${TORCH_LIBRARIES}
+      PRIVATE wmfs::control Threads::Threads ${TORCH_LIBRARIES}
     )
     target_compile_options(
       wmfs-reference-mapped-buffers-test
@@ -353,11 +304,6 @@ if(WMFS_BUILD_REFERENCE_WORKER)
   install(
     DIRECTORY plugins/reference/generated/
     DESTINATION share/wmfs/plugins/reference/generated
-    COMPONENT reference-worker
-  )
-  install(
-    FILES plugins/reference/schemas/wmfs-reference/reference.capnp
-    DESTINATION share/wmfs/plugins/reference/schemas/wmfs-reference
     COMPONENT reference-worker
   )
 endif()

@@ -212,10 +212,7 @@ def test_v1_manifest_has_frozen_none_configuration_and_accepts_only_empty(
     fixture.mkdir()
     schema.mkdir(parents=True)
     shutil.copy(V1 / "manifest.json", fixture / "manifest.json")
-    shutil.copy(
-        REFERENCE / "schemas/wmfs-reference/reference.capnp",
-        schema / "reference.capnp",
-    )
+    (schema / "reference.capnp").write_text("# frozen v1 path placeholder\n")
     candidate = Runtime()
     candidate.load_plugins(fixture)
     manifest = candidate._manifests["reference"]

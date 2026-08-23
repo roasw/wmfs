@@ -88,7 +88,6 @@
             ps.breathe
             ps.myst-parser
             ps.numpy
-            ps.pycapnp
             ps.sphinx
             ps.torch
           ]);

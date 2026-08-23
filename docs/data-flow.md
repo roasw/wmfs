@@ -115,8 +115,8 @@ Read next:
 The selected session batches all required mappings over the FD-control socket,
 then publishes a fixed-width command containing capabilities, tensor metadata,
 operation ID, and scalar values. Tensor payload bytes never enter a ring or
-Cap'n Proto message. Cap'n Proto handles startup metadata/environment and the
-versioned ring handshake only.
+control frame. The fixed control ABI handles startup identity/environment,
+liveness, shutdown, and transactional FD batches.
 
 Important implementations:
 
@@ -129,10 +129,9 @@ Important implementations:
   Python orchestration around the same ring protocol.
 - `packages/wmfs/wmfs/transport/fd_broker.py`, `FdSender.ensure_mapped_many`:
   Python batched FD sender.
-- `packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp`: startup/control
-  metadata protocol.
-- `packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp`: tensor and
-  batched buffer-transfer descriptors.
+- `packages/wmfs/wmfs/protocol/control.py`: startup, lifecycle, and batched
+  buffer-transfer protocol.
+- `inc/wmfs/protocol/control.h`: language-neutral fixed control ABI.
 
 ### 6. Worker Views And Kernel Dispatch
 

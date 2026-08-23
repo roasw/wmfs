@@ -93,7 +93,7 @@ queueing from dequeue to start, and completion wakeup from completion publish to
 runtime consumption. Runtime-local timers separately cover submission queueing,
 enqueue work, exact full-ring wait time, and consumer-to-caller materialization.
 `COMMAND_PING`/`COMPLETION_PONG` measure this ring path without a numerical
-kernel; Cap'n Proto ping is retained separately as a startup/control baseline.
+kernel; fixed-protocol ping is retained separately as a startup/control baseline.
 The capacity-pressure benchmark may set the ping operation field to a bounded
 worker hold in nanoseconds; that measured hold is reported as ping kernel time.
 

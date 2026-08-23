@@ -10,7 +10,6 @@ let
       build
       nanobind
       numpy
-      pycapnp
       pip
       scikit-build-core
       setuptools
@@ -30,7 +29,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     WMFS_GIT_VERSION = versions.git;
     nativeBuildInputs = [
       python
-      pkgs.capnproto
       pkgs.cmake
       pkgs.ninja
       pkgs.pkg-config
@@ -38,7 +36,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
       pkgs.unzip
     ];
     buildInputs = [
-      pkgs.capnproto
       pkgs.python3Packages.torch.dev
       pkgs.python3Packages.torch.lib
     ];
@@ -77,10 +74,9 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "pyproject.toml",
             "inc/wmfs/unique_fd.hpp",
             "packages/wmfs/wmfs/__init__.py",
-            "packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp",
+            "packages/wmfs/wmfs/protocol/control.py",
             "plugins/reference/generated/src/reference_plugin_stub.cpp",
             "plugins/reference/bundled.cmake",
-            "plugins/reference/schemas/wmfs-reference/reference.capnp",
           "src/native_module.cpp",
           "src/reference_kernels.cpp",
         },
@@ -89,8 +85,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "README.md",
             "pyproject.toml",
             "wmfs_plugin/__init__.py",
-            "wmfs_plugin/schemas/wmfs/runtime.capnp",
-            "wmfs_plugin/schemas/wmfs/tensor.capnp",
+            "wmfs_plugin/control.py",
         },
         "tool": {
             "README.md",
@@ -107,7 +102,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "generated/python/wmfs_reference/interface.py",
             "generated/src/reference_plugin_stub.cpp",
             "pyproject.toml",
-            "schemas/wmfs-reference/reference.capnp",
             "wmfs_reference/worker.py",
         },
         "reference-worker": {
@@ -155,7 +149,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     root = Path(sys.argv[1])
     checks = {
         "plugin": (
-            "wmfs_plugin/schemas/wmfs/runtime.capnp",
+            "wmfs_plugin/control.py",
         ),
         "tool": (
             "wmfs_tool/cli.py",
@@ -166,7 +160,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "share/wmfs/plugins/reference/generated/manifest.json",
             "share/wmfs/plugins/reference/generated/include/wmfs/plugin_abi.h",
             "share/wmfs/plugins/reference/generated/python/wmfs_reference/interface.py",
-            "share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp",
         ),
         "reference-worker": (
             "wmfs_reference_worker.py",
@@ -175,8 +168,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         "runtime": (
             "wmfs/__init__.py",
             "wmfs/_native",
-            "wmfs/protocol/schemas/wmfs/runtime.capnp",
-            "wmfs/protocol/schemas/wmfs/tensor.capnp",
+            "wmfs/protocol/control.py",
         ),
         "bundled": ("wmfs/_native", "wmfs/_bundled"),
     }
@@ -227,15 +219,14 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     import torch
     import wmfs
     import wmfs._native
-    from wmfs.protocol.schema import load_runtime_schema, schema_root
+    from wmfs.protocol import PROTOCOL_VERSION
 
     assert Path(wmfs.__file__).is_relative_to(Path(sys.prefix))
     expected_version = "${releaseVersion}"
     for distribution, module in (("wmfs", wmfs),):
         assert importlib.metadata.version(distribution) == expected_version
         assert module.__version__ == expected_version
-    assert (schema_root() / "wmfs" / "tensor.capnp").is_file()
-    assert int(load_runtime_schema().protocolVersion) > 0
+    assert PROTOCOL_VERSION > 0
     scripts = {
         entry.name: entry.value
         for distribution in ("wmfs",)

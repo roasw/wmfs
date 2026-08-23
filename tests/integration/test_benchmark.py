@@ -242,5 +242,5 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert "ring_round_trip_ms" in provenance["ring_control"]["metrics"]
     assert "not inferred by subtracting" in provenance["frontend_python"]["boundary"]
     assert "scalar bind" in render_table(report)
-    assert "Cap'n Proto startup/control ping" in render_table(report)
+    assert "fixed startup/control ping" in render_table(report)
     validate_report(report)

@@ -65,12 +65,10 @@ in
     WMFS_GIT_VERSION = versions.git;
 
     nativeBuildInputs = with pkgs; [
-      capnproto
       cmake
       ninja
     ];
     buildInputs = [
-      pkgs.capnproto
       pkgs.python3Packages.torch.dev
       pkgs.python3Packages.torch.lib
     ];

@@ -186,16 +186,13 @@ def test_python_reference_hot_path_does_not_call_operation_rpc() -> None:
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
 
-    class HostileOperationRpc:
-        def __getattr__(self, name: str) -> object:
-            if name in {"invokeKnown", "invokeKnownProfiled", "planOutputs"}:
-                raise AssertionError(f"operation RPC {name} was accessed")
-            raise AttributeError(name)
-
     try:
         backend = candidate._backends["isolated"]
         session = backend._sessions["reference"]
-        session._plugin = HostileOperationRpc()
+        assert not any(
+            hasattr(session._plugin, name)
+            for name in ("invokeKnown", "invokeKnownProfiled", "planOutputs")
+        )
         source = torch.tensor([[0.0, 2.0], [3.0, 0.0]])
 
         torch.testing.assert_close(

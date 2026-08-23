@@ -6,9 +6,8 @@ import torch
 
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
-from wmfs.protocol.metadata import metadata_from_reader, validate_operation_metadata
+from wmfs.protocol.metadata import validate_operation_metadata
 from wmfs.registry import OperationMetadata, OutputPlan, TensorParameter
-from wmfs.transport.worker_process import _load_plugin_schema
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
@@ -35,9 +34,7 @@ def test_dynamic_output_plans_are_accepted_for_read_only_inputs() -> None:
 
 def test_reference_output_plans_evaluate_rectangular_operations() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
-    schema = _load_plugin_schema(manifest)
-    metadata = metadata_from_reader(schema.pluginMetadata)
-    operations = {item.name: item for item in metadata.operations}
+    operations = {item.name: item for item in manifest.metadata.operations}
 
     from wmfs.output_metadata import evaluate_outputs
 

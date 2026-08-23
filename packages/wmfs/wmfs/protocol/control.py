@@ -1,6 +1,5 @@
-"""Additive fixed-width startup and FD-control protocol v1.
+"""Production fixed-width startup, lifecycle, and FD-control protocol v1.
 
-This module is intentionally not wired into the production Cap'n Proto path.
 All integers on the wire are explicitly little-endian.
 """
 

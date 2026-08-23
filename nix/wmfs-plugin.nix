@@ -22,7 +22,6 @@ pkgs.python3Packages.buildPythonPackage {
   ];
   dependencies = with pkgs.python3Packages; [
     numpy
-    pycapnp
     torch
   ];
 

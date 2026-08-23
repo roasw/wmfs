@@ -9,8 +9,6 @@ namespace = "mode_neutral"
 python_module = "wmfs_mode_neutral"
 
 [deployment]
-schema = "../schemas/mode-neutral.capnp"
-interface = "ModeNeutralPlugin"
 root = ".."
 worker = "wmfs-mode-neutral-worker"
 local_provider = "wmfs_mode_neutral.kernels"

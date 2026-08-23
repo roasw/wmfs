@@ -3,9 +3,7 @@ import re
 import tomllib
 from pathlib import Path
 
-import capnp
-
-from wmfs.protocol.schema import PROTOCOL_VERSION, schema_root
+from wmfs.protocol import PROTOCOL_VERSION
 
 ROOT = Path(__file__).parents[2]
 
@@ -83,12 +81,10 @@ def test_plugin_protocol_version_is_independent() -> None:
     )
     plugin_version = manifest["plugin"]["version"]
 
-    schema_path = ROOT / "plugins/reference/schemas/wmfs-reference/reference.capnp"
-    schema = capnp.load(
-        str(schema_path), imports=[str(schema_root()), str(schema_path.parent.parent)]
-    )
-    assert str(schema.pluginMetadata.version) == plugin_version
-    assert int(schema.pluginMetadata.protocolVersion) == PROTOCOL_VERSION
+    assert manifest["protocolVersion"] == PROTOCOL_VERSION
+    assert manifest["controlAbiVersion"] == 1
+    assert "schema" not in manifest["deployment"]
+    assert "interface" not in manifest["deployment"]
 
     generated_python = (
         ROOT / "plugins/reference/wmfs_reference/_generated.py"

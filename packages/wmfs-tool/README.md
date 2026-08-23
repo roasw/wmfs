@@ -3,7 +3,7 @@
 `wmfs-tool` compiles a versioned TOML plugin interface into deterministic
 runtime metadata and C/C++11 and Python plugin-facing artifacts. It is an
 independent build-time package and does not depend on the WMFS runtime, plugin
-SDK, PyTorch, or Cap'n Proto.
+SDK, PyTorch, or runtime transport libraries.
 
 Install it in plugin build and CI environments, not in application or worker
 runtime environments. Python workers consume its generated adapters through

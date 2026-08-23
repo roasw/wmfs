@@ -77,8 +77,6 @@ def load_interface(path: Path) -> Plugin:
     _keys(
         deployment,
         {
-            "schema",
-            "interface",
             "root",
             "worker",
             "local_provider",
@@ -124,14 +122,8 @@ def load_interface(path: Path) -> Plugin:
             _required(deployment, "worker", "interface.deployment"),
             "deployment.worker",
         ),
-        schema=_string(
-            _required(deployment, "schema", "interface.deployment"),
-            "deployment.schema",
-        ),
-        interface=_identifier(
-            _required(deployment, "interface", "interface.deployment"),
-            "deployment.interface",
-        ),
+        schema="",
+        interface="",
         deployment_root=_string(
             _required(deployment, "root", "interface.deployment"),
             "deployment.root",

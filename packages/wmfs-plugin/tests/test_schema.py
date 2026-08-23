@@ -1,16 +1,7 @@
-from wmfs_plugin.schema import (
-    PROTOCOL_VERSION,
-    load_runtime_schema,
-    load_tensor_schema,
-    schema_root,
-)
+from wmfs_plugin import PROTOCOL_VERSION
+from wmfs_plugin.control import ABI_MAJOR, ABI_MINOR
 
 
-def test_protocol_schemas_are_packaged_and_loadable() -> None:
-    root = schema_root()
-
-    assert (root / "wmfs" / "runtime.capnp").is_file()
-    assert (root / "wmfs" / "tensor.capnp").is_file()
+def test_fixed_protocol_versions_are_available_without_dynamic_schemas() -> None:
     assert PROTOCOL_VERSION == 11
-    assert int(load_runtime_schema().protocolVersion) == PROTOCOL_VERSION
-    assert load_tensor_schema().TensorDescriptor is not None
+    assert (ABI_MAJOR, ABI_MINOR) == (1, 0)

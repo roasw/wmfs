@@ -9,8 +9,6 @@ namespace = "reference"
 python_module = "wmfs_reference"
 
 [deployment]
-schema = "../schemas/wmfs-reference/reference.capnp"
-interface = "ReferencePlugin"
 root = ".."
 worker = "wmfs-reference-worker"
 local_provider = "wmfs_reference.kernels"

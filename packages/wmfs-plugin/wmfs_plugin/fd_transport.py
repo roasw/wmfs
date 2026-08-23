@@ -1,4 +1,3 @@
-import array
 import mmap
 import os
 import socket
@@ -6,11 +5,22 @@ import threading
 import warnings
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from types import ModuleType
 
 import torch
 
-_MAX_CONTROL_MESSAGE_BYTES = 64 * 1024
+from wmfs_plugin.control import (
+    FdAck,
+    FdEntryKind,
+    FdFlag,
+    ProtocolError,
+    Status,
+    close_fds,
+    decode_fd_batch,
+    encode_fd_ack,
+    recvmsg_strict,
+    sendmsg_strict,
+)
+
 _DTYPES: dict[str, torch.dtype] = {
     "float32": torch.float32,
     "float64": torch.float64,
@@ -235,12 +245,12 @@ class FdReceiver:
     def __init__(
         self,
         transfer_socket: socket.socket,
-        tensor_schema: ModuleType,
         cache: MappedBufferCache,
+        session_generation: int,
     ) -> None:
         self._socket = transfer_socket
-        self._schema = tensor_schema
         self._cache = cache
+        self._session_generation = session_generation
         self._thread = threading.Thread(target=self._serve, daemon=True)
 
     def start(self) -> None:
@@ -257,89 +267,69 @@ class FdReceiver:
             raise RuntimeError("FD receiver did not stop")
 
     def _serve(self) -> None:
-        descriptor_size = array.array("i").itemsize
-        ancillary_size = socket.CMSG_SPACE(descriptor_size * 256)
         while True:
             try:
-                message, ancillary, flags, _address = self._socket.recvmsg(
-                    _MAX_CONTROL_MESSAGE_BYTES,
-                    ancillary_size,
-                    socket.MSG_CMSG_CLOEXEC,
-                )
-            except OSError:
+                message, received_fds = recvmsg_strict(self._socket)
+            except (OSError, EOFError):
                 return
-            if not message:
+            except ProtocolError:
+                self._cache.invalidate()
+                try:
+                    self._socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
                 return
 
             transfer_id = 0
-            received_fds: list[int] = []
+            request_id = 0
             try:
-                received_fds = _extract_fds(ancillary)
-                if flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC):
-                    raise ValueError("FD transfer message was truncated")
-                with self._schema.BufferTransfer.from_bytes(message) as transfer:
-                    transfer_id = int(transfer.transferId)
-                    entries = tuple(transfer.entries)
-                    map_count = sum(entry.which() == "map" for entry in entries)
-                    if len(received_fds) != map_count:
-                        raise ValueError(
-                            "Buffer batch descriptor count does not match map entries"
+                request_id, transfer = decode_fd_batch(message)
+                transfer_id = transfer.transfer_id
+                if transfer.session_generation != self._session_generation:
+                    raise ValueError("FD batch has the wrong session generation")
+                fd_index = 0
+                for entry in transfer.entries:
+                    if entry.kind == FdEntryKind.MAP:
+                        fd = received_fds[fd_index]
+                        fd_index += 1
+                        self._cache.add(
+                            buffer_id=entry.buffer_id,
+                            generation=entry.generation,
+                            allocation_id=entry.allocation_id,
+                            byte_length=entry.byte_length,
+                            writable=bool(entry.flags & FdFlag.WRITABLE),
+                            arena=bool(entry.flags & FdFlag.ARENA),
+                            invocation_id=entry.invocation_id,
+                            fd=fd,
                         )
-                    for entry in entries:
-                        if entry.which() == "map":
-                            fd = received_fds.pop(0)
-                            self._cache.add(
-                                buffer_id=int(entry.bufferId),
-                                generation=int(entry.generation),
-                                allocation_id=int(entry.allocationId),
-                                byte_length=int(entry.byteLength),
-                                writable=bool(entry.writable),
-                                arena=bool(entry.arena),
-                                invocation_id=int(entry.invocationId),
-                                fd=fd,
-                            )
-                        else:
-                            self._cache.retire(
-                                buffer_id=int(entry.bufferId),
-                                generation=int(entry.generation),
-                                allocation_id=int(entry.allocationId),
-                            )
-                acknowledgement = self._schema.BufferTransferAck.new_message(
-                    transferId=transfer_id
+                        received_fds[fd_index - 1] = -1
+                    else:
+                        self._cache.retire(
+                            buffer_id=entry.buffer_id,
+                            generation=entry.generation,
+                            allocation_id=entry.allocation_id,
+                        )
+                acknowledgement = FdAck(
+                    transfer_id, self._session_generation, Status.OK
                 )
-                acknowledgement.accepted = None
             except Exception as error:
-                for fd in received_fds:
-                    os.close(fd)
+                close_fds([fd for fd in received_fds if fd >= 0])
                 self._cache.invalidate()
-                acknowledgement = self._schema.BufferTransferAck.new_message(
-                    transferId=transfer_id
+                acknowledgement = FdAck(
+                    transfer_id,
+                    self._session_generation,
+                    Status.INVALID_ARGUMENT,
+                    str(error)[:1024],
                 )
-                acknowledgement.error = str(error)
             try:
-                payload = acknowledgement.to_bytes()
-                if self._socket.send(payload) != len(payload):
-                    return
+                sendmsg_strict(
+                    self._socket,
+                    encode_fd_ack(acknowledgement, request_id=request_id),
+                )
             except OSError:
                 return
-            if acknowledgement.which() == "error":
+            if acknowledgement.status != Status.OK:
                 return
-
-
-def _extract_fds(ancillary: list[tuple[int, int, bytes]]) -> list[int]:
-    descriptors = array.array("i")
-    try:
-        for level, kind, data in ancillary:
-            if level != socket.SOL_SOCKET or kind != socket.SCM_RIGHTS:
-                raise ValueError("FD transfer contains unsupported ancillary data")
-            if len(data) % descriptors.itemsize:
-                raise ValueError("FD transfer contains a malformed descriptor array")
-            descriptors.frombytes(data)
-    except BaseException:
-        for fd in descriptors:
-            os.close(fd)
-        raise
-    return descriptors.tolist()
 
 
 def _validate_view(

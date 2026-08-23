@@ -5,14 +5,13 @@ import pytest
 import torch
 
 from wmfs.memory import BufferManager
-from wmfs.protocol.schema import load_tensor_schema
 from wmfs.transport.fd_broker import FdSender
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
 
 
 def test_sender_close_makes_later_retirement_a_noop() -> None:
     sender_socket, peer_socket = socket.socketpair(type=socket.SOCK_SEQPACKET)
-    sender = FdSender(sender_socket, load_tensor_schema())
+    sender = FdSender(sender_socket, 1)
     buffer = SimpleNamespace(id=1, generation=1)
     sender._mapped_buffers[(1, 1)] = object()
     try:
@@ -29,11 +28,10 @@ def test_sender_close_makes_later_retirement_a_noop() -> None:
 
 def test_sender_orders_read_only_upgrade_in_one_batch() -> None:
     sender_socket, receiver_socket = socket.socketpair(type=socket.SOCK_SEQPACKET)
-    schema = load_tensor_schema()
     cache = MappedBufferCache()
-    receiver = FdReceiver(receiver_socket, schema, cache)
+    receiver = FdReceiver(receiver_socket, cache, 1)
     receiver.start()
-    sender = FdSender(sender_socket, schema)
+    sender = FdSender(sender_socket, 1)
     with BufferManager() as manager:
         managed = manager.from_tensor(torch.arange(4, dtype=torch.float32))
         try:
@@ -74,7 +72,7 @@ def test_sender_orders_read_only_upgrade_in_one_batch() -> None:
 
 def test_sender_honors_short_fd_transfer_timeout() -> None:
     sender_socket, peer_socket = socket.socketpair(type=socket.SOCK_SEQPACKET)
-    sender = FdSender(sender_socket, load_tensor_schema(), timeout=0.02)
+    sender = FdSender(sender_socket, 1, timeout=0.02)
     with BufferManager() as manager:
         managed = manager.from_tensor(torch.arange(1, dtype=torch.float32))
         try:

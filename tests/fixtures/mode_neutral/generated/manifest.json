@@ -1,13 +1,12 @@
 {
     "abiVersion": 1,
     "configuration": null,
+    "controlAbiVersion": 1,
     "deployment": {
         "bundledNamespace": "wmfs_mode_neutral",
         "entrySymbol": "wmfs_mode_neutral_plugin_get_api",
-        "interface": "ModeNeutralPlugin",
         "localProvider": "wmfs_mode_neutral.kernels",
         "root": "..",
-        "schema": "../schemas/mode-neutral.capnp",
         "worker": "wmfs-mode-neutral-worker"
     },
     "enums": [],
@@ -76,5 +75,6 @@
         "pythonModule": "wmfs_mode_neutral",
         "version": "0.1.0"
     },
-    "protocolVersion": 11
+    "protocolVersion": 11,
+    "startupCapabilities": 55
 }

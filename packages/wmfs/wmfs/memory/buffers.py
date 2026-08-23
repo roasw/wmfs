@@ -46,31 +46,6 @@ class TensorDescriptor:
     shape: tuple[int, ...]
     strides: tuple[int, ...]
 
-    def as_capnp(self) -> dict[str, object]:
-        return {
-            "bufferId": self.buffer_id,
-            "generation": self.generation,
-            "allocationId": self.allocation_id,
-            "offset": self.offset,
-            "byteLength": self.byte_length,
-            "dtype": self.dtype,
-            "shape": self.shape,
-            "strides": self.strides,
-        }
-
-    @classmethod
-    def from_capnp(cls, descriptor: object) -> "TensorDescriptor":
-        return cls(
-            buffer_id=int(descriptor.bufferId),
-            generation=int(descriptor.generation),
-            allocation_id=int(descriptor.allocationId),
-            offset=int(descriptor.offset),
-            byte_length=int(descriptor.byteLength),
-            dtype=str(descriptor.dtype),
-            shape=tuple(int(item) for item in descriptor.shape),
-            strides=tuple(int(item) for item in descriptor.strides),
-        )
-
 
 class _MemoryRegion:
     def __init__(self, buffer_id: int, byte_length: int) -> None:

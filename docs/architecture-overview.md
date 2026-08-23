@@ -119,9 +119,9 @@ operation catalog.
 ```
 
 Discovery is eager and transactional: one persistent worker per plugin starts
-during `discover_plugins`, not on the first operation. Cap'n Proto currently
-carries startup metadata, environment inspection, lifecycle control, and the
-versioned ring handshake. Operation traffic uses the rings after startup.
+during `discover_plugins`, not on the first operation. The fixed control ABI
+carries startup identity and environment, lifecycle control, and exact ring/FD
+descriptor roles. Operation traffic uses the rings after startup.
 
 **Key invariants and nuances**
 
@@ -141,8 +141,8 @@ versioned ring handshake. Operation traffic uses the rings after startup.
   Python control-mode startup and validation.
 - [`NativeWorkerSession.__init__`](../packages/wmfs/wmfs/transport/native_worker.py):
   native control-mode startup orchestrated from Python.
-- [`runtime.capnp`](../packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp):
-  current startup/control schema.
+- [`control.py`](../packages/wmfs/wmfs/protocol/control.py): fixed startup,
+  lifecycle, and FD-control codec.
 
 ## 4. Steady-State Hot Path
 
@@ -164,8 +164,8 @@ pages; records contain bounded fixed-width descriptors and scalar metadata.
 
 - No public future, command, ring, worker, or shared-memory handle leaks into the
   ordinary API.
-- Discovery, registration, and worker launch happen before this path. Cap'n
-  Proto is not used for normal operation calls.
+- Discovery, registration, and worker launch happen before this path. Control
+  messages are not used for normal operation calls.
 - Full rings apply bounded backpressure and eventfd waits; they never overwrite
   unread records or busy-spin without bound.
 
@@ -200,7 +200,7 @@ without copying; an unmanaged CPU tensor incurs one ingress copy.
 
 **Key invariants and nuances**
 
-- Numerical payload bytes never enter Cap'n Proto or a ring record.
+- Numerical payload bytes never enter control frames or ring records.
 - Read-only input access is the default; writable mappings and access leases are
   explicit. Pooled mode preserves per-buffer capabilities, while trusted arena
   mode deliberately exposes one persistent writable mapping.
@@ -218,8 +218,8 @@ without copying; an unmanaged CPU tensor incurs one ingress copy.
   worker mapped-buffer endpoint.
 - [`MappedBufferCache`](../src/reference_mapped_buffers.cpp): C++ worker mapping
   validation, ATen view construction, and lifetime.
-- [`tensor.capnp`](../packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp):
-  startup/control mapping descriptors, not tensor payload serialization.
+- [`control.h`](../inc/wmfs/protocol/control.h): fixed transactional mapping
+  descriptors and acknowledgements, not tensor payload serialization.
 
 ## 6. Output Allocation
 
@@ -319,7 +319,7 @@ calling transport-neutral LibTorch kernels.
 **Key invariants and nuances**
 
 - `wmfs-plugin` never imports `wmfs`, and the runtime never imports the SDK.
-- Their independently packaged startup schemas, metadata models, ring constants,
+- Their independently packaged control codecs, metadata models, ring constants,
   and codecs are parity-tested.
 - The generated plugin-facing C ABI describes the intended stable C++ plugin
   boundary, but current reference ring dispatch remains worker-specific.
@@ -329,7 +329,7 @@ calling transport-neutral LibTorch kernels.
 - [`native_worker.py`](../packages/wmfs/wmfs/transport/native_worker.py): Python
   orchestration combining native startup/FD control with `_RingClient`.
 - [`src/native_session.cpp`](../src/native_session.cpp): nanobind session's
-  Cap'n Proto and FD-control implementation.
+  fixed lifecycle and FD-control implementation.
 - [`wmfs_plugin/worker.py`](../packages/wmfs-plugin/wmfs_plugin/worker.py): Python
   worker bootstrap and ring dispatch.
 - [`src/reference_worker.cpp`](../src/reference_worker.cpp): C++ reference
@@ -342,7 +342,7 @@ calling transport-neutral LibTorch kernels.
 ## Benchmarks and Cross-Boundary Tests
 
 The architecture is measured rather than inferred. `wmfs-benchmark` separates
-worker startup, Cap'n Proto startup/control ping, ring enqueue and wakeups,
+worker startup, fixed startup/control ping, ring enqueue and wakeups,
 backpressure, first-use FD transfer and mapping, cached mappings, output
 allocation, worker view construction, kernel time, result materialization, and
 reclamation. It compares local, bundled, and isolated execution using equivalent

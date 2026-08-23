@@ -1,13 +1,5 @@
 """Runtime-owned stable protocol definitions."""
 
-from typing import Any
+PROTOCOL_VERSION = 11
 
-__all__ = ["PROTOCOL_VERSION", "schema_root"]
-
-
-def __getattr__(name: str) -> Any:
-    if name in {"PROTOCOL_VERSION", "schema_root"}:
-        from wmfs.protocol.schema import PROTOCOL_VERSION, schema_root
-
-        return {"PROTOCOL_VERSION": PROTOCOL_VERSION, "schema_root": schema_root}[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["PROTOCOL_VERSION"]

@@ -8,7 +8,6 @@ import pytest
 import torch
 
 import wmfs
-import wmfs.transport.native_worker as native_worker_module
 import wmfs.transport.worker_process as worker_process_module
 from wmfs.memory import BufferManager
 from wmfs.plugins import discover_plugins, find_manifests, load_manifest
@@ -24,8 +23,9 @@ def test_finds_reference_plugin_manifest() -> None:
 
     assert len(manifests) == 1
     assert manifests[0].name == "reference"
-    assert manifests[0].interface == "ReferencePlugin"
-    assert manifests[0].schema_path.is_file()
+    assert manifests[0].interface is None
+    assert manifests[0].schema_path is None
+    assert manifests[0].control_abi_version == 1
     assert manifests[0].metadata.fingerprint == 0xF6ED5672A8A496CB
 
 
@@ -150,7 +150,7 @@ def test_discovery_session_is_reused_for_first_invocation(
     monkeypatch: pytest.MonkeyPatch, control_mode: str
 ) -> None:
     starts = 0
-    module = native_worker_module if control_mode == "native" else worker_process_module
+    module = worker_process_module
     original = module._start_worker
 
     def counted_start(*args: object, **kwargs: object) -> object:
@@ -184,7 +184,9 @@ def test_worker_session_rejects_metadata_changed_after_discovery() -> None:
             WorkerSession(manifest, buffers, expected)
 
     assert raised.value.__cause__ is not None
-    assert "metadata changed after plugin discovery" in str(raised.value.__cause__)
+    assert (
+        "metadata changed after plugin discovery" in str(raised.value.__cause__).lower()
+    )
 
 
 def test_manifest_discovery_does_not_import_plugin_code(
@@ -218,17 +220,11 @@ def test_manifest_rejects_interface_and_metadata_drift(tmp_path: Path) -> None:
 def test_finds_installed_generated_manifest_layout(tmp_path: Path) -> None:
     plugin_root = tmp_path / "share" / "wmfs" / "plugins" / "reference"
     generated = plugin_root / "generated"
-    schema = plugin_root / "schemas" / "wmfs-reference"
     generated.mkdir(parents=True)
-    schema.mkdir(parents=True)
     source_root = PLUGIN_DIRECTORY / "reference"
     (generated / "manifest.json").write_bytes(
         (source_root / "generated" / "manifest.json").read_bytes()
     )
-    (schema / "reference.capnp").write_bytes(
-        (source_root / "schemas" / "wmfs-reference" / "reference.capnp").read_bytes()
-    )
-
     manifests = find_manifests([plugin_root.parent])
 
     assert len(manifests) == 1

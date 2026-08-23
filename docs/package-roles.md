@@ -90,7 +90,7 @@ include:
 Generated artifacts are committed to or packaged with the plugin. Neither the
 application runtime nor the deployed worker runs `wmfs-tool`, so it is not a
 runtime dependency. The compiler itself has no dependency on `wmfs`,
-`wmfs-plugin`, PyTorch, or Cap'n Proto.
+`wmfs-plugin`, PyTorch, or runtime transport libraries.
 
 ## Plugin Workflows
 

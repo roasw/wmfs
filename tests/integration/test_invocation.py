@@ -14,16 +14,13 @@ from wmfs.invocation import (
 )
 from wmfs.memory import BufferManager, ManagedTensor
 from wmfs.plugins import find_manifests
-from wmfs.protocol.metadata import metadata_from_reader
-from wmfs.transport.worker_process import _load_plugin_schema
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
 def _operation(name: str) -> object:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
-    metadata = metadata_from_reader(_load_plugin_schema(manifest).pluginMetadata)
-    return next(item for item in metadata.operations if item.name == name)
+    return next(item for item in manifest.metadata.operations if item.name == name)
 
 
 def test_invocation_binding_normalizes_scalars() -> None:

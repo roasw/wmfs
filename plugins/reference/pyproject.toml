@@ -28,9 +28,5 @@ include = ["wmfs_reference*"]
 "share/wmfs/plugins/reference/generated" = [
     "generated/manifest.json",
 ]
-"share/wmfs/plugins/reference/schemas/wmfs-reference" = [
-    "schemas/wmfs-reference/reference.capnp",
-]
-
 [tool.setuptools_scm]
 fallback_version = "0.0.0+gunknown"

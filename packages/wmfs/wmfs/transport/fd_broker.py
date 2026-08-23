@@ -1,14 +1,21 @@
-import array
 import os
 import secrets
 import socket
 import threading
 from dataclasses import dataclass
-from types import ModuleType
 
 from wmfs.memory.buffers import SharedBuffer
-
-_MAX_CONTROL_MESSAGE_BYTES = 64 * 1024
+from wmfs.protocol.control import (
+    FdBatch,
+    FdEntry,
+    FdEntryKind,
+    FdFlag,
+    Status,
+    decode_fd_ack,
+    encode_fd_batch,
+    recvmsg_strict,
+    sendmsg_strict,
+)
 
 
 @dataclass(frozen=True)
@@ -23,11 +30,11 @@ class FdSender:
     def __init__(
         self,
         transfer_socket: socket.socket,
-        tensor_schema: ModuleType,
+        session_generation: int,
         timeout: float = 5.0,
     ) -> None:
         self._socket = transfer_socket
-        self._schema = tensor_schema
+        self._session_generation = session_generation
         self._mapped_buffers: dict[tuple[int, int], _RemoteMapping] = {}
         self._lock = threading.Lock()
         self._socket.settimeout(timeout)
@@ -58,7 +65,7 @@ class FdSender:
     ) -> tuple[bool, ...]:
         with self._lock:
             self._ensure_usable()
-            entries: list[dict[str, object]] = []
+            entries: list[FdEntry] = []
             descriptors: list[int] = []
             pending: list[tuple[tuple[int, int], _RemoteMapping]] = []
             results: list[bool] = []
@@ -102,7 +109,7 @@ class FdSender:
                 if not descriptors:
                     return tuple(results)
                 sending = True
-                self._send(entries, descriptors)
+                batches = self._send_batched(entries, descriptors)
             except BaseException:
                 if not sending:
                     for descriptor in descriptors:
@@ -114,11 +121,11 @@ class FdSender:
             for _key, mapping in pending:
                 if not mapping.arena:
                     mapping.buffer.register_recipient(self)
-            self.mapping_batch_count += 1
+            self.mapping_batch_count += batches
             self.transfer_count += len(descriptors)
             self.retirement_count += len(entries) - len(descriptors)
             if len(entries) != len(descriptors):
-                self.retirement_batch_count += 1
+                self.retirement_batch_count += batches
             return tuple(results)
 
     def finish_invocation(self, invocation_id: int) -> None:
@@ -181,7 +188,7 @@ class FdSender:
             return
         self._ensure_usable()
         try:
-            self._send(
+            batches = self._send_batched(
                 [self._entry(mapping.buffer, map_buffer=False) for mapping in mappings],
                 [],
             )
@@ -192,7 +199,7 @@ class FdSender:
             self._mapped_buffers.pop(
                 (mapping.buffer.id, mapping.buffer.generation), None
             )
-        self.retirement_batch_count += 1
+        self.retirement_batch_count += batches
         self.retirement_count += len(mappings)
 
     def _entry(
@@ -202,49 +209,68 @@ class FdSender:
         map_buffer: bool,
         invocation_id: int = 0,
         writable: bool = False,
-    ) -> dict[str, object]:
-        return {
-            "invocationId": invocation_id,
-            "bufferId": buffer.id,
-            "generation": buffer.generation,
-            "allocationId": buffer.allocation_id,
-            "byteLength": buffer.mapping_byte_length,
-            "writable": writable,
-            "arena": buffer.arena if map_buffer else False,
-            "map" if map_buffer else "retire": None,
-        }
+    ) -> FdEntry:
+        flags = FdFlag(0)
+        if map_buffer and writable:
+            flags |= FdFlag.WRITABLE
+        if map_buffer and buffer.arena:
+            flags |= FdFlag.ARENA
+        return FdEntry(
+            FdEntryKind.MAP if map_buffer else FdEntryKind.RETIRE,
+            buffer.id,
+            buffer.generation,
+            buffer.allocation_id,
+            invocation_id if map_buffer else 0,
+            buffer.mapping_byte_length,
+            flags,
+        )
 
-    def _send(self, entries: list[dict[str, object]], descriptors: list[int]) -> None:
+    def _send(self, entries: list[FdEntry], descriptors: list[int]) -> None:
         try:
-            message = self._schema.BufferTransfer.new_message(
-                transferId=secrets.randbits(64), entries=entries
+            transfer_id = secrets.randbits(64) or 1
+            request_id = secrets.randbits(64) or 1
+            packet = encode_fd_batch(
+                FdBatch(transfer_id, self._session_generation, tuple(entries)),
+                request_id=request_id,
             )
-            payload = message.to_bytes()
-            if descriptors:
-                rights = array.array("i", descriptors)
-                sent = self._socket.sendmsg(
-                    [payload], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)]
+            sendmsg_strict(self._socket, packet, tuple(descriptors))
+            response, response_fds = recvmsg_strict(self._socket)
+            if response_fds:
+                raise RuntimeError(
+                    "FD acknowledgement unexpectedly carried descriptors"
                 )
-            else:
-                sent = self._socket.send(payload)
-            if sent != len(payload):
-                raise RuntimeError("Buffer control message was not sent atomically")
-
-            response = self._socket.recv(_MAX_CONTROL_MESSAGE_BYTES)
-            if not response:
-                raise RuntimeError("FD transfer socket closed before acknowledgement")
-            with self._schema.BufferTransferAck.from_bytes(response) as acknowledgement:
-                if acknowledgement.transferId != message.transferId:
-                    raise RuntimeError(
-                        "Worker acknowledged an unexpected buffer request"
-                    )
-                if acknowledgement.which() == "error":
-                    raise RuntimeError(
-                        f"Worker rejected buffer request: {acknowledgement.error}"
-                    )
+            response_id, acknowledgement = decode_fd_ack(response)
+            if (
+                response_id != request_id
+                or acknowledgement.transfer_id != transfer_id
+                or acknowledgement.session_generation != self._session_generation
+            ):
+                raise RuntimeError("Worker acknowledged an unexpected buffer request")
+            if acknowledgement.status != Status.OK:
+                raise RuntimeError(
+                    f"Worker rejected buffer request: {acknowledgement.error}"
+                )
         finally:
             for descriptor in descriptors:
                 os.close(descriptor)
+
+    def _send_batched(self, entries: list[FdEntry], descriptors: list[int]) -> int:
+        descriptor_index = 0
+        batches = 0
+        try:
+            for offset in range(0, len(entries), 240):
+                batch_entries = entries[offset : offset + 240]
+                count = sum(entry.kind == FdEntryKind.MAP for entry in batch_entries)
+                batch_descriptors = descriptors[
+                    descriptor_index : descriptor_index + count
+                ]
+                descriptor_index += count
+                self._send(batch_entries, batch_descriptors)
+                batches += 1
+        finally:
+            for descriptor in descriptors[descriptor_index:]:
+                os.close(descriptor)
+        return batches
 
     def _ensure_usable(self) -> None:
         if self._failed:

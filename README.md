@@ -10,7 +10,7 @@ Architecture: [diagram-driven project overview](docs/architecture-overview.md)
 
 `wmfs` is a prototype scientific-computing runtime for transparently running
 selected Python function calls in isolated worker processes. Its low-latency
-path uses startup-only Cap'n Proto control, asynchronous command/completion
+path uses fixed startup/lifecycle control, asynchronous command/completion
 rings, shared CPU tensors, and an independently deployed C++ worker linked to
 its own LibTorch environment. Ordinary Python calls remain synchronous and
 return tensor results; asynchronous submissions are private runtime machinery.
@@ -32,14 +32,14 @@ dependency graph.
 ## Development Build
 
 The `wmfs` Python distribution lives under `packages/wmfs` and owns the runtime
-protocol schemas and codecs. The independent Python worker SDK lives under
-`packages/wmfs-plugin` and carries compatible worker-side copies.
+protocol records and codecs. The independent Python worker SDK lives under
+`packages/wmfs-plugin` and carries compatible worker-side codecs.
 Root-level CMake, C++ sources, tests, plugins, Nix definitions, and benchmarks
 remain shared repository infrastructure.
 
 The development shell inherits build inputs from the runtime and worker package
 derivations with `inputsFrom`. This keeps the CMake and package builds on the
-same Python, Cap'n Proto, nanobind, Torch, compiler, and linker dependencies.
+same Python, nanobind, Torch, compiler, and linker dependencies.
 
 The shell provides a `justfile` that configures one CMake tree for both the
 native runtime extension and C++ reference worker, then installs the runnable
@@ -189,7 +189,7 @@ c = wmfs.matmul(a, b)
 
 The bundled extension is loaded lazily on its first invocation. It calls the
 same transport-neutral C++ kernels as the isolated worker but does not create a
-worker, allocate shared memory, transfer file descriptors, or use Cap'n Proto.
+worker, allocate shared memory, or transfer file descriptors.
 Bundled plugins must use the application's compiler ABI, glibc, LibTorch, and
 dependency versions, and a plugin failure can terminate the application.
 
@@ -204,11 +204,11 @@ Only Python worker distributions depend on the standalone `wmfs-plugin`
 distribution; the main runtime, C++ workers, and generated C++ artifacts do not.
 The SDK source does not import `wmfs`. For v0.1 its invocation,
 shared-memory transport, and worker layers deliberately target Torch CPU
-tensors. The wire schemas and metadata model are Torch-independent and can be
+tensors. The fixed protocol and metadata model are Torch-independent and can be
 imported by control-plane tooling without loading Torch. Both layers remain in
 one SDK distribution until a separate package has a concrete use case.
 
-The SDK provides worker-side protocol schema copies, an FD receiver, mapped
+The SDK provides worker-side fixed protocol codecs, an FD receiver, mapped
 Torch views, and metadata-driven worker bootstrap:
 
 ```python
@@ -239,7 +239,7 @@ wmfs-tool generate --interface interface.toml --output generated --check
 
 The generated manifest is read before worker launch. Startup validates metadata,
 the ring handshake, and the worker environment once; operation calls use rings,
-not per-operation Cap'n Proto discovery or RPC:
+not per-operation discovery or RPC:
 
 ```python
 from pathlib import Path
@@ -394,8 +394,8 @@ runtime.configure_control("native")  # or "python"
 runtime.discover_plugins(Path("plugins"))
 ```
 
-Cap'n Proto is restricted to startup metadata, environment, compatibility, and
-shutdown control. The native session submits operations asynchronously to the
+The fixed control ABI owns startup identity/environment, liveness, shutdown,
+and FD acknowledgements. The native session submits operations asynchronously to the
 command ring and consumes completion records on a dedicated dispatcher; the
 Python layer waits internally and preserves the synchronous Torch API. FD
 mapping control remains on the `SCM_RIGHTS` channel. Neither the native extension
@@ -406,7 +406,7 @@ process-level plugin isolation for that code.
 
 The packaged reference worker implements the server control plane in C++20 and
 constructs ATen tensor views directly over mapped memfds. It executes the
-reference kernels with LibTorch, removing pycapnp, asyncio, Python descriptor
+reference kernels with LibTorch, removing asyncio and Python descriptor
 conversion, and Python-to-Torch dispatch from the worker hot path. The previous
 Python implementation remains available as the `reference-python-worker` Nix
 package for comparison and fallback testing.
@@ -443,7 +443,7 @@ and `out=` with differentiable inputs.
 ## Incompatible Worker Environment
 
 `environments/nixos-25.05` is an independent nested flake that rebuilds the
-reference worker with NixOS 25.05, glibc 2.40, Cap'n Proto 1.1, and LibTorch
+reference worker with NixOS 25.05, glibc 2.40, and LibTorch
 2.7. The worker contains no Python runtime. The root runtime remains built from
 its separately pinned unstable Nixpkgs input.
 
@@ -497,7 +497,7 @@ reclamation when outputs are not reused. These are deliberately distinct
 boundaries and neither measurement is batched.
 
 Separate diagnostics report worker startup, ring round trips, the retained
-Cap'n Proto startup/control ping baseline, shared-memory
+fixed startup/control ping baseline, shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
 cached mapping checks, and runtime-owned output allocation. Input preparation
 includes memfd allocation, the runtime mapping and Torch view, and the ingress
