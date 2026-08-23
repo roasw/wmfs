@@ -72,6 +72,11 @@ class BoundOperations(dict[str, OperationHandler]):
     startup_capabilities = STARTUP_CAPABILITIES
     declarations = WORKER_DECLARATIONS
 
+    def __init__(self, *args, initialize=None, shutdown=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.initialize = initialize
+        self.shutdown = shutdown
+
 
 def _adapt_scale(implementation: Implementation) -> OperationHandler:
     def handler(context: InvocationContext) -> None:
@@ -85,6 +90,32 @@ _OPERATION_NAMES = frozenset(
         "scale",
     }
 )
+
+
+def bind_plugin(
+    implementations: Mapping[str, Implementation],
+    *,
+    initialize=None,
+    shutdown=None,
+) -> BoundOperations:
+    if HAS_INITIALIZE != callable(initialize):
+        raise ValueError("initialize hook does not match generated lifecycle")
+    if HAS_SHUTDOWN != callable(shutdown):
+        raise ValueError("shutdown hook does not match generated lifecycle")
+    if set(implementations) != _OPERATION_NAMES:
+        missing = sorted(_OPERATION_NAMES - set(implementations))
+        unknown = sorted(set(implementations) - _OPERATION_NAMES)
+        raise ValueError(
+            f"Implementations do not match generated metadata: "
+            f"missing={missing}, unknown={unknown}"
+        )
+    return BoundOperations(
+        {
+            "scale": _adapt_scale(implementations["scale"]),
+        },
+        initialize=initialize,
+        shutdown=shutdown,
+    )
 
 
 def bind_operations(

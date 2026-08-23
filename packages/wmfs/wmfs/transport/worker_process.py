@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import queue
@@ -963,6 +964,8 @@ async def _worker_connection(
                 "Worker STARTUP_RESPONSE identity does not match manifest"
             )
         environment_data = json.loads(response.config)
+        configuration_digest = environment_data.pop("configurationDigest", None)
+        hook_accepted = environment_data.pop("hookAccepted", None)
         if (
             json.dumps(
                 environment_data.pop("configuration", None),
@@ -974,6 +977,11 @@ async def _worker_connection(
             != startup.config
         ):
             raise RuntimeError("Worker did not acknowledge exact configuration bytes")
+        if (
+            configuration_digest is not None
+            and configuration_digest != hashlib.sha256(startup.config).hexdigest()
+        ) or (hook_accepted is not None and hook_accepted is not True):
+            raise RuntimeError("Worker did not confirm configuration hook acceptance")
         environment = EnvironmentMetadata(
             python_version=str(environment_data["pythonVersion"]),
             torch_version=str(environment_data["torchVersion"]),

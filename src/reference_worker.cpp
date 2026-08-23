@@ -41,6 +41,8 @@ struct StartupResources {
     std::array<UniqueFd, 3> commands;
     std::array<UniqueFd, 3> completions;
     std::uint64_t generation{};
+    const wmfs_plugin_api_v1 *api{};
+    bool initialized{};
 };
 
 void require(bool condition, const char *message) {
@@ -69,6 +71,92 @@ std::string executable_path() {
     return length < 0
                ? std::string("/proc/self/exe")
                : std::string(buffer.data(), static_cast<std::size_t>(length));
+}
+
+std::string sha256(std::string_view value) {
+    static constexpr std::uint32_t constants[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+        0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+        0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+        0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    std::array<std::uint32_t, 8> hash{0x6a09e667, 0xbb67ae85, 0x3c6ef372,
+                                      0xa54ff53a, 0x510e527f, 0x9b05688c,
+                                      0x1f83d9ab, 0x5be0cd19};
+    std::vector<std::uint8_t> bytes(value.begin(), value.end());
+    const std::uint64_t bit_length = bytes.size() * UINT64_C(8);
+    bytes.push_back(0x80);
+    while (bytes.size() % 64 != 56)
+        bytes.push_back(0);
+    for (int shift = 56; shift >= 0; shift -= 8)
+        bytes.push_back(static_cast<std::uint8_t>(bit_length >> shift));
+
+    const auto rotate = [](std::uint32_t input, std::uint32_t bits) {
+        return (input >> bits) | (input << (32 - bits));
+    };
+    for (std::size_t offset = 0; offset < bytes.size(); offset += 64) {
+        std::array<std::uint32_t, 64> words{};
+        for (std::size_t index = 0; index < 16; ++index) {
+            const auto at = offset + index * 4;
+            words[index] = (std::uint32_t(bytes[at]) << 24) |
+                           (std::uint32_t(bytes[at + 1]) << 16) |
+                           (std::uint32_t(bytes[at + 2]) << 8) | bytes[at + 3];
+        }
+        for (std::size_t index = 16; index < words.size(); ++index) {
+            const auto first = rotate(words[index - 15], 7) ^
+                               rotate(words[index - 15], 18) ^
+                               (words[index - 15] >> 3);
+            const auto second = rotate(words[index - 2], 17) ^
+                                rotate(words[index - 2], 19) ^
+                                (words[index - 2] >> 10);
+            words[index] =
+                words[index - 16] + first + words[index - 7] + second;
+        }
+        auto a = hash[0];
+        auto b = hash[1];
+        auto c = hash[2];
+        auto d = hash[3];
+        auto e = hash[4];
+        auto f = hash[5];
+        auto g = hash[6];
+        auto h = hash[7];
+        for (std::size_t index = 0; index < words.size(); ++index) {
+            const auto upper = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+            const auto choice = (e & f) ^ (~e & g);
+            const auto temporary1 =
+                h + upper + choice + constants[index] + words[index];
+            const auto lower = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+            const auto majority = (a & b) ^ (a & c) ^ (b & c);
+            const auto temporary2 = lower + majority;
+            h = g;
+            g = f;
+            f = e;
+            e = d + temporary1;
+            d = c;
+            c = b;
+            b = a;
+            a = temporary1 + temporary2;
+        }
+        const std::uint32_t state[] = {a, b, c, d, e, f, g, h};
+        for (std::size_t index = 0; index < hash.size(); ++index)
+            hash[index] += state[index];
+    }
+    static constexpr char hexadecimal[] = "0123456789abcdef";
+    std::string result(64, '0');
+    for (std::size_t index = 0; index < hash.size(); ++index)
+        for (std::size_t byte = 0; byte < 4; ++byte) {
+            const auto value_byte = static_cast<std::uint8_t>(
+                hash[index] >> static_cast<unsigned>((3 - byte) * 8));
+            result[(index * 4 + byte) * 2] = hexadecimal[value_byte >> 4];
+            result[(index * 4 + byte) * 2 + 1] = hexadecimal[value_byte & 15];
+        }
+    return result;
 }
 
 int parse_bootstrap(int argc, char **argv) {
@@ -182,10 +270,52 @@ StartupResources accept_startup(int bootstrap_fd) {
     const std::string configuration(
         reinterpret_cast<const char *>(request.config.data),
         request.config.size);
+    const auto *api = wmfs_reference_plugin_get_api(WMFS_PLUGIN_ABI_VERSION);
+    require(api != nullptr, "Generated plugin API is unavailable");
+    const bool has_lifecycle =
+        api->struct_size >=
+        offsetof(wmfs_plugin_api_v1, shutdown) + sizeof(api->shutdown);
+    if (has_lifecycle && (api->features & WMFS_PLUGIN_FEATURE_INITIALIZE)) {
+        require(api->initialize != nullptr,
+                "Generated plugin initialize callback is missing");
+        char error_data[1024]{};
+        wmfs_error_buffer_v1 error{sizeof(error), sizeof(error_data),
+                                   error_data, 0, 0};
+        wmfs_initialize_args_v1 args{};
+        args.struct_size = sizeof(args);
+        args.features = api->features;
+        args.configuration = {configuration.data(), configuration.size()};
+        args.logger.struct_size = sizeof(args.logger);
+        args.error = &error;
+        if (api->initialize(&args) != WMFS_STATUS_OK) {
+            const std::size_t error_size =
+                std::min<std::size_t>(error.size, error.capacity);
+            const std::string message =
+                error_size ? std::string(error.data, error_size)
+                           : "plugin rejected initialization";
+            std::vector<std::uint8_t> rejected(WMFS_CONTROL_MAX_PACKET_BYTES);
+            wmfs_control_mutable_bytes_v1 output{rejected.data(),
+                                                 rejected.size(), 0};
+            const wmfs_control_error_v1 control_error{
+                WMFS_CONTROL_STATUS_CONFIGURATION_REJECTED,
+                static_cast<std::uint32_t>(message.size())};
+            const wmfs_control_bytes_v1 message_bytes{
+                reinterpret_cast<const std::uint8_t *>(message.data()),
+                message.size()};
+            require(wmfs_control_encode_error_v1(request.request_id,
+                                                 &control_error, message_bytes,
+                                                 &output) == 0,
+                    "Cannot encode startup rejection");
+            send_packet(bootstrap_fd, rejected.data(), output.size);
+            throw std::runtime_error("Plugin rejected initialization");
+        }
+        result.initialized = true;
+    }
     const std::string environment =
         std::string("{\"configuration\":") + configuration +
-        ",\"executable\":\"" + executable_path() + "\",\"glibcVersion\":\"" +
-        gnu_get_libc_version() +
+        ",\"configurationDigest\":\"" + sha256(configuration) +
+        "\",\"hookAccepted\":true" + ",\"executable\":\"" + executable_path() +
+        "\",\"glibcVersion\":\"" + gnu_get_libc_version() +
         "\",\"pythonVersion\":\"none\",\"torchVersion\":\"" +
         WMFS_STRINGIFY(TORCH_VERSION_MAJOR) "." WMFS_STRINGIFY(
             TORCH_VERSION_MINOR) "." WMFS_STRINGIFY(TORCH_VERSION_PATCH) "\"}";
@@ -204,6 +334,7 @@ StartupResources accept_startup(int bootstrap_fd) {
     send_packet(bootstrap_fd, encoded.data(), output.size);
 
     result.generation = request.startup.session_generation;
+    result.api = api;
     for (std::size_t index = 0; index < 3; ++index)
         result.commands[index] = std::move(received.second[index]);
     for (std::size_t index = 0; index < 3; ++index)
@@ -441,8 +572,7 @@ void run_ring(RingConsumer commands, RingProducer completions,
     }
 }
 
-void serve_lifecycle(int fd) {
-    std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE> response{};
+std::uint64_t serve_lifecycle(int fd) {
     for (;;) {
         auto received = receive_packet(fd, 1);
         require(received.second.empty(),
@@ -450,24 +580,21 @@ void serve_lifecycle(int fd) {
         const wmfs_control_bytes_v1 packet{received.first.data(),
                                            received.first.size()};
         std::uint64_t request_id = 0;
-        std::uint16_t response_kind = 0;
         if (wmfs_control_decode_empty_v1(packet, WMFS_CONTROL_PING,
                                          &request_id) == 0) {
-            response_kind = WMFS_CONTROL_PONG;
+            std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE> response{};
+            wmfs_control_mutable_bytes_v1 output{response.data(),
+                                                 response.size(), 0};
+            require(wmfs_control_encode_empty_v1(WMFS_CONTROL_PONG, request_id,
+                                                 &output) == 0,
+                    "Cannot encode lifecycle response");
+            send_packet(fd, response.data(), output.size);
         } else if (wmfs_control_decode_empty_v1(packet, WMFS_CONTROL_SHUTDOWN,
                                                 &request_id) == 0) {
-            response_kind = WMFS_CONTROL_SHUTDOWN_ACK;
+            return request_id;
         } else {
             throw std::runtime_error("Invalid lifecycle frame");
         }
-        wmfs_control_mutable_bytes_v1 output{response.data(), response.size(),
-                                             0};
-        require(wmfs_control_encode_empty_v1(response_kind, request_id,
-                                             &output) == 0,
-                "Cannot encode lifecycle response");
-        send_packet(fd, response.data(), output.size);
-        if (response_kind == WMFS_CONTROL_SHUTDOWN_ACK)
-            return;
     }
 }
 
@@ -504,18 +631,30 @@ int run_worker(int argc, char **argv) {
         }
     });
     try {
-        serve_lifecycle(resources.bootstrap.get());
-    } catch (...) {
+        const auto shutdown_request =
+            serve_lifecycle(resources.bootstrap.get());
         ::shutdown(resources.fd_control.get(), SHUT_RDWR);
         command_interrupt.close();
         receiver.join();
         ring_worker.join();
+        if (resources.initialized && resources.api && resources.api->shutdown)
+            resources.api->shutdown();
+        std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE> response{};
+        wmfs_control_mutable_bytes_v1 output{response.data(), response.size(),
+                                             0};
+        require(wmfs_control_encode_empty_v1(WMFS_CONTROL_SHUTDOWN_ACK,
+                                             shutdown_request, &output) == 0,
+                "Cannot encode shutdown acknowledgement");
+        send_packet(resources.bootstrap.get(), response.data(), output.size);
+    } catch (...) {
+        ::shutdown(resources.fd_control.get(), SHUT_RDWR);
+        command_interrupt.close();
+        if (receiver.joinable())
+            receiver.join();
+        if (ring_worker.joinable())
+            ring_worker.join();
         throw;
     }
-    ::shutdown(resources.fd_control.get(), SHUT_RDWR);
-    command_interrupt.close();
-    receiver.join();
-    ring_worker.join();
     if (receiver_error)
         std::rethrow_exception(receiver_error);
     return 0;

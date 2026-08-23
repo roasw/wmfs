@@ -135,6 +135,7 @@ set(WMFS_BUNDLED_SOURCES "")
 set(WMFS_BUNDLED_LIBRARIES "")
 set(WMFS_BUNDLED_COMPILE_OPTIONS "")
 set(WMFS_BUNDLED_INCLUDE_DIRECTORIES "")
+set(WMFS_BUNDLED_PLUGIN_APIS "")
 foreach(plugin IN LISTS WMFS_BUNDLED_PLUGINS)
   if(IS_ABSOLUTE "${plugin}")
     set(plugin_descriptor "${plugin}")
@@ -205,17 +206,41 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
   )
 
   if(WMFS_BUNDLED_PLUGIN_NAMES)
+    set(WMFS_BUNDLED_REGISTRY_SOURCE
+      "#include <cstring>\n#include <wmfs/bundled_registry.hpp>\n")
+    foreach(plugin_api IN LISTS WMFS_BUNDLED_PLUGIN_APIS)
+      string(REPLACE "|" ";" plugin_api_parts "${plugin_api}")
+      list(GET plugin_api_parts 1 plugin_api_symbol)
+      string(APPEND WMFS_BUNDLED_REGISTRY_SOURCE
+        "extern \"C\" const wmfs_plugin_api_v1 *${plugin_api_symbol}(uint32_t);\n")
+    endforeach()
+    string(APPEND WMFS_BUNDLED_REGISTRY_SOURCE
+      "const wmfs_plugin_api_v1 *wmfs_bundled_plugin_api(const char *name) {\n")
+    foreach(plugin_api IN LISTS WMFS_BUNDLED_PLUGIN_APIS)
+      string(REPLACE "|" ";" plugin_api_parts "${plugin_api}")
+      list(GET plugin_api_parts 0 plugin_api_name)
+      list(GET plugin_api_parts 1 plugin_api_symbol)
+      string(APPEND WMFS_BUNDLED_REGISTRY_SOURCE
+        "  if (std::strcmp(name, \"${plugin_api_name}\") == 0) return ${plugin_api_symbol}(WMFS_PLUGIN_ABI_VERSION);\n")
+    endforeach()
+    string(APPEND WMFS_BUNDLED_REGISTRY_SOURCE "  return 0;\n}\n")
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/bundled_registry.cpp"
+      CONTENT "${WMFS_BUNDLED_REGISTRY_SOURCE}")
     list(JOIN WMFS_BUNDLED_PLUGIN_NAMES "," WMFS_BUNDLED_PLUGIN_NAMES_CSV)
     nanobind_add_module(
       wmfs-bundled-reference
       NB_STATIC
       src/bundled_module.cpp
+      "${CMAKE_CURRENT_BINARY_DIR}/bundled_registry.cpp"
       ${WMFS_BUNDLED_SOURCES}
     )
     add_library(wmfs::bundled-reference ALIAS wmfs-bundled-reference)
     target_link_libraries(wmfs-bundled-reference PRIVATE ${WMFS_BUNDLED_LIBRARIES})
     target_include_directories(
-      wmfs-bundled-reference PRIVATE ${WMFS_BUNDLED_INCLUDE_DIRECTORIES}
+      wmfs-bundled-reference
+      PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+        ${WMFS_BUNDLED_INCLUDE_DIRECTORIES}
     )
     target_compile_options(wmfs-bundled-reference PRIVATE ${WMFS_BUNDLED_COMPILE_OPTIONS})
     target_compile_definitions(

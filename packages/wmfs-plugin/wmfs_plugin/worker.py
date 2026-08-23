@@ -1,5 +1,6 @@
 import argparse
 import ctypes
+import hashlib
 import json
 import socket
 import sys
@@ -28,6 +29,7 @@ from wmfs_plugin.control import (
 )
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
 from wmfs_plugin.invocation import InvocationContext, OutputSpec
+from wmfs_plugin.logging import NullLogger
 from wmfs_plugin.metadata import (
     DimensionExpression,
     DTypeExpression,
@@ -104,6 +106,8 @@ def _serve(
     bootstrap = socket.socket(fileno=bootstrap_fd)
     packet, descriptors = recvmsg_strict(bootstrap)
     request_id = 0
+    initialized = False
+    shutdown: Callable[[], None] | None = None
     try:
         request_id, startup = decode_startup(packet)
         expected_roles = (
@@ -121,6 +125,11 @@ def _serve(
         config = json.loads(startup.config)
         if not isinstance(config, dict) or _canonical_json(config) != startup.config:
             raise ValueError("startup configuration is not a canonical JSON object")
+        initialize = getattr(operations, "initialize", None)
+        shutdown = getattr(operations, "shutdown", None)
+        if initialize is not None:
+            initialize(config, NullLogger)
+            initialized = True
         command_fds = tuple(descriptors[:3])
         completion_fds = tuple(descriptors[3:6])
         fd_socket_fd = descriptors[6]
@@ -132,6 +141,8 @@ def _serve(
                 "pythonVersion": sys.version.split()[0],
                 "torchVersion": torch.__version__,
                 "configuration": config,
+                "configurationDigest": hashlib.sha256(startup.config).hexdigest(),
+                "hookAccepted": True,
             }
         )
         response = Startup(
@@ -153,6 +164,11 @@ def _serve(
         )
     except Exception as error:
         close_fds(descriptors)
+        if initialized and shutdown is not None:
+            try:
+                shutdown()
+            except Exception:
+                pass
         try:
             sendmsg_strict(
                 bootstrap,
@@ -187,6 +203,7 @@ def _serve(
         daemon=True,
     )
     ring_thread.start()
+    shutdown_request: int | None = None
     try:
         while True:
             packet, fds = recvmsg_strict(bootstrap)
@@ -197,15 +214,11 @@ def _serve(
                 request = _empty_request(packet, Kind.PING)
                 sendmsg_strict(bootstrap, encode_empty(Kind.PONG, request_id=request))
             elif frame.kind == Kind.SHUTDOWN:
-                request = _empty_request(packet, Kind.SHUTDOWN)
-                sendmsg_strict(
-                    bootstrap, encode_empty(Kind.SHUTDOWN_ACK, request_id=request)
-                )
+                shutdown_request = _empty_request(packet, Kind.SHUTDOWN)
                 break
             else:
                 raise ValueError("unexpected lifecycle frame")
     finally:
-        bootstrap.close()
         command_ring.interrupt()
         completion_ring.interrupt()
         ring_thread.join(timeout=5)
@@ -213,6 +226,17 @@ def _serve(
         completion_ring.close()
         fd_receiver.close()
         mapped_buffers.close()
+        if shutdown_request is not None:
+            if initialized and shutdown is not None:
+                try:
+                    shutdown()
+                except Exception:
+                    pass
+            sendmsg_strict(
+                bootstrap,
+                encode_empty(Kind.SHUTDOWN_ACK, request_id=shutdown_request),
+            )
+        bootstrap.close()
 
 
 def _empty_request(packet: bytes, kind: Kind) -> int:
@@ -246,6 +270,12 @@ def _validate_startup_identity(
     }
     if any(not hasattr(operations, name) for name in required):
         raise ValueError("operations were not bound from generated worker declarations")
+    if bool(getattr(operations, "initialize", None)) != bool(
+        getattr(operations, "startup_capabilities") & (1 << 6)
+    ) or bool(getattr(operations, "shutdown", None)) != bool(
+        getattr(operations, "startup_capabilities") & (1 << 7)
+    ):
+        raise ValueError("worker hooks do not match generated lifecycle declarations")
     expected = (
         operations.interface_fingerprint,
         operations.configuration_fingerprint,

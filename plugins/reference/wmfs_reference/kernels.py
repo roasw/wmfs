@@ -1,4 +1,54 @@
+from __future__ import annotations
+
+import threading
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import TYPE_CHECKING
+
 import torch
+
+if TYPE_CHECKING:
+    from wmfs_plugin import Logger
+
+_state_lock = threading.Lock()
+_state: Mapping[str, object] | None = None
+_state_references = 0
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def initialize(config: dict[str, object], logger: Logger) -> None:
+    global _state, _state_references
+    frozen = _freeze(config)
+    assert isinstance(frozen, Mapping)
+    with _state_lock:
+        if _state is not None:
+            if _state == frozen:
+                _state_references += 1
+                return
+            raise RuntimeError("reference plugin is already initialized")
+        _state = frozen
+        _state_references = 1
+    if config.get("emit_diagnostics") and logger.enabled(20):
+        logger.info(
+            "reference plugin initialized",
+            fields={"threads": int(config.get("threads", 1))},
+        )
+
+
+def shutdown() -> None:
+    global _state, _state_references
+    with _state_lock:
+        if _state_references:
+            _state_references -= 1
+        if not _state_references:
+            _state = None
 
 
 def matmul(

@@ -8,6 +8,9 @@
 #define WMFS_PLUGIN_MAX_RANK UINT32_C(16)
 #define WMFS_PLUGIN_MAX_INPUTS UINT32_C(16)
 #define WMFS_PLUGIN_MAX_OUTPUTS UINT32_C(8)
+#define WMFS_PLUGIN_MAX_LOG_FIELDS UINT32_C(32)
+#define WMFS_PLUGIN_FEATURE_INITIALIZE (UINT64_C(1) << 0)
+#define WMFS_PLUGIN_FEATURE_SHUTDOWN (UINT64_C(1) << 1)
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +43,72 @@ typedef enum wmfs_scalar_kind_v1 {
     WMFS_SCALAR_INT64 = 3,
     WMFS_SCALAR_TEXT = 4
 } wmfs_scalar_kind_v1;
+
+typedef enum wmfs_log_level_v1 {
+    WMFS_LOG_DEBUG = 10,
+    WMFS_LOG_INFO = 20,
+    WMFS_LOG_WARNING = 30,
+    WMFS_LOG_ERROR = 40,
+    WMFS_LOG_CRITICAL = 50
+} wmfs_log_level_v1;
+
+typedef enum wmfs_log_field_kind_v1 {
+    WMFS_LOG_FIELD_BOOLEAN = 1,
+    WMFS_LOG_FIELD_INT64 = 2,
+    WMFS_LOG_FIELD_UINT64 = 3,
+    WMFS_LOG_FIELD_FLOAT64 = 4,
+    WMFS_LOG_FIELD_TEXT = 5
+} wmfs_log_field_kind_v1;
+
+typedef struct wmfs_text_view_v1 {
+    const char *data;
+    uint64_t size;
+} wmfs_text_view_v1;
+
+typedef wmfs_text_view_v1 wmfs_json_view_v1;
+
+typedef struct wmfs_log_field_v1 {
+    uint32_t struct_size;
+    uint32_t kind;
+    wmfs_text_view_v1 name;
+    uint64_t bits;
+    wmfs_text_view_v1 text;
+} wmfs_log_field_v1;
+
+typedef uint8_t (*wmfs_log_enabled_v1)(void *context, uint32_t level);
+typedef void (*wmfs_log_write_v1)(void *context, uint32_t level,
+                                  wmfs_text_view_v1 message,
+                                  wmfs_text_view_v1 category,
+                                  const wmfs_log_field_v1 *fields,
+                                  uint32_t field_count);
+
+typedef struct wmfs_logger_v1 {
+    uint32_t struct_size;
+    uint32_t reserved;
+    void *context;
+    wmfs_log_enabled_v1 enabled;
+    wmfs_log_write_v1 log;
+} wmfs_logger_v1;
+
+typedef struct wmfs_error_buffer_v1 {
+    uint32_t struct_size;
+    uint32_t capacity;
+    char *data;
+    uint32_t size;
+    uint32_t truncated;
+} wmfs_error_buffer_v1;
+
+typedef struct wmfs_initialize_args_v1 {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t features;
+    wmfs_json_view_v1 configuration;
+    wmfs_logger_v1 logger;
+    wmfs_error_buffer_v1 *error;
+} wmfs_initialize_args_v1;
+
+typedef int32_t (*wmfs_initialize_v1)(const wmfs_initialize_args_v1 *args);
+typedef void (*wmfs_shutdown_v1)(void);
 
 typedef struct wmfs_tensor_v1 {
     uint32_t struct_size;
@@ -103,6 +172,9 @@ typedef struct wmfs_plugin_api_v1 {
     const char *interface_fingerprint;
     wmfs_dispatch_v1 dispatch;
     wmfs_plan_outputs_v1 plan_outputs;
+    uint64_t features;
+    wmfs_initialize_v1 initialize;
+    wmfs_shutdown_v1 shutdown;
 } wmfs_plugin_api_v1;
 
 typedef const wmfs_plugin_api_v1 *(*wmfs_get_plugin_api_v1)(

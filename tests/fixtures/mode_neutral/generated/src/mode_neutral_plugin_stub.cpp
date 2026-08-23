@@ -2,6 +2,7 @@
 #include <wmfs/mode_neutral_plugin.hpp>
 
 namespace {
+
 int32_t dispatch(const wmfs_invocation_v1 *invocation) {
     if (invocation == 0 ||
         invocation->struct_size < sizeof(wmfs_invocation_v1)) {
@@ -60,7 +61,10 @@ const wmfs_plugin_api_v1 API = {sizeof(wmfs_plugin_api_v1),
                                 "0.1.0",
                                 WMFS_MODE_NEUTRAL_INTERFACE_FINGERPRINT,
                                 &dispatch,
-                                &plan_outputs};
+                                &plan_outputs,
+                                UINT64_C(0),
+                                0,
+                                0};
 } // namespace
 
 extern "C" const wmfs_plugin_api_v1 *

@@ -3,11 +3,70 @@
 #include <ATen/ATen.h>
 #include <wmfs/reference_plugin.hpp>
 
+#include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 namespace wmfs::reference {
 namespace {
+
+struct ConfigurationState {
+    std::string canonical;
+    std::string precision;
+    std::int64_t threads;
+    bool emit_diagnostics;
+};
+
+std::mutex configuration_mutex;
+std::unique_ptr<const ConfigurationState> configuration_state;
+
+void set_error(wmfs_error_buffer_v1 *error, const char *message) {
+    if (!error || error->struct_size < sizeof(*error) || !error->data ||
+        !error->capacity)
+        return;
+    const std::size_t length = std::strlen(message);
+    const std::size_t size =
+        length < error->capacity ? length : error->capacity;
+    std::memcpy(error->data, message, size);
+    error->size = static_cast<std::uint32_t>(size);
+    error->truncated = size != length;
+}
+
+std::string string_value(const std::string &json, const char *key,
+                         const char *fallback) {
+    const std::string prefix = std::string("\"") + key + "\":\"";
+    const auto start = json.find(prefix);
+    if (start == std::string::npos)
+        return fallback;
+    const auto value_start = start + prefix.size();
+    const auto end = json.find('"', value_start);
+    return end == std::string::npos
+               ? std::string()
+               : json.substr(value_start, end - value_start);
+}
+
+std::int64_t integer_value(const std::string &json, const char *key,
+                           std::int64_t fallback) {
+    const std::string prefix = std::string("\"") + key + "\":";
+    const auto start = json.find(prefix);
+    if (start == std::string::npos)
+        return fallback;
+    const char *first = json.c_str() + start + prefix.size();
+    char *end = 0;
+    const long long value = std::strtoll(first, &end, 10);
+    return end == first ? fallback : static_cast<std::int64_t>(value);
+}
+
+bool boolean_value(const std::string &json, const char *key, bool fallback) {
+    const std::string prefix = std::string("\"") + key + "\":";
+    const auto start = json.find(prefix);
+    if (start == std::string::npos)
+        return fallback;
+    return json.compare(start + prefix.size(), 4, "true") == 0;
+}
 
 at::Tensor tensor(const wmfs_tensor_v1 &value) {
     std::vector<std::int64_t> shape(value.shape, value.shape + value.rank);
@@ -99,6 +158,46 @@ std::int32_t plan_nonzero(const wmfs_invocation_v1 *value,
 }
 
 } // namespace
+
+std::int32_t initialize(wmfs_json_view_v1 configuration, logger log,
+                        wmfs_error_buffer_v1 *error) {
+    if ((!configuration.data && configuration.size) ||
+        configuration.size > 65536) {
+        set_error(error, "invalid configuration view");
+        return WMFS_STATUS_INVALID_ARGUMENT;
+    }
+    const std::string canonical(configuration.data ? configuration.data : "",
+                                static_cast<std::size_t>(configuration.size));
+    ConfigurationState parsed{
+        canonical, string_value(canonical, "precision", "balanced"),
+        integer_value(canonical, "threads", 1),
+        boolean_value(canonical, "emit_diagnostics", false)};
+    if (canonical.empty() || canonical.front() != '{' ||
+        canonical.back() != '}' || parsed.threads < 1 || parsed.threads > 64 ||
+        (parsed.precision != "fast" && parsed.precision != "balanced" &&
+         parsed.precision != "accurate")) {
+        set_error(error, "reference configuration is semantically invalid");
+        return WMFS_STATUS_INVALID_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(configuration_mutex);
+    if (configuration_state) {
+        if (configuration_state->canonical == canonical)
+            return WMFS_STATUS_OK;
+        set_error(error, "reference plugin is already initialized");
+        return WMFS_STATUS_INVALID_ARGUMENT;
+    }
+    configuration_state.reset(new const ConfigurationState(parsed));
+    if (parsed.emit_diagnostics && log.enabled(WMFS_LOG_INFO)) {
+        static const char message[] = "reference plugin initialized";
+        log.info(message, sizeof(message) - 1);
+    }
+    return WMFS_STATUS_OK;
+}
+
+void shutdown() {
+    std::lock_guard<std::mutex> lock(configuration_mutex);
+    configuration_state.reset();
+}
 
 #define WMFS_SPECIALIZE(operation, type, function)                             \
     template <>                                                                \

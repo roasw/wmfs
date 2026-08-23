@@ -15,6 +15,8 @@ class BundledBackend:
         self._operations: dict[
             str, tuple[Callable[..., object], Callable[..., object], OperationMetadata]
         ] = {}
+        self._initialized: dict[str, bytes] = {}
+        self._module: object | None = None
 
     @property
     def operation_names(self) -> tuple[str, ...]:
@@ -48,7 +50,37 @@ class BundledBackend:
             qualified = f"{plugin}.{name}"
             if qualified in operations:
                 operations[name] = operations[qualified]
+        initialized_now: list[str] = []
+        try:
+            for manifest in manifests:
+                if manifest.name not in compiled:
+                    continue
+                existing = self._initialized.get(manifest.name)
+                if existing is not None:
+                    if existing != manifest.configuration_bytes:
+                        raise RuntimeError(
+                            f"Plugin {manifest.name!r} is already initialized with different configuration"
+                        )
+                    continue
+                module.initialize(manifest.name, manifest.configuration_bytes)
+                self._initialized[manifest.name] = manifest.configuration_bytes
+                initialized_now.append(manifest.name)
+        except BaseException:
+            for plugin in reversed(initialized_now):
+                module.shutdown(plugin)
+                self._initialized.pop(plugin, None)
+            raise
+        self._module = module
         self._operations = operations
+
+    def close(self) -> None:
+        module = self._module
+        initialized = tuple(self._initialized)
+        self._initialized.clear()
+        self._operations = {}
+        if module is not None:
+            for plugin in reversed(initialized):
+                module.shutdown(plugin)
 
     def invoke(
         self,

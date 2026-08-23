@@ -2,11 +2,16 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wmfs_plugin.invocation import InvocationContext, OutputSpec
+    from wmfs_plugin.logging import Logger, LogLevel, LogValue
     from wmfs_plugin.worker import OperationHandler, OutputPlanner
 
 __all__ = [
     "__version__",
     "InvocationContext",
+    "Logger",
+    "LogLevel",
+    "LogValue",
+    "NullLogger",
     "OperationHandler",
     "OutputPlanner",
     "OutputSpec",
@@ -26,6 +31,15 @@ def __getattr__(name: str) -> Any:
         from wmfs_plugin.invocation import InvocationContext, OutputSpec
 
         return {"InvocationContext": InvocationContext, "OutputSpec": OutputSpec}[name]
+    if name in {"Logger", "LogLevel", "LogValue", "NullLogger"}:
+        from wmfs_plugin.logging import Logger, LogLevel, LogValue, NullLogger
+
+        return {
+            "Logger": Logger,
+            "LogLevel": LogLevel,
+            "LogValue": LogValue,
+            "NullLogger": NullLogger,
+        }[name]
     if name in {"OperationHandler", "OutputPlanner", "worker_main"}:
         from wmfs_plugin.worker import OperationHandler, OutputPlanner, worker_main
 

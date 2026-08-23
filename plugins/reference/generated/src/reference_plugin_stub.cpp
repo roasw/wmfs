@@ -2,6 +2,24 @@
 #include <wmfs/reference_plugin.hpp>
 
 namespace {
+int32_t initialize(const wmfs_initialize_args_v1 *args) {
+    if (args == 0 || args->struct_size < sizeof(wmfs_initialize_args_v1))
+        return WMFS_STATUS_INVALID_ARGUMENT;
+    try {
+        return wmfs::reference::initialize(
+            args->configuration, wmfs::reference::logger(&args->logger),
+            args->error);
+    } catch (...) {
+        return WMFS_STATUS_INTERNAL_ERROR;
+    }
+}
+void shutdown() {
+    try {
+        wmfs::reference::shutdown();
+    } catch (...) {
+    }
+}
+
 int32_t dispatch(const wmfs_invocation_v1 *invocation) {
     if (invocation == 0 ||
         invocation->struct_size < sizeof(wmfs_invocation_v1)) {
@@ -278,7 +296,10 @@ const wmfs_plugin_api_v1 API = {sizeof(wmfs_plugin_api_v1),
                                 "0.1.0",
                                 WMFS_REFERENCE_INTERFACE_FINGERPRINT,
                                 &dispatch,
-                                &plan_outputs};
+                                &plan_outputs,
+                                UINT64_C(3),
+                                &initialize,
+                                &shutdown};
 } // namespace
 
 extern "C" const wmfs_plugin_api_v1 *

@@ -150,7 +150,15 @@ class Runtime:
             self._ensure_open()
             if self._backend_name in {"local", "bundled"}:
                 initialize = getattr(self._backends[self._backend_name], "initialize")
-                initialize(manifests, registry)
+                initialize(
+                    tuple(
+                        replace(
+                            manifest, configuration_bytes=configurations[manifest.name]
+                        )
+                        for manifest in manifests
+                    ),
+                    registry,
+                )
             self._registry = registry
             self._manifests = loaded
             self._plugin_configurations = configurations
@@ -585,7 +593,17 @@ class Runtime:
 
     def _initialize_in_process_backend_locked(self, name: str) -> None:
         initialize = getattr(self._backends[name], "initialize")
-        initialize(tuple(self._manifests.values()), self._registry)
+        manifests = tuple(
+            replace(
+                manifest,
+                configuration_bytes=self._plugin_configurations.get(
+                    manifest.name, EMPTY_CONFIGURATION_BYTES
+                ),
+            )
+            for manifest in self._manifests.values()
+        )
+        initialize(manifests, self._registry)
+        self._initialized_plugins.update(manifest.name for manifest in manifests)
 
     def _selected_backend_locked(self) -> Backend:
         if self._backend_name is None:

@@ -16,3 +16,4 @@ list(APPEND WMFS_BUNDLED_SOURCES
 list(APPEND WMFS_BUNDLED_INCLUDE_DIRECTORIES plugins/reference/generated/include)
 list(APPEND WMFS_BUNDLED_LIBRARIES wmfs-reference-kernels)
 list(APPEND WMFS_BUNDLED_COMPILE_OPTIONS ${TORCH_CXX_FLAGS})
+list(APPEND WMFS_BUNDLED_PLUGIN_APIS "reference|wmfs_reference_plugin_get_api")

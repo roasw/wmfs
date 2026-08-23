@@ -31,6 +31,46 @@ static const std::uint8_t configuration_fingerprint_sha256[32] = {
     0xe6, 0xd1, 0x2d, 0xff, 0xe1, 0xab, 0xa0, 0x4c, 0xf1, 0xbc, 0x19,
     0x0e, 0xd9, 0xb2, 0xcd, 0xae, 0x7f, 0xea, 0x61, 0x59, 0xcf};
 
+class logger {
+  public:
+    logger() : value_(0) {}
+    explicit logger(const wmfs_logger_v1 *value) : value_(value) {}
+
+    bool enabled(std::uint32_t level) const {
+        return value_ && value_->enabled &&
+               value_->enabled(value_->context, level);
+    }
+    void log(std::uint32_t level, const char *message, std::uint64_t size,
+             const char *category = 0, std::uint64_t category_size = 0,
+             const wmfs_log_field_v1 *fields = 0,
+             std::uint32_t field_count = 0) const {
+        if (!enabled(level) || !value_->log)
+            return;
+        const wmfs_text_view_v1 message_view = {message, size};
+        const wmfs_text_view_v1 category_view = {category, category_size};
+        value_->log(value_->context, level, message_view, category_view, fields,
+                    field_count);
+    }
+    void debug(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_DEBUG, message, size);
+    }
+    void info(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_INFO, message, size);
+    }
+    void warning(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_WARNING, message, size);
+    }
+    void error(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_ERROR, message, size);
+    }
+    void critical(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_CRITICAL, message, size);
+    }
+
+  private:
+    const wmfs_logger_v1 *value_;
+};
+
 enum class operation_id : std::uint32_t {
     matmul = UINT32_C(1),
     svd = UINT32_C(2),
@@ -93,6 +133,11 @@ template <typename T>
 std::int32_t nonzero_plan_typed(dtype_tag<T>, const wmfs_invocation_v1 *,
                                 wmfs_output_plan_v1 *, std::uint32_t,
                                 std::uint32_t *);
+
+std::int32_t initialize(wmfs_json_view_v1 configuration, logger log,
+                        wmfs_error_buffer_v1 *error);
+
+void shutdown();
 
 } // namespace reference
 } // namespace wmfs

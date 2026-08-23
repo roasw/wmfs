@@ -2,7 +2,7 @@ import torch
 
 from wmfs_plugin import InvocationContext, OutputSpec, worker_main
 from wmfs_reference import kernels
-from wmfs_reference._generated import bind_operations
+from wmfs_reference._generated import bind_plugin
 
 
 def _matmul(a: torch.Tensor, b: torch.Tensor, result: torch.Tensor) -> None:
@@ -84,7 +84,7 @@ def _validate_output(
 
 def main() -> None:
     worker_main(
-        bind_operations(
+        bind_plugin(
             {
                 "matmul": _matmul,
                 "svd": _svd,
@@ -92,7 +92,9 @@ def main() -> None:
                 "matmul_vjp": _matmul_vjp,
                 "add_scalar_vjp": _add_scalar_vjp,
                 "nonzero": _nonzero,
-            }
+            },
+            initialize=kernels.initialize,
+            shutdown=kernels.shutdown,
         ),
         output_planners={"nonzero": _plan_nonzero},
     )

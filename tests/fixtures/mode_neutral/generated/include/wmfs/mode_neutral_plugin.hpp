@@ -30,6 +30,46 @@ static const std::uint8_t configuration_fingerprint_sha256[32] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
+class logger {
+  public:
+    logger() : value_(0) {}
+    explicit logger(const wmfs_logger_v1 *value) : value_(value) {}
+
+    bool enabled(std::uint32_t level) const {
+        return value_ && value_->enabled &&
+               value_->enabled(value_->context, level);
+    }
+    void log(std::uint32_t level, const char *message, std::uint64_t size,
+             const char *category = 0, std::uint64_t category_size = 0,
+             const wmfs_log_field_v1 *fields = 0,
+             std::uint32_t field_count = 0) const {
+        if (!enabled(level) || !value_->log)
+            return;
+        const wmfs_text_view_v1 message_view = {message, size};
+        const wmfs_text_view_v1 category_view = {category, category_size};
+        value_->log(value_->context, level, message_view, category_view, fields,
+                    field_count);
+    }
+    void debug(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_DEBUG, message, size);
+    }
+    void info(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_INFO, message, size);
+    }
+    void warning(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_WARNING, message, size);
+    }
+    void error(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_ERROR, message, size);
+    }
+    void critical(const char *message, std::uint64_t size) const {
+        log(WMFS_LOG_CRITICAL, message, size);
+    }
+
+  private:
+    const wmfs_logger_v1 *value_;
+};
+
 enum class operation_id : std::uint32_t {
     scale = UINT32_C(101),
 };

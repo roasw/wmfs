@@ -52,6 +52,8 @@ class PluginManifest:
     startup_capabilities: int = 0
     format_version: int = 2
     control_abi_version: int = 1
+    has_initialize: bool = False
+    has_shutdown: bool = False
 
 
 def load_manifest(path: Path) -> PluginManifest:
@@ -89,11 +91,15 @@ def load_manifest(path: Path) -> PluginManifest:
         else set()
     )
     _keys_with_optional(data, fields, optional_fields, "manifest")
+    has_initialize = False
+    has_shutdown = False
     if "lifecycle" in data:
         lifecycle = _object(data["lifecycle"], "manifest.lifecycle")
         _keys(lifecycle, {"initialize", "shutdown"}, "manifest.lifecycle")
-        _boolean(lifecycle["initialize"], "manifest.lifecycle.initialize")
-        _boolean(lifecycle["shutdown"], "manifest.lifecycle.shutdown")
+        has_initialize = _boolean(
+            lifecycle["initialize"], "manifest.lifecycle.initialize"
+        )
+        has_shutdown = _boolean(lifecycle["shutdown"], "manifest.lifecycle.shutdown")
     _require_equal(data, "abiVersion", _ABI_VERSION)
     _require_equal(data, "protocolVersion", PROTOCOL_VERSION)
     _require_equal(data, "generator", f"wmfs-tool/{format_version}")
@@ -206,6 +212,8 @@ def load_manifest(path: Path) -> PluginManifest:
         startup_capabilities=startup_capabilities,
         format_version=format_version,
         control_abi_version=control_abi_version,
+        has_initialize=has_initialize,
+        has_shutdown=has_shutdown,
     )
 
 
