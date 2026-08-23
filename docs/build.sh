@@ -14,6 +14,6 @@ env \
   WMFS_SOURCE_ROOT="$root" \
   "$doxygen_command" "$root/docs/Doxyfile"
 env \
-  PYTHONPATH="$root/packages/wmfs:$root/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
+  PYTHONPATH="$root/packages/wmfs${PYTHONPATH:+:$PYTHONPATH}" \
   WMFS_DOXYGEN_XML="$output/doxygen/xml" \
   "$sphinx_command" -W --keep-going -b html "$root/docs" "$output/html"

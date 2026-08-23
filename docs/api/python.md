@@ -49,14 +49,8 @@ depend on `wmfs-plugin` at runtime and do not depend on `wmfs-tool`.
 
 ## Plugin SDK
 
-```{eval-rst}
-.. autoclass:: wmfs_plugin.invocation.InvocationContext
-   :members:
-
-.. autofunction:: wmfs_plugin.worker.worker_main
-```
-
-```{eval-rst}
-.. automodule:: wmfs_plugin.metadata
-   :members: PluginMetadata, OperationMetadata, TensorParameter, ScalarParameter, OutputPlan, VjpMetadata, metadata_from_reader, validate_plugin_metadata, metadata_fingerprint
-```
+`wmfs-plugin` is documented and tested as an independent Python-worker SDK.
+Core runtime documentation deliberately does not import it: runtime and worker
+SDK packages carry compatible protocol definitions but may be installed in
+different environments. See `packages/wmfs-plugin/README.md` and generated
+Python interface stubs for its worker-facing API.
