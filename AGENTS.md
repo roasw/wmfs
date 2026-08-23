@@ -52,6 +52,11 @@ The primary motivation is ABI/runtime isolation:
 
 The prototype must compare isolated execution against an equivalent single-process implementation and quantify the overhead.
 
+Process isolation is an execution option, not a requirement imposed on user
+algorithms. Every plugin must retain a supported exit route to ordinary
+single-process Torch execution and, where applicable, a unified build that
+links the plugin into the main process.
+
 ## User Experience
 
 User code should look ordinary:
@@ -119,6 +124,19 @@ Workers should only receive capabilities to the inputs required for an operation
 
 Do not expose the complete object store to plugins.
 
+The same registered operation catalog must be executable through three
+adapters without changing application calls:
+
+```text
+                         +-> pure Torch / local
+Python frontend -> API --+-> bundled / unified process
+                         +-> isolated worker rings
+```
+
+Only initialization and backend selection may differ. Steady-state user code,
+function signatures, tensor arguments, return values, and optional `out=` usage
+must remain backend-independent.
+
 ## Interface Generation
 
 Plugin authors define a versioned, declarative interface specification. At
@@ -138,6 +156,25 @@ manifest.json   generated C++   generated Python
 The generated manifest is read by the runtime without importing plugin code.
 Generated C++ and Python adapters depend only on the stable plugin ABI, not on
 private runtime implementation details.
+
+`wmfs-tool` output must be execution-mode-neutral. Do not generate separate
+local, bundled, and isolated interface files for one plugin. The same generated
+manifest, operation IDs, metadata, declarations, and plugin entry points must
+be usable in every mode. Ring-specific generation must not become the only way
+to invoke an operation.
+
+Backend selection belongs in the runtime and build system:
+
+- an isolated worker target links the plugin implementation and generated
+  entry table into a worker executable;
+- a bundled target links the same implementation and generated entry table
+  into the application-side extension or executable;
+- a pure-Python target imports the same ordinary Torch implementation directly.
+
+Mode-specific transport glue should be generic runtime code rather than a
+second set of per-plugin generated sources. If a language binding requires thin
+glue, it must consume the same generated declarations and must not redefine the
+operation catalog.
 
 The specification and generated artifacts carry explicit format, ABI, and
 feature versions. Additive evolution must preserve old generated plugins where
@@ -234,7 +271,8 @@ must remain explicit and opt-in.
 
 ## Output Allocation
 
-Output ownership must remain with the runtime.
+For isolated execution, output ownership must remain with the runtime. Local
+and bundled execution use normal Torch allocation and `out=` semantics.
 
 Support an allocator capability exposed to workers.
 
@@ -296,6 +334,59 @@ Algorithms must not need to understand:
 
 Runtime adapters handle those concerns.
 
+## Unified And Pure-Torch Exit Route
+
+Supporting degeneration to ordinary Torch is a hard requirement.
+
+Plugin numerical implementations operate on ordinary Torch tensors or
+tensor-like values and scalar parameters. They must remain callable without:
+
+- worker processes;
+- command or completion rings;
+- shared-memory descriptors;
+- `memfd`, `mmap`, or FD passing;
+- runtime object IDs or capability records;
+- an `InvocationContext` in the core numerical kernel.
+
+Generated or handwritten transport adapters may translate an
+`InvocationContext` or ring record into a call to that kernel, but transport
+concerns must stop at the adapter boundary.
+
+The execution modes are:
+
+- **Pure Torch/local:** call the ordinary Python Torch implementation in the
+  application process using native Torch allocation, views, exceptions, and
+  autograd.
+- **Bundled/unified:** call the same plugin entry points and implementation from
+  a directly linked or in-process build using native tensors. This mode bypasses
+  worker startup, rings, shared-memory transport, and Cap'n Proto.
+- **Isolated:** use the generated metadata, runtime-owned shared storage, and
+  command/completion rings around the same mathematical kernel.
+
+Initialization for local or bundled execution must be small and bounded by the
+number of plugins and operations. It may read manifests, validate generated
+metadata, build dispatch tables, and import the selected in-process
+implementation once. It must not launch workers, establish rings, map shared
+arenas, perform per-operation discovery, or allocate tensors proportional to
+user data. Measure and report initialization separately from steady-state
+calls.
+
+After initialization, local and bundled calls should be indistinguishable from
+regular Torch calls except for the dynamic `wmfs` function lookup:
+
+- inputs and outputs are ordinary Torch tensors;
+- output allocation follows Torch conventions;
+- views and `out=` preserve normal Torch behavior;
+- native Torch autograd is preferred over isolated VJP machinery;
+- algorithm exceptions propagate as ordinary local exceptions;
+- no mandatory future, command, graph, or runtime tensor wrapper is exposed.
+
+Every public reference operation must have contract tests across all available
+local, bundled, and isolated modes. Tests cover signatures, values, dtypes,
+shapes, multiple outputs, `out=`, views, errors, and first-order autograd where
+the operation supports it. A feature is incomplete if it works only through
+the isolated transport.
+
 ## Python Compatibility
 
 Prefer PyTorch as the initial tensor/numerical substrate.
@@ -316,10 +407,11 @@ The backend selection should be configurable, for example:
 
 ```python
 runtime.use_backend("local")
+runtime.use_backend("bundled")
 runtime.use_backend("isolated")
 ```
 
-Do not require application code to change between the two modes.
+Do not require application code to change between execution modes.
 
 ## Prototype Operations
 
@@ -341,7 +433,8 @@ This tests a relatively large-compute/low-control-overhead operation.
 u, s, vh = svd(a)
 ```
 
-Use the same underlying numerical library in both execution modes where possible.
+Use the same underlying numerical library in all execution modes where
+possible.
 
 This tests:
 
@@ -361,7 +454,8 @@ overhead.
 
 ## Execution Modes
 
-Every benchmark operation must have two implementations using equivalent numerical kernels.
+Every benchmark operation must be available through local, bundled when built,
+and isolated adapters using equivalent numerical kernels.
 
 ### Local
 
@@ -371,6 +465,22 @@ Python
 ```
 
 Everything executes in one process.
+
+This is the pure-Torch exit route. It uses ordinary tensors and Torch semantics
+and must not initialize isolated transport resources.
+
+### Bundled / Unified
+
+```text
+Python
+  -> generic in-process runtime adapter
+  -> same generated plugin entry table
+  -> same directly linked plugin kernel
+  -> native Torch tensor result
+```
+
+Everything executes in the application process. This mode trades away ABI and
+crash isolation but preserves the same public operation API.
 
 ### Isolated
 
@@ -389,7 +499,9 @@ Tensor payloads are shared through mapped memory.
 
 Measure separately:
 
+- local, bundled, and isolated initialization time;
 - local kernel execution time;
+- bundled end-to-end execution time;
 - isolated end-to-end execution time;
 - command/completion ring round-trip latency;
 - command enqueue and completion dequeue cost;
@@ -413,6 +525,7 @@ For matrix multiplication and SVD report:
 
 ```text
 local time
+bundled time
 isolated time
 absolute overhead
 percentage overhead
@@ -525,6 +638,9 @@ Implementation status:
 - [x] Milestone 11: compatibility fixtures built from older generated plugin
   artifacts.
 - [x] Milestone 12: ring-versus-RPC benchmark and removal of per-call RPC.
+- [ ] Milestone 13: verify every plugin interface and implementation can be
+  built for local, bundled, and isolated execution without mode-specific
+  generated interface files.
 
 ### Milestone 1
 
