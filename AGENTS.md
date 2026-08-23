@@ -209,6 +209,7 @@ At startup the runtime:
 1. Establishes one runtime-to-worker command ring.
 1. Establishes one worker-to-runtime completion ring.
 1. Establishes the FD-control channel and initial shared tensor mappings.
+1. Supplies the optional initialization JSON and selected logging service.
 
 Cap'n Proto may remain temporarily as a migration-only startup/control
 mechanism, but it is not part of the target plugin ABI or operation hot path.
@@ -231,6 +232,108 @@ acceptable.
 Malformed records, impossible indices, generation mismatches, and ring
 invariant violations are fatal session errors. Ordinary algorithm failures are
 recoverable completion records and do not tear down the worker.
+
+## Worker Initialization Services
+
+Configuration and logging are session-level host services. They are supplied
+once during plugin initialization and must not become required parameters of
+the numerical kernels.
+
+The generated, execution-mode-neutral plugin entry table may expose optional
+`initialize` and `shutdown` hooks. Isolated, bundled, and pure-Torch adapters
+call the same logical initialization hook before publishing operations.
+
+### Initialization Configuration
+
+The application may provide one optional JSON object per plugin. The runtime
+serializes it once using canonical UTF-8 JSON with sorted keys, compact
+separators, and no NaN or infinity. The initial protocol limit is 64 KiB.
+
+Configuration rules:
+
+- the top-level value is an object; absence is equivalent to `{}`;
+- configuration is immutable for one initialized session;
+- worker replacement replays the exact canonical bytes;
+- configuration travels in a bounded startup frame, not command-line
+  arguments, environment variables, or per-operation records;
+- the runtime validates framing and JSON syntax, while the plugin validates
+  plugin-specific semantics and should version its configuration schema;
+- initialization rejection is a startup error and prevents publication of the
+  plugin session;
+- configuration bytes and secrets must not be copied into diagnostics or logs
+  by default.
+
+Python initialization receives the decoded object and a logger:
+
+```python
+def initialize(config: dict[str, object], logger: Logger) -> None:
+    ...
+```
+
+C++11 initialization receives borrowed process-local views:
+
+```cpp
+status initialize(json_view config, logger log);
+```
+
+`json_view` contains `const char*` plus an explicit fixed-width byte length. The
+pointer is local to the process and valid only for the initialization call. It
+is never placed in shared memory. The plugin may parse or copy the bytes using
+its own C++ library; no `std::string` crosses the generated interface.
+
+Local and bundled initialization receive the same logical configuration
+without creating a worker or transport. Pure Python receives a normal decoded
+mapping; bundled C++ receives the same canonical JSON view.
+
+### Logging
+
+Python and C++ plugins use matching logger semantics:
+
+- levels `debug`, `info`, `warning`, `error`, and `critical`, with numeric values
+  10, 20, 30, 40, and 50;
+- `enabled(level)` for avoiding expensive message construction;
+- `log(level, message, category, fields)` plus level-specific convenience
+  methods;
+- structured fields limited initially to Boolean, signed/unsigned 64-bit
+  integer, float64, and bounded UTF-8 text values;
+- contextual child loggers that bind plugin, worker, session, operation,
+  submission, and invocation identity;
+- thread-safe, non-throwing calls whose failure never changes operation status.
+
+The C++11 interface uses borrowed `text_view` values, fixed-width field records,
+and a process-local function table/context pointer. It must not expose
+`std::string`, virtual classes, exceptions, or STL object layouts across the
+plugin boundary. The Python SDK exposes an equivalent `Logger` protocol and may
+adapt it to the standard `logging` package.
+
+Logging mode is selected by the host for each worker session:
+
+- **centralized:** a worker-local logger sends bounded structured records over
+  a dedicated nonblocking Unix `SOCK_SEQPACKET` channel to a runtime collector,
+  which emits ordinary Python `logging.LogRecord` values;
+- **disabled:** the worker receives a null logger, `enabled()` always returns
+  false, log methods return immediately, and no log socket or serialization is
+  created;
+- **worker file:** the worker writes its own structured log file through a
+  bounded local queue and does not send records to the main process.
+
+Do not reuse command, completion, or FD-control channels for logs. Logging must
+not delay completion delivery or create transport deadlocks. Centralized and
+file sinks use bounded queues. On saturation, they may drop records according
+to configured severity, count drops, and emit one synthetic warning when
+delivery resumes. Oversized values are truncated with explicit flags.
+
+The runtime may also capture worker stdout and stderr as an unstructured
+fallback for third-party libraries, but explicit structured logging is the
+preferred path. Error completions remain separate from logs.
+
+Tests must verify initialization runs exactly once per session, canonical
+configuration parity across execution modes, exact replay after worker
+replacement, startup rejection, logger level filtering, contextual fields,
+drop accounting, worker-file output, and centralized collection. Disabled-mode
+tests must prove that no log channel is created and repeated disabled log calls
+perform no formatting, allocation, serialization, or transport work at the
+worker boundary.
 
 ## Tensor Transport
 
@@ -641,6 +744,9 @@ Implementation status:
 - [ ] Milestone 13: verify every plugin interface and implementation can be
   built for local, bundled, and isolated execution without mode-specific
   generated interface files.
+- [ ] Milestone 14: implement mode-neutral initialization hooks, canonical JSON
+  configuration, and optional centralized, null, and worker-file loggers for
+  both Python and C++ plugins.
 
 ### Milestone 1
 
