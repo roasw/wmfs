@@ -1,0 +1,809 @@
+import mmap
+import os
+import queue
+import secrets
+import threading
+import weakref
+from collections import deque
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, fields
+from time import perf_counter_ns
+from typing import Protocol
+
+import torch
+
+_DTYPE_NAMES: dict[torch.dtype, str] = {
+    torch.float32: "float32",
+    torch.float64: "float64",
+    torch.int64: "int64",
+    torch.uint8: "uint8",
+}
+_DTYPES = {name: dtype for dtype, name in _DTYPE_NAMES.items()}
+_ITEM_SIZES = {
+    torch.float32: 4,
+    torch.float64: 8,
+    torch.int64: 8,
+    torch.uint8: 1,
+}
+_DEFAULT_MAX_CACHED_BUFFERS = 64
+_DEFAULT_MAX_CACHED_BYTES = 256 * 1024 * 1024
+_DEFAULT_ARENA_BYTES = 2 * 1024 * 1024 * 1024
+_ARENA_ALIGNMENT = 64
+
+
+class BufferRecipient(Protocol):
+    def retire_buffers(self, buffers: tuple["SharedBuffer", ...]) -> None: ...
+
+
+@dataclass(frozen=True)
+class TensorDescriptor:
+    buffer_id: int
+    generation: int
+    allocation_id: int
+    offset: int
+    byte_length: int
+    dtype: str
+    shape: tuple[int, ...]
+    strides: tuple[int, ...]
+
+    def as_capnp(self) -> dict[str, object]:
+        return {
+            "bufferId": self.buffer_id,
+            "generation": self.generation,
+            "allocationId": self.allocation_id,
+            "offset": self.offset,
+            "byteLength": self.byte_length,
+            "dtype": self.dtype,
+            "shape": self.shape,
+            "strides": self.strides,
+        }
+
+    @classmethod
+    def from_capnp(cls, descriptor: object) -> "TensorDescriptor":
+        return cls(
+            buffer_id=int(descriptor.bufferId),
+            generation=int(descriptor.generation),
+            allocation_id=int(descriptor.allocationId),
+            offset=int(descriptor.offset),
+            byte_length=int(descriptor.byteLength),
+            dtype=str(descriptor.dtype),
+            shape=tuple(int(item) for item in descriptor.shape),
+            strides=tuple(int(item) for item in descriptor.strides),
+        )
+
+
+class _MemoryRegion:
+    def __init__(self, buffer_id: int, byte_length: int) -> None:
+        self.id = buffer_id
+        self.generation = 1
+        self.byte_length = byte_length
+        self.recipients: set[BufferRecipient] = set()
+        self._fd = os.memfd_create(f"wmfs-{self.id}", os.MFD_CLOEXEC)
+        try:
+            os.ftruncate(self._fd, byte_length)
+            self.mapping = mmap.mmap(self._fd, byte_length, access=mmap.ACCESS_WRITE)
+        except Exception:
+            os.close(self._fd)
+            raise
+        self._closed = False
+
+    def duplicate_fd(self, *, writable: bool) -> int:
+        self._ensure_open()
+        if writable:
+            return os.dup(self._fd)
+        return os.open(f"/proc/self/fd/{self._fd}", os.O_RDONLY | os.O_CLOEXEC)
+
+    def reset(self) -> None:
+        self._ensure_open()
+        if self.generation == 0xFFFFFFFF:
+            raise OverflowError("Shared buffer generation is exhausted")
+        self.mapping.close()
+        os.ftruncate(self._fd, 0)
+        os.ftruncate(self._fd, self.byte_length)
+        self.mapping = mmap.mmap(self._fd, self.byte_length, access=mmap.ACCESS_WRITE)
+        self.generation += 1
+        self.recipients.clear()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self.mapping.close()
+        os.close(self._fd)
+        self._closed = True
+
+    def __del__(self) -> None:
+        if hasattr(self, "_closed"):
+            self.close()
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Shared buffer is closed")
+
+
+@dataclass(frozen=True)
+class SharedBuffer:
+    _region: _MemoryRegion
+    _generation: int
+    allocation_id: int
+    offset: int
+    byte_length: int
+    arena: bool = False
+
+    @property
+    def id(self) -> int:
+        return self._region.id
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    @property
+    def mapping(self) -> mmap.mmap:
+        self._ensure_current()
+        return self._region.mapping
+
+    @property
+    def mapping_byte_length(self) -> int:
+        return self._region.byte_length
+
+    def duplicate_fd(self, writable: bool = False) -> int:
+        self._ensure_current()
+        return self._region.duplicate_fd(writable=writable or self.arena)
+
+    def register_recipient(self, recipient: BufferRecipient) -> None:
+        self._ensure_current()
+        if not self.arena:
+            self._region.recipients.add(recipient)
+
+    def _ensure_current(self) -> None:
+        if self._generation != self._region.generation:
+            raise RuntimeError("Shared buffer handle refers to a stale generation")
+
+
+@dataclass
+class ManagedTensor:
+    tensor: torch.Tensor
+    descriptor: TensorDescriptor
+    buffer: SharedBuffer
+
+
+@dataclass(frozen=True)
+class AllocationLease:
+    manager: "BufferManager"
+    allocation_id: int
+
+
+_AccessKey = tuple[int, int, int]
+
+
+@dataclass
+class _AccessState:
+    readers: int = 0
+    writer: bool = False
+
+
+@dataclass
+class _AccessWaiter:
+    accesses: dict[_AccessKey, bool]
+    granted: bool = False
+
+
+class BufferAccessLease:
+    def __init__(
+        self,
+        manager: "BufferManager",
+        accesses: dict[_AccessKey, bool],
+        tensors: tuple[torch.Tensor, ...],
+    ) -> None:
+        self._manager: BufferManager | None = manager
+        self._accesses = accesses
+        self._tensors = tensors
+        self._lock = threading.Lock()
+
+    def release(self) -> None:
+        with self._lock:
+            manager = self._manager
+            if manager is None:
+                return
+            self._manager = None
+        manager._release_access(self._accesses)
+        self._tensors = ()
+
+    def __enter__(self) -> "BufferAccessLease":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
+
+@dataclass
+class _Allocation:
+    buffer: SharedBuffer
+    descriptor: TensorDescriptor
+    tensor: weakref.ReferenceType[torch.Tensor]
+
+
+@dataclass
+class PoolStats:
+    allocation_requests: int = 0
+    pool_hits: int = 0
+    pool_misses: int = 0
+    memfds_created: int = 0
+    buffers_reclaimed: int = 0
+    buffers_evicted: int = 0
+    buffers_quarantined: int = 0
+    collection_calls: int = 0
+    collection_noops: int = 0
+    collection_ns: int = 0
+    allocation_collection_calls: int = 0
+    stats_collection_calls: int = 0
+    allocations_drained: int = 0
+    recipient_notifications: int = 0
+    recipient_notification_batches: int = 0
+    recipient_retirement_ns: int = 0
+    buffers_reset: int = 0
+    buffer_reset_ns: int = 0
+    buffers_cached: int = 0
+    buffer_cache_ns: int = 0
+    buffer_eviction_ns: int = 0
+    buffer_quarantine_ns: int = 0
+
+
+@dataclass(frozen=True)
+class ReclamationStats:
+    collection_calls: int = 0
+    collection_noops: int = 0
+    collection_ns: int = 0
+    allocation_collection_calls: int = 0
+    stats_collection_calls: int = 0
+    allocations_drained: int = 0
+    buffers_reclaimed: int = 0
+    recipient_notifications: int = 0
+    recipient_notification_batches: int = 0
+    recipient_retirement_ns: int = 0
+    buffers_reset: int = 0
+    buffer_reset_ns: int = 0
+    buffers_cached: int = 0
+    buffer_cache_ns: int = 0
+    buffers_evicted: int = 0
+    buffer_eviction_ns: int = 0
+    buffers_quarantined: int = 0
+    buffer_quarantine_ns: int = 0
+
+    def delta(self, previous: "ReclamationStats") -> "ReclamationStats":
+        values = {
+            field.name: getattr(self, field.name) - getattr(previous, field.name)
+            for field in fields(self)
+        }
+        if any(value < 0 for value in values.values()):
+            raise ValueError("Reclamation snapshots are not in cumulative order")
+        return ReclamationStats(**values)
+
+
+class BufferManager:
+    def __init__(
+        self,
+        *,
+        mode: str = "pooled",
+        arena_bytes: int | None = None,
+        max_cached_buffers: int = _DEFAULT_MAX_CACHED_BUFFERS,
+        max_cached_bytes: int = _DEFAULT_MAX_CACHED_BYTES,
+    ) -> None:
+        if mode not in {"pooled", "arena"}:
+            raise ValueError("Buffer mode must be 'pooled' or 'arena'")
+        effective_arena_bytes = (
+            _DEFAULT_ARENA_BYTES if arena_bytes is None else arena_bytes
+        )
+        if (
+            effective_arena_bytes <= 0
+            or effective_arena_bytes % _ARENA_ALIGNMENT
+            or max_cached_buffers < 0
+            or max_cached_bytes < 0
+        ):
+            raise ValueError(
+                "Buffer pool limits must be non-negative and arena size "
+                f"must be a positive multiple of {_ARENA_ALIGNMENT}"
+            )
+        self.mode = mode
+        self._arena_bytes = effective_arena_bytes
+        self._max_cached_buffers = max_cached_buffers
+        self._max_cached_bytes = max_cached_bytes
+        self._active: dict[int, _Allocation] = {}
+        self._free: dict[int, list[_MemoryRegion]] = {}
+        self._cached_bytes = 0
+        self._arena_region: _MemoryRegion | None = None
+        self._arena_free: list[tuple[int, int]] = []
+        self._region_ids: set[int] = set()
+        self._released: queue.SimpleQueue[int] = queue.SimpleQueue()
+        self._lock = threading.RLock()
+        self._collection_lock = threading.Lock()
+        self._access_changed = threading.Condition(self._lock)
+        self._access_states: dict[_AccessKey, _AccessState] = {}
+        self._access_waiters: deque[_AccessWaiter] = deque()
+        self._closed = False
+        self._stats = PoolStats()
+
+    def empty(
+        self, shape: tuple[int, ...], *, dtype: torch.dtype = torch.float32
+    ) -> ManagedTensor:
+        if dtype not in _DTYPE_NAMES:
+            raise TypeError(f"Unsupported shared tensor dtype: {dtype}")
+        if not shape or any(dimension <= 0 for dimension in shape):
+            raise ValueError("Shared tensors must have a non-empty, positive shape")
+
+        item_size = _ITEM_SIZES[dtype]
+        element_count = _element_count(shape)
+        byte_length = element_count * item_size
+        byte_strides = tuple(
+            stride * item_size for stride in _contiguous_strides(shape)
+        )
+        self._collect(source="allocation")
+        with self._lock:
+            self._ensure_open()
+            self._stats.allocation_requests += 1
+            allocation_id = secrets.randbits(64)
+            while allocation_id == 0 or allocation_id in self._active:
+                allocation_id = secrets.randbits(64)
+            buffer = (
+                self._allocate_arena(byte_length, allocation_id)
+                if self.mode == "arena"
+                else self._allocate_pooled(byte_length, allocation_id)
+            )
+
+            tensor = torch.frombuffer(
+                buffer.mapping,
+                dtype=dtype,
+                count=element_count,
+                offset=buffer.offset,
+            ).reshape(shape)
+            descriptor = TensorDescriptor(
+                buffer_id=buffer.id,
+                generation=buffer.generation,
+                allocation_id=allocation_id,
+                offset=buffer.offset,
+                byte_length=byte_length,
+                dtype=_DTYPE_NAMES[dtype],
+                shape=shape,
+                strides=byte_strides,
+            )
+            lease = AllocationLease(self, allocation_id)
+            storage = tensor.untyped_storage()
+            storage._wmfs_allocation = lease
+            tensor._wmfs_allocation = lease
+            weakref.finalize(storage, self._storage_released, allocation_id)
+            self._active[allocation_id] = _Allocation(
+                buffer, descriptor, weakref.ref(tensor)
+            )
+            return ManagedTensor(tensor=tensor, descriptor=descriptor, buffer=buffer)
+
+    def empty_named(self, shape: tuple[int, ...], dtype: str) -> ManagedTensor:
+        try:
+            torch_dtype = _DTYPES[dtype]
+        except KeyError:
+            raise TypeError(f"Unsupported shared tensor dtype: {dtype}") from None
+        return self.empty(shape, dtype=torch_dtype)
+
+    def from_tensor(self, tensor: torch.Tensor) -> ManagedTensor:
+        if tensor.device.type != "cpu":
+            raise ValueError("Only CPU tensors can be moved into shared memory")
+        if tensor.layout != torch.strided:
+            raise ValueError("Only strided tensors can be moved into shared memory")
+        if any(stride < 0 for stride in tensor.stride()):
+            raise ValueError("Negative tensor strides are not supported")
+        managed = self.empty(tuple(tensor.shape), dtype=tensor.dtype)
+        managed.tensor.copy_(tensor)
+        return managed
+
+    def managed(self, tensor: torch.Tensor) -> ManagedTensor | None:
+        if tensor.device.type != "cpu" or tensor.layout != torch.strided:
+            return None
+        lease = getattr(tensor.untyped_storage(), "_wmfs_allocation", None)
+        if not isinstance(lease, AllocationLease) or lease.manager is not self:
+            return None
+        strides = tuple(tensor.stride())
+        if any(stride < 0 for stride in strides):
+            raise ValueError("Negative tensor strides are not supported")
+        with self._lock:
+            allocation = self._active.get(lease.allocation_id)
+            if allocation is None:
+                return None
+            item_size = tensor.element_size()
+            shape = tuple(tensor.shape)
+            byte_strides = tuple(stride * item_size for stride in strides)
+            byte_length = (
+                0
+                if tensor.numel() == 0
+                else item_size
+                + sum(
+                    (dimension - 1) * stride
+                    for dimension, stride in zip(shape, byte_strides, strict=True)
+                )
+            )
+            offset = allocation.buffer.offset + tensor.storage_offset() * item_size
+            allocation_end = allocation.buffer.offset + allocation.buffer.byte_length
+            if (
+                offset < allocation.buffer.offset
+                or offset + byte_length > allocation_end
+            ):
+                raise ValueError("Tensor view exceeds its managed allocation")
+            descriptor = TensorDescriptor(
+                buffer_id=allocation.buffer.id,
+                generation=allocation.buffer.generation,
+                allocation_id=allocation.descriptor.allocation_id,
+                offset=offset,
+                byte_length=byte_length,
+                dtype=_DTYPE_NAMES[tensor.dtype],
+                shape=shape,
+                strides=byte_strides,
+            )
+            return ManagedTensor(tensor, descriptor, allocation.buffer)
+
+    def resolve(self, descriptor: TensorDescriptor) -> ManagedTensor:
+        with self._lock:
+            allocation = self._active.get(descriptor.allocation_id)
+            tensor = allocation.tensor() if allocation is not None else None
+            if (
+                allocation is None
+                or allocation.descriptor != descriptor
+                or tensor is None
+            ):
+                raise ValueError("Tensor descriptor does not identify a live tensor")
+            return ManagedTensor(tensor, descriptor, allocation.buffer)
+
+    def reserve_access(
+        self,
+        *,
+        reads: Iterable[ManagedTensor] = (),
+        writes: Iterable[ManagedTensor] = (),
+    ) -> BufferAccessLease:
+        accesses: dict[_AccessKey, bool] = {}
+        held_tensors: dict[int, torch.Tensor] = {}
+        with self._access_changed:
+            self._ensure_open()
+            for managed in reads:
+                key = self._access_key(managed)
+                accesses.setdefault(key, False)
+                held_tensors.setdefault(key[2], managed.tensor)
+            for managed in writes:
+                key = self._access_key(managed)
+                accesses[key] = True
+                held_tensors.setdefault(key[2], managed.tensor)
+            if not accesses:
+                return BufferAccessLease(self, {}, ())
+
+            waiter = _AccessWaiter(accesses)
+            self._access_waiters.append(waiter)
+            try:
+                while not waiter.granted:
+                    if self._closed:
+                        raise RuntimeError("Buffer manager is closed")
+                    self._grant_access_waiters()
+                    if waiter.granted:
+                        break
+                    self._access_changed.wait()
+            except BaseException:
+                if waiter.granted:
+                    self._release_access_locked(accesses)
+                else:
+                    self._access_waiters.remove(waiter)
+                self._grant_access_waiters()
+                self._access_changed.notify_all()
+                raise
+        return BufferAccessLease(self, accesses, tuple(held_tensors.values()))
+
+    def collect(self) -> None:
+        self._collect(source="explicit")
+
+    def _collect(self, *, source: str) -> None:
+        started = perf_counter_ns()
+        drained = 0
+        reclaimed = 0
+        try:
+            with self._collection_lock:
+                pooled = []
+                with self._lock:
+                    while True:
+                        try:
+                            allocation_id = self._released.get_nowait()
+                        except queue.Empty:
+                            break
+                        drained += 1
+                        allocation = self._active.pop(allocation_id, None)
+                        if allocation is None:
+                            continue
+                        if allocation.buffer.arena:
+                            self._release_arena(allocation.buffer)
+                            reclaimed += 1
+                        else:
+                            pooled.append(allocation.buffer)
+                self._release_pooled_many(pooled)
+                reclaimed += len(pooled)
+        finally:
+            with self._lock:
+                self._stats.collection_calls += 1
+                self._stats.collection_noops += reclaimed == 0
+                self._stats.collection_ns += perf_counter_ns() - started
+                self._stats.allocations_drained += drained
+                self._stats.buffers_reclaimed += reclaimed
+                if source == "allocation":
+                    self._stats.allocation_collection_calls += 1
+                elif source == "stats":
+                    self._stats.stats_collection_calls += 1
+
+    def reclamation_stats(self) -> ReclamationStats:
+        """Return an immutable, side-effect-free cumulative metrics snapshot."""
+        with self._lock:
+            return ReclamationStats(
+                **{
+                    field.name: getattr(self._stats, field.name)
+                    for field in fields(ReclamationStats)
+                }
+            )
+
+    def stats(self) -> dict[str, int | float | str]:
+        self._collect(source="stats")
+        with self._lock:
+            result: dict[str, int | float | str] = asdict(self._stats)
+            result.update(
+                {
+                    "mode": self.mode,
+                    "active_buffers": len(self._active),
+                    "cached_buffers": sum(len(items) for items in self._free.values()),
+                    "cached_bytes": self._cached_bytes,
+                    "pool_hit_rate": (
+                        self._stats.pool_hits / self._stats.allocation_requests
+                        if self._stats.allocation_requests
+                        else 0.0
+                    ),
+                }
+            )
+            return result
+
+    def close(self) -> None:
+        with self._access_changed:
+            self._closed = True
+            self._access_changed.notify_all()
+        self.collect()
+        with self._lock:
+            for regions in self._free.values():
+                for region in regions:
+                    region.close()
+            self._free.clear()
+            self._cached_bytes = 0
+            if self._arena_region is not None and not self._active:
+                self._arena_region.close()
+                self._arena_region = None
+
+    def __del__(self) -> None:
+        if hasattr(self, "_closed"):
+            self.close()
+
+    def __enter__(self) -> "BufferManager":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def _allocate_pooled(self, byte_length: int, allocation_id: int) -> SharedBuffer:
+        available = self._free.get(byte_length)
+        if available:
+            region = available.pop()
+            if not available:
+                self._free.pop(byte_length)
+            self._cached_bytes -= byte_length
+            self._stats.pool_hits += 1
+        else:
+            region = self._new_region(byte_length)
+            self._stats.pool_misses += 1
+        return SharedBuffer(
+            region,
+            region.generation,
+            allocation_id,
+            0,
+            byte_length,
+        )
+
+    def _release_pooled_many(self, buffers: list[SharedBuffer]) -> None:
+        by_recipient: dict[BufferRecipient, list[SharedBuffer]] = {}
+        for buffer in buffers:
+            for recipient in buffer._region.recipients:
+                by_recipient.setdefault(recipient, []).append(buffer)
+        failed_regions: set[_MemoryRegion] = set()
+        notifications = 0
+        notification_batches = 0
+        retirement_ns = 0
+        for recipient, recipient_buffers in by_recipient.items():
+            started = perf_counter_ns()
+            try:
+                recipient.retire_buffers(tuple(recipient_buffers))
+            except Exception:
+                failed_regions.update(buffer._region for buffer in recipient_buffers)
+            finally:
+                retirement_ns += perf_counter_ns() - started
+                notifications += len(recipient_buffers)
+                notification_batches += 1
+        with self._lock:
+            self._stats.recipient_notifications += notifications
+            self._stats.recipient_notification_batches += notification_batches
+            self._stats.recipient_retirement_ns += retirement_ns
+        for buffer in buffers:
+            region = buffer._region
+            if region in failed_regions:
+                started = perf_counter_ns()
+                region.close()
+                with self._lock:
+                    self._stats.buffers_quarantined += 1
+                    self._stats.buffer_quarantine_ns += perf_counter_ns() - started
+                continue
+            self._reset_or_release_region(region)
+
+    def _reset_or_release_region(self, region: _MemoryRegion) -> None:
+        with self._lock:
+            close_region = self._closed or region.generation == 0xFFFFFFFF
+        if close_region:
+            region.close()
+            return
+        try:
+            started = perf_counter_ns()
+            region.reset()
+            reset_ns = perf_counter_ns() - started
+        except Exception:
+            region.close()
+            raise
+        with self._lock:
+            self._stats.buffers_reset += 1
+            self._stats.buffer_reset_ns += reset_ns
+            if (
+                self._closed
+                or sum(len(items) for items in self._free.values())
+                >= self._max_cached_buffers
+                or self._cached_bytes + region.byte_length > self._max_cached_bytes
+            ):
+                started = perf_counter_ns()
+                region.close()
+                if not self._closed:
+                    self._stats.buffers_evicted += 1
+                    self._stats.buffer_eviction_ns += perf_counter_ns() - started
+                return
+            started = perf_counter_ns()
+            self._free.setdefault(region.byte_length, []).append(region)
+            self._cached_bytes += region.byte_length
+            self._stats.buffers_cached += 1
+            self._stats.buffer_cache_ns += perf_counter_ns() - started
+
+    def _allocate_arena(self, byte_length: int, allocation_id: int) -> SharedBuffer:
+        created = False
+        if self._arena_region is None:
+            self._arena_region = self._new_region(self._arena_bytes)
+            self._arena_free = [(0, self._arena_bytes)]
+            self._stats.pool_misses += 1
+            created = True
+        required = _align(byte_length, _ARENA_ALIGNMENT)
+        for index, (offset, length) in enumerate(self._arena_free):
+            if length < required:
+                continue
+            del self._arena_free[index]
+            if length > required:
+                self._arena_free.insert(index, (offset + required, length - required))
+            if not created:
+                self._stats.pool_hits += 1
+            return SharedBuffer(
+                self._arena_region,
+                self._arena_region.generation,
+                allocation_id,
+                offset,
+                byte_length,
+                arena=True,
+            )
+        raise MemoryError(
+            f"Shared-memory arena exhausted; requested {required} of "
+            f"{self._arena_bytes} bytes"
+        )
+
+    def _release_arena(self, buffer: SharedBuffer) -> None:
+        length = _align(buffer.byte_length, _ARENA_ALIGNMENT)
+        self._arena_free.append((buffer.offset, length))
+        self._arena_free.sort()
+        merged: list[tuple[int, int]] = []
+        for offset, size in self._arena_free:
+            if merged and merged[-1][0] + merged[-1][1] == offset:
+                previous_offset, previous_size = merged[-1]
+                merged[-1] = (previous_offset, previous_size + size)
+            else:
+                merged.append((offset, size))
+        self._arena_free = merged
+        if self._closed and not self._active and self._arena_region is not None:
+            self._arena_region.close()
+            self._arena_region = None
+
+    def _new_region(self, byte_length: int) -> _MemoryRegion:
+        buffer_id = secrets.randbits(64)
+        while buffer_id == 0 or buffer_id in self._region_ids:
+            buffer_id = secrets.randbits(64)
+        self._region_ids.add(buffer_id)
+        self._stats.memfds_created += 1
+        return _MemoryRegion(buffer_id, byte_length)
+
+    def _storage_released(self, allocation_id: int) -> None:
+        self._released.put(allocation_id)
+
+    def _access_key(self, managed: ManagedTensor) -> _AccessKey:
+        current = self.managed(managed.tensor)
+        descriptor = managed.descriptor
+        if (
+            current is None
+            or current.descriptor.buffer_id != descriptor.buffer_id
+            or current.descriptor.generation != descriptor.generation
+            or current.descriptor.allocation_id != descriptor.allocation_id
+        ):
+            raise RuntimeError("Tensor access refers to a stale managed allocation")
+        return (
+            descriptor.buffer_id,
+            descriptor.generation,
+            descriptor.allocation_id,
+        )
+
+    def _grant_access_waiters(self) -> None:
+        if self._closed:
+            return
+        blocked: set[_AccessKey] = set()
+        for waiter in tuple(self._access_waiters):
+            keys = waiter.accesses.keys()
+            if blocked.isdisjoint(keys) and self._can_grant_access(waiter.accesses):
+                for key, writable in waiter.accesses.items():
+                    state = self._access_states.setdefault(key, _AccessState())
+                    if writable:
+                        state.writer = True
+                    else:
+                        state.readers += 1
+                waiter.granted = True
+                self._access_waiters.remove(waiter)
+                continue
+            blocked.update(keys)
+
+    def _can_grant_access(self, accesses: dict[_AccessKey, bool]) -> bool:
+        for key, writable in accesses.items():
+            state = self._access_states.get(key)
+            if state is None:
+                continue
+            if state.writer or (writable and state.readers):
+                return False
+        return True
+
+    def _release_access(self, accesses: dict[_AccessKey, bool]) -> None:
+        with self._access_changed:
+            self._release_access_locked(accesses)
+            self._grant_access_waiters()
+            self._access_changed.notify_all()
+
+    def _release_access_locked(self, accesses: dict[_AccessKey, bool]) -> None:
+        for key, writable in accesses.items():
+            state = self._access_states[key]
+            if writable:
+                state.writer = False
+            else:
+                state.readers -= 1
+            if not state.writer and state.readers == 0:
+                del self._access_states[key]
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Buffer manager is closed")
+
+
+def _element_count(shape: tuple[int, ...]) -> int:
+    count = 1
+    for dimension in shape:
+        count *= dimension
+    return count
+
+
+def _contiguous_strides(shape: tuple[int, ...]) -> tuple[int, ...]:
+    strides = [1]
+    for dimension in reversed(shape[1:]):
+        strides.append(strides[-1] * dimension)
+    return tuple(reversed(strides))
+
+
+def _align(value: int, alignment: int) -> int:
+    return (value + alignment - 1) // alignment * alignment

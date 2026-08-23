@@ -1,0 +1,12 @@
+{
+  "latest": {
+    "name": "master",
+    "path": "latest/"
+  },
+  "releases": [
+    {
+      "name": "0.1.0",
+      "path": "versions/0.1.0/"
+    }
+  ]
+}

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Package Roles &#8212; WMFS 5ccd995c85da</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <script src="_static/documentation_options.js?v=00907de2"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Data Flow And Reading Guide" href="data-flow.html" />
+    <link rel="prev" title="Architecture Overview" href="architecture-overview.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="package-roles">
+<h1>Package Roles<a class="headerlink" href="#package-roles" title="Link to this heading">¶</a></h1>
+<p>WMFS publishes three Python distributions with deliberately different users
+and lifetimes. They are not a stack that every environment should install.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Distribution</p></th>
+<th class="head"><p>Installed by</p></th>
+<th class="head"><p>Used when</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">wmfs</span></code></p></td>
+<td><p>Application/runtime environment</p></td>
+<td><p>Runtime</p></td>
+<td><p>Public Python API, plugin discovery, worker lifecycle, rings, shared buffers, and tensor results</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code></p></td>
+<td><p>Python plugin worker environment</p></td>
+<td><p>Runtime, inside the worker only</p></td>
+<td><p>Stable Python worker bootstrap, invocation context, FD receiver, mapped tensors, and worker-side ring endpoint</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code></p></td>
+<td><p>Plugin build and CI environment</p></td>
+<td><p>Build time only</p></td>
+<td><p>Compiles <code class="docutils literal notranslate"><span class="pre">interface.toml</span></code> into manifests and C++/Python plugin-facing artifacts</p></td>
+</tr>
+</tbody>
+</table>
+<section id="wmfs-application-runtime">
+<h2><code class="docutils literal notranslate"><span class="pre">wmfs</span></code>: Application Runtime<a class="headerlink" href="#wmfs-application-runtime" title="Link to this heading">¶</a></h2>
+<p>Applications install <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> and call ordinary operations:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">python -m pip install wmfs</span>
+</pre></div>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">wmfs</span>
+
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">discover_plugins</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;plugins&quot;</span><span class="p">))</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">use_backend</span><span class="p">(</span><span class="s2">&quot;isolated&quot;</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">wmfs</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The distribution owns the application-side protocol model, startup schemas,
+ring producer/completion dispatcher, shared-memory allocator, FD sender, and
+worker process lifecycle. It reads generated plugin manifests but does not
+import plugin implementations.</p>
+<p><code class="docutils literal notranslate"><span class="pre">wmfs</span></code> does not depend on <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> or <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>. A local, bundled, or C++
+isolated deployment therefore does not install the Python worker SDK or the
+interface compiler.</p>
+</section>
+<section id="wmfs-plugin-python-worker-sdk">
+<h2><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>: Python Worker SDK<a class="headerlink" href="#wmfs-plugin-python-worker-sdk" title="Link to this heading">¶</a></h2>
+<p>Install <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> only in an environment that executes a Python plugin
+worker:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">python -m pip install wmfs-plugin</span>
+</pre></div>
+</div>
+<p>Generated Python adapters import its stable worker-facing types. Plugin code
+uses <code class="docutils literal notranslate"><span class="pre">InvocationContext</span></code> and <code class="docutils literal notranslate"><span class="pre">worker_main</span></code> rather than importing the application
+runtime:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">wmfs_plugin</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvocationContext</span><span class="p">,</span> <span class="n">worker_main</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">scale</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">InvocationContext</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">context</span><span class="o">.</span><span class="n">output</span><span class="p">(</span><span class="s2">&quot;result&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">input</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">)</span> <span class="o">*</span> <span class="n">context</span><span class="o">.</span><span class="n">scalar</span><span class="p">(</span><span class="s2">&quot;factor&quot;</span><span class="p">)</span>
+    <span class="p">)</span>
+
+
+<span class="n">worker_main</span><span class="p">({</span><span class="s2">&quot;scale&quot;</span><span class="p">:</span> <span class="n">scale</span><span class="p">})</span>
+</pre></div>
+</div>
+<p>The SDK owns the Python worker bootstrap, mapped-buffer receiver, worker-side
+ring endpoint, and compatible worker-side protocol definitions. It does not
+depend on <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> or <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>.</p>
+<p>Do not add <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> to an application’s dependencies merely because the
+application invokes plugins. The worker package declares it when, and only
+when, that worker is implemented in Python. C++ workers do not use it.</p>
+</section>
+<section id="wmfs-tool-interface-compiler">
+<h2><code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>: Interface Compiler<a class="headerlink" href="#wmfs-tool-interface-compiler" title="Link to this heading">¶</a></h2>
+<p>Plugin projects use <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> while building or checking generated artifacts:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">python -m pip install wmfs-tool</span>
+<span class="go">wmfs-tool generate --interface interface.toml --output generated</span>
+<span class="go">wmfs-tool generate --interface interface.toml --output generated --check</span>
+</pre></div>
+</div>
+<p>The TOML interface is the handwritten source of truth. Generated outputs
+include:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">manifest.json</span></code>, consumed by <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> before worker launch;</p></li>
+<li><p>C and C++11 ABI headers and dispatch stubs;</p></li>
+<li><p>Python metadata, type stubs, and implementation adapters.</p></li>
+</ul>
+<p>Generated artifacts are committed to or packaged with the plugin. Neither the
+application runtime nor the deployed worker runs <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>, so it is not a
+runtime dependency. The compiler itself has no dependency on <code class="docutils literal notranslate"><span class="pre">wmfs</span></code>,
+<code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>, PyTorch, or Cap’n Proto.</p>
+</section>
+<section id="plugin-workflows">
+<h2>Plugin Workflows<a class="headerlink" href="#plugin-workflows" title="Link to this heading">¶</a></h2>
+<section id="python-plugin">
+<h3>Python Plugin<a class="headerlink" href="#python-plugin" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Declare operations in <code class="docutils literal notranslate"><span class="pre">interface.toml</span></code>.</p></li>
+<li><p>Install and run <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> in the build environment.</p></li>
+<li><p>Implement the generated Python interface using <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> types.</p></li>
+<li><p>Package the generated manifest with the worker distribution.</p></li>
+<li><p>Declare <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> and the numerical library as worker runtime
+dependencies; do not declare <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> or <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>.</p></li>
+</ol>
+<p>The application and Python worker may use different Python, PyTorch, libc, and
+dependency environments. Their protocol copies are tested for wire parity but
+are packaged independently so neither environment imports the other package.</p>
+</section>
+<section id="c-plugin">
+<h3>C++ Plugin<a class="headerlink" href="#c-plugin" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Declare operations in <code class="docutils literal notranslate"><span class="pre">interface.toml</span></code>.</p></li>
+<li><p>Run <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> during the build.</p></li>
+<li><p>Implement the generated C++11-compatible interface.</p></li>
+<li><p>Package the generated manifest and worker executable together.</p></li>
+</ol>
+<p>The deployed C++ worker requires neither <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> nor <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>. It
+communicates with <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> only through the generated startup contract,
+command/completion rings, the FD-control channel, and shared tensor mappings.</p>
+</section>
+</section>
+<section id="dependency-direction">
+<h2>Dependency Direction<a class="headerlink" href="#dependency-direction" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>application
+    -&gt; wmfs
+
+Python worker distribution
+    -&gt; wmfs-plugin
+
+plugin build / CI
+    -&gt; wmfs-tool
+
+wmfs-tool
+    -&gt; generated manifest + C++ interface + Python interface
+</pre></div>
+</div>
+<p>There is intentionally no dependency edge from <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> to <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>, from
+<code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> to <code class="docutils literal notranslate"><span class="pre">wmfs</span></code>, or from either runtime package to <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture-overview.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Package Roles</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#wmfs-application-runtime"><code class="docutils literal notranslate"><span class="pre">wmfs</span></code>: Application Runtime</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#wmfs-plugin-python-worker-sdk"><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>: Python Worker SDK</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#wmfs-tool-interface-compiler"><code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>: Interface Compiler</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#plugin-workflows">Plugin Workflows</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#dependency-direction">Dependency Direction</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="data-flow.html">Data Flow And Reading Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ring-protocol.html">Command and Completion Ring Protocol</a></li>
+<li class="toctree-l1"><a class="reference internal" href="plugin-compatibility.html">Plugin Artifact Compatibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/python.html">Python API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/cpp.html">C++ API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing-docs.html">Contributing Documentation</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="architecture-overview.html" title="previous chapter">Architecture Overview</a></li>
+      <li>Next: <a href="data-flow.html" title="next chapter">Data Flow And Reading Guide</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/package-roles.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

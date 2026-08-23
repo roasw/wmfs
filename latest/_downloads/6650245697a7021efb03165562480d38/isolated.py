@@ -1,0 +1,277 @@
+import threading
+
+import torch
+
+from wmfs.autograd import invoke_with_vjp
+from wmfs.memory import BufferManager
+from wmfs.plugins import PluginManifest
+from wmfs.registry import EnvironmentMetadata, OperationRegistry
+from wmfs.tensors import TensorFactory
+from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
+from wmfs.transport.errors import WorkerTransportError
+from wmfs.transport.native_worker import NativeWorkerSession, native_available
+from wmfs.transport.worker_process import WorkerSession
+
+
+class IsolatedBackend:
+    """Execute registered operations in persistent plugin workers."""
+
+    def __init__(
+        self,
+        manifests: tuple[PluginManifest, ...],
+        registry: OperationRegistry,
+        *,
+        memory_mode: str = "pooled",
+        arena_bytes: int | None = None,
+        control_mode: str = "auto",
+        deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
+    ) -> None:
+        self._registry = registry
+        self._buffers = BufferManager(mode=memory_mode, arena_bytes=arena_bytes)
+        self._manifests = {manifest.name: manifest for manifest in manifests}
+        self._control_mode = control_mode
+        self._deadlines = deadlines
+        self._sessions: dict[str, WorkerSession | NativeWorkerSession] = {}
+        self._condition = threading.Condition()
+        self._creating: set[str] = set()
+        self._inflight = 0
+        self._state = "open"
+
+    @property
+    def operation_names(self) -> tuple[str, ...]:
+        """Return public operations advertised by discovered workers."""
+        return self._registry.operation_names
+
+    @classmethod
+    def discover(
+        cls,
+        manifests: tuple[PluginManifest, ...],
+        *,
+        memory_mode: str = "pooled",
+        arena_bytes: int | None = None,
+        control_mode: str = "auto",
+        deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
+    ) -> tuple[OperationRegistry, "IsolatedBackend"]:
+        registry = OperationRegistry()
+        backend = cls(
+            manifests,
+            registry,
+            memory_mode=memory_mode,
+            arena_bytes=arena_bytes,
+            control_mode=control_mode,
+            deadlines=deadlines,
+        )
+        try:
+            for manifest in manifests:
+                registry.register(manifest.metadata)
+            for manifest in manifests:
+                session = backend._new_session(manifest.name)
+                backend._sessions[manifest.name] = session
+            return registry, backend
+        except BaseException:
+            backend.close()
+            raise
+
+    def plugin_environment(self, plugin_name: str) -> EnvironmentMetadata:
+        session = self._acquire_session(plugin_name)
+        try:
+            return session.environment()
+        except WorkerTransportError:
+            self._evict_session(plugin_name, session)
+            raise
+        finally:
+            with self._condition:
+                self._inflight -= 1
+                self._condition.notify_all()
+
+    def invoke(
+        self,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
+        try:
+            plugin_name = self._registry.plugin_for_operation(operation)
+        except KeyError:
+            raise ValueError(f"Unknown operation {operation!r}") from None
+        metadata = self._registry.operation(operation)
+        if metadata.internal:
+            raise ValueError(f"Operation {operation!r} is internal to its plugin")
+        tensor_inputs = tuple(item for item in args if isinstance(item, torch.Tensor))
+        autograd_requested = torch.is_grad_enabled() and any(
+            item.requires_grad for item in tensor_inputs
+        )
+        if autograd_requested:
+            if out is not None:
+                raise RuntimeError("Isolated out does not support autograd inputs")
+            if metadata.vjp is None:
+                raise RuntimeError(
+                    f"Isolated operation {operation!r} does not advertise a VJP"
+                )
+            vjp_operation = self._registry.operation_by_id(
+                plugin_name, metadata.vjp.operation_id
+            )
+            return invoke_with_vjp(
+                self,
+                plugin_name,
+                metadata,
+                vjp_operation,
+                args,
+                kwargs,
+            )
+        return self._invoke_plugin(plugin_name, metadata.name, *args, out=out, **kwargs)
+
+    def construct_tensor(
+        self,
+        factory: TensorFactory,
+        shape: tuple[int, ...],
+        *,
+        dtype: torch.dtype,
+        device: torch.device | str | None,
+        requires_grad: bool,
+        generator: torch.Generator | None,
+    ) -> torch.Tensor:
+        """Construct a tensor directly over runtime-owned shared memory."""
+        target_device = torch.device("cpu" if device is None else device)
+        if target_device.type != "cpu":
+            raise ValueError("Isolated tensors must use the CPU device")
+        with self._condition:
+            if self._state != "open":
+                raise RuntimeError("Isolated backend is closed")
+            self._inflight += 1
+        try:
+            tensor = self._buffers.empty(shape, dtype=dtype).tensor
+            with torch.no_grad():
+                if factory == "zeros":
+                    tensor.zero_()
+                elif factory == "ones":
+                    tensor.fill_(1)
+                elif factory == "randn":
+                    tensor.normal_(generator=generator)
+            return tensor.requires_grad_(requires_grad)
+        finally:
+            with self._condition:
+                self._inflight -= 1
+                self._condition.notify_all()
+
+    def _invoke_plugin(
+        self,
+        plugin_name: str,
+        operation: str,
+        /,
+        *args: object,
+        out: object | None = None,
+        **kwargs: object,
+    ) -> object:
+        session = self._acquire_session(plugin_name)
+        try:
+            return session.invoke(operation, *args, out=out, **kwargs)
+        except WorkerTransportError:
+            self._evict_session(plugin_name, session)
+            raise
+        finally:
+            with self._condition:
+                self._inflight -= 1
+                self._condition.notify_all()
+
+    def close(self) -> None:
+        with self._condition:
+            if self._state == "closed":
+                return
+            if self._state == "closing":
+                self._condition.wait_for(lambda: self._state == "closed")
+                return
+            self._state = "closing"
+            self._condition.wait_for(lambda: self._inflight == 0 and not self._creating)
+            sessions = tuple(self._sessions.values())
+            self._sessions.clear()
+        failures: list[BaseException] = []
+        try:
+            for session in sessions:
+                try:
+                    session.close()
+                except BaseException as error:
+                    failures.append(error)
+            try:
+                self._buffers.close()
+            except BaseException as error:
+                failures.append(error)
+        finally:
+            with self._condition:
+                self._state = "closed"
+                self._condition.notify_all()
+        if failures:
+            raise failures[0]
+
+    def _acquire_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+        with self._condition:
+            while True:
+                if self._state != "open":
+                    raise RuntimeError("Isolated backend is closed")
+                session = self._sessions.get(plugin_name)
+                if session is not None:
+                    self._inflight += 1
+                    return session
+                if plugin_name not in self._creating:
+                    self._creating.add(plugin_name)
+                    break
+                self._condition.wait()
+
+        try:
+            session = self._new_session(plugin_name)
+        except BaseException:
+            with self._condition:
+                self._creating.remove(plugin_name)
+                self._condition.notify_all()
+            raise
+
+        with self._condition:
+            if self._state == "open":
+                self._sessions[plugin_name] = session
+                self._creating.remove(plugin_name)
+                self._inflight += 1
+                self._condition.notify_all()
+                return session
+
+        try:
+            session.close()
+        finally:
+            with self._condition:
+                self._creating.remove(plugin_name)
+                self._condition.notify_all()
+        raise RuntimeError("Isolated backend is closed")
+
+    def _new_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+        expected = self._registry.plugin(plugin_name)
+        use_native = self._control_mode == "native" or (
+            self._control_mode == "auto" and native_available()
+        )
+        if use_native:
+            return NativeWorkerSession(
+                self._manifests[plugin_name],
+                self._buffers,
+                expected,
+                self._deadlines,
+            )
+        return WorkerSession(
+            self._manifests[plugin_name],
+            self._buffers,
+            expected,
+            self._deadlines,
+        )
+
+    def _evict_session(
+        self,
+        plugin_name: str,
+        session: WorkerSession | NativeWorkerSession,
+    ) -> None:
+        with self._condition:
+            if self._sessions.get(plugin_name) is session:
+                del self._sessions[plugin_name]
+                self._condition.notify_all()
+        try:
+            session.close()
+        except Exception:
+            pass

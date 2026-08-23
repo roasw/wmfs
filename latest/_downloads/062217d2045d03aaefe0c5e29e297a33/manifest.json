@@ -1,0 +1,424 @@
+{
+    "abiVersion": 1,
+    "deployment": {
+        "interface": "ReferencePlugin",
+        "root": "..",
+        "schema": "../schemas/wmfs-reference/reference.capnp",
+        "worker": "wmfs-reference-worker"
+    },
+    "formatVersion": 1,
+    "generator": "wmfs-tool/1",
+    "interfaceFingerprint": "sha256:b0f2005fae597c883fc5caf85c3b78f88996b0141b5c7a71bdd9d7163efc3123",
+    "metadataFingerprint": "0x549fb18b7a4b6c75",
+    "operationCount": 6,
+    "operations": [
+        {
+            "id": 1,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "name": "a"
+                },
+                {
+                    "access": "read_only",
+                    "name": "b"
+                }
+            ],
+            "internal": false,
+            "name": "matmul",
+            "outputs": [
+                {
+                    "allocation": "known",
+                    "dimensions": [
+                        {
+                            "axis": 0,
+                            "input": 0,
+                            "kind": "input_axis",
+                            "operands": [],
+                            "scalar": null,
+                            "when_false": null,
+                            "when_true": null
+                        },
+                        {
+                            "axis": 1,
+                            "input": 1,
+                            "kind": "input_axis",
+                            "operands": [],
+                            "scalar": null,
+                            "when_false": null,
+                            "when_true": null
+                        }
+                    ],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "result",
+                    "same_shape_as_input": null
+                }
+            ],
+            "scalars": [],
+            "vjp": {
+                "input_gradients": [
+                    0,
+                    1
+                ],
+                "operation_id": 4,
+                "output_cotangents": [
+                    0
+                ],
+                "saved_inputs": [
+                    0,
+                    1
+                ],
+                "saved_outputs": [],
+                "scalar_parameters": []
+            }
+        },
+        {
+            "id": 2,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "name": "a"
+                }
+            ],
+            "internal": false,
+            "name": "svd",
+            "outputs": [
+                {
+                    "allocation": "known",
+                    "dimensions": [
+                        {
+                            "axis": 0,
+                            "input": 0,
+                            "kind": "input_axis",
+                            "operands": [],
+                            "scalar": null,
+                            "when_false": null,
+                            "when_true": null
+                        },
+                        {
+                            "axis": null,
+                            "input": null,
+                            "kind": "select",
+                            "operands": [],
+                            "scalar": 0,
+                            "when_false": {
+                                "axis": null,
+                                "input": null,
+                                "kind": "minimum",
+                                "operands": [
+                                    {
+                                        "axis": 0,
+                                        "input": 0,
+                                        "kind": "input_axis",
+                                        "operands": [],
+                                        "scalar": null,
+                                        "when_false": null,
+                                        "when_true": null
+                                    },
+                                    {
+                                        "axis": 1,
+                                        "input": 0,
+                                        "kind": "input_axis",
+                                        "operands": [],
+                                        "scalar": null,
+                                        "when_false": null,
+                                        "when_true": null
+                                    }
+                                ],
+                                "scalar": null,
+                                "when_false": null,
+                                "when_true": null
+                            },
+                            "when_true": {
+                                "axis": 0,
+                                "input": 0,
+                                "kind": "input_axis",
+                                "operands": [],
+                                "scalar": null,
+                                "when_false": null,
+                                "when_true": null
+                            }
+                        }
+                    ],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "u",
+                    "same_shape_as_input": null
+                },
+                {
+                    "allocation": "known",
+                    "dimensions": [
+                        {
+                            "axis": null,
+                            "input": null,
+                            "kind": "minimum",
+                            "operands": [
+                                {
+                                    "axis": 0,
+                                    "input": 0,
+                                    "kind": "input_axis",
+                                    "operands": [],
+                                    "scalar": null,
+                                    "when_false": null,
+                                    "when_true": null
+                                },
+                                {
+                                    "axis": 1,
+                                    "input": 0,
+                                    "kind": "input_axis",
+                                    "operands": [],
+                                    "scalar": null,
+                                    "when_false": null,
+                                    "when_true": null
+                                }
+                            ],
+                            "scalar": null,
+                            "when_false": null,
+                            "when_true": null
+                        }
+                    ],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "s",
+                    "same_shape_as_input": null
+                },
+                {
+                    "allocation": "known",
+                    "dimensions": [
+                        {
+                            "axis": null,
+                            "input": null,
+                            "kind": "select",
+                            "operands": [],
+                            "scalar": 0,
+                            "when_false": {
+                                "axis": null,
+                                "input": null,
+                                "kind": "minimum",
+                                "operands": [
+                                    {
+                                        "axis": 0,
+                                        "input": 0,
+                                        "kind": "input_axis",
+                                        "operands": [],
+                                        "scalar": null,
+                                        "when_false": null,
+                                        "when_true": null
+                                    },
+                                    {
+                                        "axis": 1,
+                                        "input": 0,
+                                        "kind": "input_axis",
+                                        "operands": [],
+                                        "scalar": null,
+                                        "when_false": null,
+                                        "when_true": null
+                                    }
+                                ],
+                                "scalar": null,
+                                "when_false": null,
+                                "when_true": null
+                            },
+                            "when_true": {
+                                "axis": 1,
+                                "input": 0,
+                                "kind": "input_axis",
+                                "operands": [],
+                                "scalar": null,
+                                "when_false": null,
+                                "when_true": null
+                            }
+                        },
+                        {
+                            "axis": 1,
+                            "input": 0,
+                            "kind": "input_axis",
+                            "operands": [],
+                            "scalar": null,
+                            "when_false": null,
+                            "when_true": null
+                        }
+                    ],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "vh",
+                    "same_shape_as_input": null
+                }
+            ],
+            "scalars": [
+                {
+                    "default": true,
+                    "kind": "boolean",
+                    "name": "fullMatrices",
+                    "required": false
+                }
+            ],
+            "vjp": null
+        },
+        {
+            "id": 3,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "name": "a"
+                }
+            ],
+            "internal": false,
+            "name": "add_scalar",
+            "outputs": [
+                {
+                    "allocation": "known",
+                    "dimensions": [],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "promote_tensor_scalar",
+                        "scalar": 0,
+                        "value": null
+                    },
+                    "name": "result",
+                    "same_shape_as_input": 0
+                }
+            ],
+            "scalars": [
+                {
+                    "default": null,
+                    "kind": "float64",
+                    "name": "value",
+                    "required": true
+                }
+            ],
+            "vjp": {
+                "input_gradients": [
+                    0
+                ],
+                "operation_id": 5,
+                "output_cotangents": [
+                    0
+                ],
+                "saved_inputs": [],
+                "saved_outputs": [],
+                "scalar_parameters": []
+            }
+        },
+        {
+            "id": 4,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "name": "a"
+                },
+                {
+                    "access": "read_only",
+                    "name": "b"
+                },
+                {
+                    "access": "read_only",
+                    "name": "resultCotangent"
+                }
+            ],
+            "internal": true,
+            "name": "matmul_vjp",
+            "outputs": [
+                {
+                    "allocation": "known",
+                    "dimensions": [],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "aGradient",
+                    "same_shape_as_input": 0
+                },
+                {
+                    "allocation": "known",
+                    "dimensions": [],
+                    "dtype": {
+                        "input": 1,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "bGradient",
+                    "same_shape_as_input": 1
+                }
+            ],
+            "scalars": [],
+            "vjp": null
+        },
+        {
+            "id": 5,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "name": "resultCotangent"
+                }
+            ],
+            "internal": true,
+            "name": "add_scalar_vjp",
+            "outputs": [
+                {
+                    "allocation": "known",
+                    "dimensions": [],
+                    "dtype": {
+                        "input": 0,
+                        "kind": "input",
+                        "scalar": null,
+                        "value": null
+                    },
+                    "name": "aGradient",
+                    "same_shape_as_input": 0
+                }
+            ],
+            "scalars": [],
+            "vjp": null
+        },
+        {
+            "id": 6,
+            "inputs": [
+                {
+                    "access": "read_only",
+                    "name": "a"
+                }
+            ],
+            "internal": false,
+            "name": "nonzero",
+            "outputs": [
+                {
+                    "allocation": "dynamic",
+                    "dimensions": [],
+                    "dtype": null,
+                    "name": "indices",
+                    "same_shape_as_input": null
+                }
+            ],
+            "scalars": [],
+            "vjp": null
+        }
+    ],
+    "plugin": {
+        "name": "reference",
+        "namespace": "reference",
+        "pythonModule": "wmfs_reference",
+        "version": "0.1.0"
+    },
+    "protocolVersion": 11
+}

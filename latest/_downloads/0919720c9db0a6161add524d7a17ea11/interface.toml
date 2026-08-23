@@ -1,0 +1,144 @@
+format_version = 1
+abi_version = 1
+protocol_version = 11
+
+[plugin]
+name = "reference"
+version = "0.1.0"
+namespace = "reference"
+python_module = "wmfs_reference"
+
+[deployment]
+schema = "../schemas/wmfs-reference/reference.capnp"
+interface = "ReferencePlugin"
+root = ".."
+worker = "wmfs-reference-worker"
+
+[[operations]]
+id = 1
+name = "matmul"
+
+[[operations.inputs]]
+name = "a"
+
+[[operations.inputs]]
+name = "b"
+
+[[operations.outputs]]
+name = "result"
+dimensions = [
+  { input_axis = { input = 0, axis = 0 } },
+  { input_axis = { input = 1, axis = 1 } },
+]
+dtype = { input = 0 }
+
+[operations.vjp]
+operation_id = 4
+saved_inputs = [0, 1]
+output_cotangents = [0]
+input_gradients = [0, 1]
+
+[[operations]]
+id = 2
+name = "svd"
+
+[[operations.inputs]]
+name = "a"
+
+[[operations.scalars]]
+name = "fullMatrices"
+kind = "boolean"
+required = false
+default = true
+
+[[operations.outputs]]
+name = "u"
+dimensions = [
+  { input_axis = { input = 0, axis = 0 } },
+  { select = { scalar = 0, when_true = { input_axis = { input = 0, axis = 0 } }, when_false = { minimum = { values = [{ input_axis = { input = 0, axis = 0 } }, { input_axis = { input = 0, axis = 1 } }] } } } },
+]
+dtype = { input = 0 }
+
+[[operations.outputs]]
+name = "s"
+dimensions = [
+  { minimum = { values = [{ input_axis = { input = 0, axis = 0 } }, { input_axis = { input = 0, axis = 1 } }] } },
+]
+dtype = { input = 0 }
+
+[[operations.outputs]]
+name = "vh"
+dimensions = [
+  { select = { scalar = 0, when_true = { input_axis = { input = 0, axis = 1 } }, when_false = { minimum = { values = [{ input_axis = { input = 0, axis = 0 } }, { input_axis = { input = 0, axis = 1 } }] } } } },
+  { input_axis = { input = 0, axis = 1 } },
+]
+dtype = { input = 0 }
+
+[[operations]]
+id = 3
+name = "add_scalar"
+
+[[operations.inputs]]
+name = "a"
+
+[[operations.scalars]]
+name = "value"
+kind = "float64"
+
+[[operations.outputs]]
+name = "result"
+same_shape_as_input = 0
+dtype = { promote_tensor = 0, scalar = 0 }
+
+[operations.vjp]
+operation_id = 5
+output_cotangents = [0]
+input_gradients = [0]
+
+[[operations]]
+id = 4
+name = "matmul_vjp"
+internal = true
+
+[[operations.inputs]]
+name = "a"
+
+[[operations.inputs]]
+name = "b"
+
+[[operations.inputs]]
+name = "resultCotangent"
+
+[[operations.outputs]]
+name = "aGradient"
+same_shape_as_input = 0
+dtype = { input = 0 }
+
+[[operations.outputs]]
+name = "bGradient"
+same_shape_as_input = 1
+dtype = { input = 1 }
+
+[[operations]]
+id = 5
+name = "add_scalar_vjp"
+internal = true
+
+[[operations.inputs]]
+name = "resultCotangent"
+
+[[operations.outputs]]
+name = "aGradient"
+same_shape_as_input = 0
+dtype = { input = 0 }
+
+[[operations]]
+id = 6
+name = "nonzero"
+
+[[operations.inputs]]
+name = "a"
+
+[[operations.outputs]]
+name = "indices"
+dynamic = true

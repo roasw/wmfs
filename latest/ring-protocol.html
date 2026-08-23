@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Command and Completion Ring Protocol &#8212; WMFS 5ccd995c85da</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <script src="_static/documentation_options.js?v=00907de2"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Plugin Artifact Compatibility" href="plugin-compatibility.html" />
+    <link rel="prev" title="Data Flow And Reading Guide" href="data-flow.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="command-and-completion-ring-protocol">
+<h1>Command and Completion Ring Protocol<a class="headerlink" href="#command-and-completion-ring-protocol" title="Link to this heading">¶</a></h1>
+<p>The normative C ABI is
+<a class="reference download internal" download="" href="_downloads/8dd4a8fb17b7b2b753357812b7e3a9bf/ring.h"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">inc/wmfs/protocol/ring.h</span></code></span></a>. ABI 1.1 adds the
+logical <code class="docutils literal notranslate"><span class="pre">allocation_id</span></code> required to distinguish pooled-buffer reuse while
+preserving the 16 KiB record geometry.</p>
+<section id="version-and-byte-order">
+<h2>Version and byte order<a class="headerlink" href="#version-and-byte-order" title="Link to this heading">¶</a></h2>
+<p>Version 1 uses little-endian integers, IEEE 754 binary64 scalar bits, two’s
+complement signed integers, and UTF-8 text. A participant must reject a host
+that cannot provide those representations; records are not byte-swapped.
+<code class="docutils literal notranslate"><span class="pre">WMFS_RING_MAGIC</span></code> has the bytes <code class="docutils literal notranslate"><span class="pre">WMFSRNG1</span></code> in increasing address order on a
+little-endian host.</p>
+<p>The ring header carries an ABI major and minor version. A different major
+version is incompatible. A participant may accept a newer minor version only
+when all unknown header flags, record flags, kinds, and statuses are zero or
+otherwise explicitly supported. Header size, record size, capacity, magic,
+and session generation are validated before either counter is accessed.</p>
+</section>
+<section id="ring-header">
+<h2>Ring header<a class="headerlink" href="#ring-header" title="Link to this heading">¶</a></h2>
+<p>Each command and completion ring begins with one 4096-byte, 64-byte-aligned
+header. <code class="docutils literal notranslate"><span class="pre">capacity</span></code> is the number of following 16384-byte records and must be
+nonzero. Producer and consumer are monotonically increasing <code class="docutils literal notranslate"><span class="pre">uint64_t</span></code> sequence
+counters; the record slot for sequence <code class="docutils literal notranslate"><span class="pre">n</span></code> is <code class="docutils literal notranslate"><span class="pre">n</span> <span class="pre">%</span> <span class="pre">capacity</span></code>.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head text-right"><p>Offset</p></th>
+<th class="head text-right"><p>Size</p></th>
+<th class="head"><p>Field</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-right"><p>0</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>magic</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>8</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>ABI major</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>12</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>ABI minor</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>16</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>header size</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>20</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>record size</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>24</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>capacity</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>28</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>header flags</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>32</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>session generation</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>40</p></td>
+<td class="text-right"><p>24</p></td>
+<td><p>reserved, zero</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>64</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>producer sequence</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>72</p></td>
+<td class="text-right"><p>56</p></td>
+<td><p>reserved, zero; producer cache line padding</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>128</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>consumer sequence</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>136</p></td>
+<td class="text-right"><p>3960</p></td>
+<td><p>reserved, zero; consumer cache line padding and future header data</p></td>
+</tr>
+</tbody>
+</table>
+<p>The producer and consumer values deliberately have plain integer C layout.
+They are not C++ <code class="docutils literal notranslate"><span class="pre">std::atomic</span></code> objects and must never be accessed with ordinary
+loads or stores while another process can access them.</p>
+</section>
+<section id="record-layout">
+<h2>Record layout<a class="headerlink" href="#record-layout" title="Link to this heading">¶</a></h2>
+<p>Command and completion rings use the same 16384-byte, 64-byte-aligned physical
+record. Their kind values occupy separate ranges. Counts are bounded by 16
+combined input/output tensor descriptors, 16 scalars, and 16 planned outputs.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head text-right"><p>Offset</p></th>
+<th class="head text-right"><p>Size</p></th>
+<th class="head"><p>Field</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-right"><p>0</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>record kind</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>4</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>record flags</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>8</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>session generation</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>16</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>submission ID</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>24</p></td>
+<td class="text-right"><p>8</p></td>
+<td><p>invocation ID</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>32</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>operation ID</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>36</p></td>
+<td class="text-right"><p>4</p></td>
+<td><p>completion status; zero in commands</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>40</p></td>
+<td class="text-right"><p>2</p></td>
+<td><p>tensor count</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>42</p></td>
+<td class="text-right"><p>2</p></td>
+<td><p>scalar count</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>44</p></td>
+<td class="text-right"><p>2</p></td>
+<td><p>planned output count</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>46</p></td>
+<td class="text-right"><p>82</p></td>
+<td><p>reserved, zero</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>128</p></td>
+<td class="text-right"><p>4992</p></td>
+<td><p>16 tensor descriptors, 312 bytes each</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>5120</p></td>
+<td class="text-right"><p>4480</p></td>
+<td><p>16 scalars, 280 bytes each</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>9600</p></td>
+<td class="text-right"><p>2304</p></td>
+<td><p>16 planned outputs, 144 bytes each</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>11904</p></td>
+<td class="text-right"><p>64</p></td>
+<td><p>profiling data</p></td>
+</tr>
+<tr class="row-odd"><td class="text-right"><p>11968</p></td>
+<td class="text-right"><p>1104</p></td>
+<td><p>error lengths, flags, type[64], and message[1024]</p></td>
+</tr>
+<tr class="row-even"><td class="text-right"><p>13072</p></td>
+<td class="text-right"><p>3312</p></td>
+<td><p>reserved, zero</p></td>
+</tr>
+</tbody>
+</table>
+<p>A tensor descriptor contains five 64-bit capability/view values (<code class="docutils literal notranslate"><span class="pre">buffer_id</span></code>,
+generation, allocation ID, byte offset, byte length), fixed-width dtype/rank/kind/flags and
+parameter index fields, then signed 64-bit <code class="docutils literal notranslate"><span class="pre">shape[16]</span></code> and <code class="docutils literal notranslate"><span class="pre">strides[16]</span></code> at
+offsets 56 and 184. Tensor kind distinguishes inputs from outputs. Read-only is
+the default; writable access requires <code class="docutils literal notranslate"><span class="pre">WMFS_RING_TENSOR_FLAG_WRITABLE</span></code>.</p>
+<p>A scalar stores parameter index, kind, flags, an eight-byte value bit pattern,
+a text length, and <code class="docutils literal notranslate"><span class="pre">text[256]</span></code>. Boolean, integer, and floating values use
+<code class="docutils literal notranslate"><span class="pre">bits</span></code>; text uses exactly <code class="docutils literal notranslate"><span class="pre">text_length</span></code> bytes and need not be NUL terminated.
+A planned output stores dtype, flags, rank, output index, and <code class="docutils literal notranslate"><span class="pre">shape[16]</span></code>.</p>
+<p>Profiling values use a common monotonic nanosecond clock. Published/dequeued/
+started/completion values are timestamps; input-view, output-view, dispatch,
+and kernel values are durations. They are valid only when the profile record
+flag is set.</p>
+<p>The benchmark derives command wakeup from publish to worker dequeue, worker
+queueing from dequeue to start, and completion wakeup from completion publish to
+runtime consumption. Runtime-local timers separately cover submission queueing,
+enqueue work, exact full-ring wait time, and consumer-to-caller materialization.
+<code class="docutils literal notranslate"><span class="pre">COMMAND_PING</span></code>/<code class="docutils literal notranslate"><span class="pre">COMPLETION_PONG</span></code> measure this ring path without a numerical
+kernel; Cap’n Proto ping is retained separately as a startup/control baseline.
+The capacity-pressure benchmark may set the ping operation field to a bounded
+worker hold in nanoseconds; that measured hold is reported as ping kernel time.</p>
+<p>Error strings use explicit byte lengths and need not be NUL terminated. A
+writer sets a truncation flag when the source exceeds the corresponding fixed
+array. Error fields are meaningful only for a non-OK completion status.</p>
+</section>
+<section id="publication-and-atomic-access">
+<h2>Publication and atomic access<a class="headerlink" href="#publication-and-atomic-access" title="Link to this heading">¶</a></h2>
+<p>Each ring is single producer, single consumer. To publish, the producer first
+acquires the consumer sequence, waits while <code class="docutils literal notranslate"><span class="pre">producer</span> <span class="pre">-</span> <span class="pre">consumer</span> <span class="pre">==</span> <span class="pre">capacity</span></code>,
+writes the entire selected record, then release-stores <code class="docutils literal notranslate"><span class="pre">producer</span> <span class="pre">+</span> <span class="pre">1</span></code>. To
+consume, the consumer acquires the producer sequence, reads the selected
+record only when the sequences differ, finishes all record reads, then
+release-stores <code class="docutils literal notranslate"><span class="pre">consumer</span> <span class="pre">+</span> <span class="pre">1</span></code>. Counter wrap uses unsigned 64-bit arithmetic;
+the distance must never exceed capacity.</p>
+<p>On GCC and Clang, access the plain counters with compiler atomics, for example:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">observed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">__atomic_load_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">header</span><span class="o">-&gt;</span><span class="n">producer</span><span class="p">,</span><span class="w"> </span><span class="n">__ATOMIC_ACQUIRE</span><span class="p">);</span>
+<span class="n">__atomic_store_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">header</span><span class="o">-&gt;</span><span class="n">producer</span><span class="p">,</span><span class="w"> </span><span class="n">next</span><span class="p">,</span><span class="w"> </span><span class="n">__ATOMIC_RELEASE</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>Equivalent platform/compiler intrinsics are permitted only when they provide
+interprocess acquire/release semantics for naturally aligned 64-bit values.
+Do not cast the storage to <code class="docutils literal notranslate"><span class="pre">std::atomic&lt;uint64_t&gt;</span></code> and do not place process-
+local pointers, file descriptor numbers, or synchronization objects in it.</p>
+<p>The Python SDK endpoint is Linux-specific and publishes or consumes every
+record through the corresponding <code class="docutils literal notranslate"><span class="pre">eventfd</span></code> syscall. Those syscalls are the
+interprocess synchronization boundary around its naturally aligned counter
+loads/stores; it does not offer a polling-only mode. Native participants still
+use the acquire/release operations above.</p>
+</section>
+<section id="notification-and-backpressure">
+<h2>Notification and backpressure<a class="headerlink" href="#notification-and-backpressure" title="Link to this heading">¶</a></h2>
+<p>A session owns four process-local descriptors transferred during startup:</p>
+<ol class="arabic simple">
+<li><p>command-available eventfd, signaled by the command producer;</p></li>
+<li><p>command-space-available eventfd, signaled by the command consumer;</p></li>
+<li><p>completion-available eventfd, signaled by the completion producer;</p></li>
+<li><p>completion-space-available eventfd, signaled by the completion consumer.</p></li>
+</ol>
+<p>After observing an empty/full condition, a waiter must recheck the relevant
+counter after arming its wait to avoid a lost wakeup. Eventfd counts are hints;
+counters are authoritative. A full ring applies bounded blocking/backpressure
+and never overwrites unread records. Unbounded busy-spinning is forbidden.</p>
+</section>
+<section id="validation-and-corruption">
+<h2>Validation and corruption<a class="headerlink" href="#validation-and-corruption" title="Link to this heading">¶</a></h2>
+<p>All shared pages and every record are zero-initialized before use. Writers
+zero the complete destination record before populating it. Every reserved
+field, unused array entry, inactive payload area, and unknown flag bit must be
+zero. Readers validate bounds, kinds, statuses, rank, text/error lengths,
+session generation, and reserved bytes before acting on capabilities.</p>
+<p>Bad magic/version/size/alignment, impossible sequence distance, generation
+mismatch, unknown nonzero flags, nonzero reserved data, malformed descriptors,
+or an unexpected kind is fatal session corruption. Stop publishing, mark the
+session failed, and tear it down; do not try to resynchronize by skipping a
+record. A supported non-OK completion status is a recoverable operation result
+and does not by itself terminate the session.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">WMFS</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture-overview.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="package-roles.html">Package Roles</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data-flow.html">Data Flow And Reading Guide</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Command and Completion Ring Protocol</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#version-and-byte-order">Version and byte order</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#ring-header">Ring header</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#record-layout">Record layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#publication-and-atomic-access">Publication and atomic access</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#notification-and-backpressure">Notification and backpressure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#validation-and-corruption">Validation and corruption</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="plugin-compatibility.html">Plugin Artifact Compatibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/python.html">Python API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/cpp.html">C++ API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing-docs.html">Contributing Documentation</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="data-flow.html" title="previous chapter">Data Flow And Reading Guide</a></li>
+      <li>Next: <a href="plugin-compatibility.html" title="next chapter">Plugin Artifact Compatibility</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;WMFS contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/ring-protocol.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

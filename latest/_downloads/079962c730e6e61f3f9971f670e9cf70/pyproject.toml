@@ -1,0 +1,41 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "setuptools-scm>=8"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "wmfs"
+dynamic = ["version"]
+description = "Process-isolated scientific computing runtime prototype"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy", "pycapnp", "torch>=2.1"]
+
+[project.scripts]
+wmfs-benchmark = "wmfs.benchmark:main"
+
+[tool.scikit-build]
+wheel.packages = ["packages/wmfs/wmfs"]
+cmake.build-type = "Release"
+install.components = ["runtime"]
+
+[[tool.dynamic-metadata]]
+field = "version"
+provider = "scikit_build_core.metadata.setuptools_scm"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0+gunknown"
+
+[tool.scikit-build.sdist]
+include = [
+    "/CMakeLists.txt",
+    "/README.md",
+    "/inc/**",
+    "/packages/wmfs/wmfs/**",
+    "/packages/wmfs/tests/**",
+    "/packages/wmfs/wmfs/protocol/schemas/**",
+    "/plugins/reference/generated/**",
+    "/plugins/reference/schemas/**",
+    "/src/**",
+    "/tests/**",
+]
+exclude = ["**/__pycache__/**"]

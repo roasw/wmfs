@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wmfs-tool"
+dynamic = ["version"]
+description = "Interface compiler and code generator for WMFS plugins"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+wmfs-tool = "wmfs_tool.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["wmfs_tool*"]
+exclude = ["wmfs_tool.__pycache__"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0+gunknown"
