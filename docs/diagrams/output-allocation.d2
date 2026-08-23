@@ -1,0 +1,58 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  artifact: { shape: document; style: { fill: "#F2EAFE"; stroke: "#7C3AED"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  memory: { shape: cylinder; style: { fill: "#E8F6E8"; stroke: "#2E7D32"; stroke-width: 2 } }
+  compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
+}
+
+metadata: "Generated output metadata"
+metadata.class: artifact
+choice: "Is shape + dtype known\nfrom inputs and scalars?"
+choice.shape: diamond
+metadata -> choice
+
+known: "Known-output fast path" {
+  shape: package
+  evaluate: "Runtime evaluates expression\nand validates optional out="
+  evaluate.class: runtime
+  allocate: "Runtime allocates output storage"
+  allocate.class: memory
+  invoke: "COMMAND_INVOKE\ninputs + writable outputs"
+  invoke.class: transport
+  worker: "Worker builds views\nand runs kernel"
+  worker.class: worker
+  kernel: "Write output bytes"
+  kernel.class: compute
+  evaluate -> allocate -> invoke -> worker -> kernel
+}
+
+dynamic: "Genuinely dynamic output path" {
+  shape: package
+  plan_command: "1. COMMAND_PLAN_OUTPUTS\ninputs + scalars, no outputs"
+  plan_command.class: transport
+  planner: "Worker computes indexed\nshape + dtype metadata"
+  planner.class: worker
+  plan_completion: "1. COMPLETION_PLAN_OUTPUTS"
+  plan_completion.class: transport
+  validate: "Runtime validates plan\nand allocates output storage"
+  validate.class: runtime
+  allocate: "Runtime-owned memfd output"
+  allocate.class: memory
+  invoke_command: "2. COMMAND_INVOKE\nwith writable descriptors"
+  invoke_command.class: transport
+  kernel: "Worker kernel writes output"
+  kernel.class: compute
+  plan_command -> planner -> plan_completion -> validate -> allocate -> invoke_command -> kernel
+}
+
+choice -> known.evaluate: "yes: one ring command"
+choice -> dynamic.plan_command: "no: two ring commands"
+
+owner: "Invariant: worker never allocates shared output storage\nor receives unrestricted allocator/object-store access"
+owner.class: runtime
+known.allocate -> owner
+dynamic.allocate -> owner

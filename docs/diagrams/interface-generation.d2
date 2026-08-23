@@ -1,0 +1,46 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  artifact: { shape: document; style: { fill: "#F2EAFE"; stroke: "#7C3AED"; stroke-width: 2 } }
+  compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
+}
+
+spec: "interface.toml\nversions, IDs, tensors, scalars,\naccess, output expressions, VJPs"
+spec.class: artifact
+compiler: "wmfs-tool\nparser + validator + generator"
+compiler.class: artifact
+spec -> compiler: "single handwritten registry"
+
+outputs: "Deterministic generated deployment inputs" {
+  shape: package
+  manifest: "manifest.json\nclosed versioned metadata"
+  manifest.class: artifact
+  cabi: "plugin_abi.h + C++11 wrapper/stub\nfuture/plugin-facing C ABI"
+  cabi.class: artifact
+  py: "Python metadata/stubs + adapter\nfor Python workers only"
+  py.class: artifact
+  dispatch: "reference_dispatch.inc\ncompatibility RPC dispatch"
+  dispatch.class: artifact
+}
+
+compiler -> outputs.manifest
+compiler -> outputs.cabi
+compiler -> outputs.py
+compiler -> outputs.dispatch
+
+runtime: "wmfs runtime\nreads manifest without importing plugin"
+runtime.class: runtime
+python_worker: "Python worker\nuses wmfs-plugin"
+python_worker.class: worker
+cpp_future: "Plugin-facing C++ implementation\nC++11 ABI consumer"
+cpp_future.class: worker
+reference: "Current C++ reference worker\ncompatibility RPC + separate ring dispatch"
+reference.class: worker
+
+outputs.manifest -> runtime: "discovery + validation"
+outputs.py -> python_worker: "metadata-driven adapter"
+outputs.cabi -> cpp_future: "stable generated boundary"
+outputs.dispatch -> reference: "compatibility dispatch include"
+outputs.cabi -> reference: "not the current ring dispatch path" { style.stroke-dash: 5; style.opacity: 0.55 }

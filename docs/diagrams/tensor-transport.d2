@@ -1,0 +1,50 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  memory: { shape: cylinder; style: { fill: "#E8F6E8"; stroke: "#2E7D32"; stroke-width: 2 } }
+  compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
+}
+
+runtime: "Runtime process" {
+  shape: package
+  torch: "Torch tensor\nordinary view"
+  torch.class: runtime
+  manager: "BufferManager\nowner + access scheduler"
+  manager.class: runtime
+  memfd: "memfd + mmap\nbuffer ID / generation / allocation ID"
+  memfd.class: memory
+  torch -> manager: "managed: reuse\nunmanaged: one ingress copy"
+  manager -> memfd: "allocate pooled region\nor trusted arena range"
+}
+
+control: "FD-control socket\nSCM_RIGHTS, batched maps/retirements, ACK"
+control.class: transport
+record: "Ring tensor descriptor\ncapability IDs, offset, bytes, dtype,\nshape, strides, read-only/writable"
+record.class: transport
+
+worker: "Worker process" {
+  shape: package
+  cache: "Mapped buffer cache\nkeyed by capability generation"
+  cache.class: worker
+  view: "Torch / ATen tensor view\nover mapped bytes"
+  view.class: worker
+  kernel: "Kernel reads/writes view"
+  kernel.class: compute
+  cache -> view -> kernel
+}
+
+runtime.memfd -> control -> worker.cache: "FD only on first map / upgrade"
+runtime.manager -> record -> worker.view: "metadata every command"
+runtime.memfd -> worker.view: "same physical CPU pages" { style.stroke: "#2E7D32"; style.stroke-width: 3 }
+
+retire: "Last Torch storage alias released\n-> retire worker mapping\n-> advance generation\n-> pool whole memfd or free arena range"
+retire.class: memory
+runtime.torch -> retire: "lifetime"
+retire -> control: "retirement batch"
+
+not_dlpack: "DLPack is not currently used\nand is not the cross-process transport"
+not_dlpack.style: { stroke-dash: 5; fill: "#FFFFFF"; stroke: "#4B5563" }
+not_dlpack -> worker.view: "direct Torch/ATen construction" { style.stroke-dash: 5 }

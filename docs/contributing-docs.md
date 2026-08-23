@@ -42,3 +42,10 @@ UniqueFd duplicate_cloexec(int minimum = 0) const;
 Use MyST Markdown under `docs`. Prefer `literalinclude` for implementation
 snippets so examples stay synchronized with source code. Run `just doc`; Sphinx
 warnings and Doxygen documentation errors fail the build.
+
+Architecture diagrams are D2 sources under `docs/diagrams`; deterministic SVGs
+under `docs/_static/diagrams` are committed so readers do not need D2. Run
+`bash docs/generate-diagrams.sh` after editing a source, or
+`bash docs/generate-diagrams.sh . --check` to verify freshness. The Nix development
+shell supplies the pinned D2 executable, and every documentation build checks
+the committed SVGs before invoking Sphinx.

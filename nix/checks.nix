@@ -234,6 +234,11 @@ in
         touch $out
       '';
 
+  diagrams = pkgs.runCommand "wmfs-diagrams-check" { nativeBuildInputs = [ pkgs.d2 ]; } ''
+    bash ${source}/docs/generate-diagrams.sh ${source} --check
+    touch $out
+  '';
+
   documentation = pkgs.stdenv.mkDerivation {
     name = "wmfs-documentation";
     src = source;
@@ -241,6 +246,7 @@ in
     nativeBuildInputs = [
       pkgs.capnproto
       pkgs.cmake
+      pkgs.d2
       pkgs.doxygen
       pkgs.ninja
       documentationPython

@@ -1,0 +1,50 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  fatal: { shape: rectangle; style: { fill: "#FDE8E8"; stroke: "#B91C1C"; stroke-width: 3; double-border: true } }
+  recoverable: { shape: diamond; style: { fill: "#FFF3D6"; stroke: "#B26A00"; stroke-width: 3 } }
+}
+
+call: "One isolated invocation"
+call.class: runtime
+outcome: "Completion / transport outcome"
+outcome.shape: diamond
+call -> outcome
+
+operation: "Supported non-OK completion\nSTATUS_OPERATION_ERROR\nalgorithm/argument failure"
+operation.class: recoverable
+raise_operation: "Raise OperationError to caller\nrelease access; retain session"
+raise_operation.class: runtime
+next_call: "Later operation uses\nthe same persistent worker"
+next_call.class: worker
+outcome -> operation: "recoverable"
+operation -> raise_operation -> next_call
+
+corruption: "Fatal session fault\nmalformed record, impossible index,\ngeneration mismatch, unknown submission"
+corruption.class: fatal
+transport: "Fatal transport fault\nworker exit/hang, timeout, FD-control error"
+transport.class: fatal
+invalidate: "Fail every pending waiter\nstop publication; invalidate mappings"
+invalidate.class: transport
+evict: "Close + reap worker\nevict session from backend"
+evict.class: runtime
+recreate: "Next accepted call may create\na fresh validated session"
+recreate.class: worker
+
+outcome -> corruption: "protocol invariant"
+outcome -> transport: "process / channel"
+corruption -> invalidate
+transport -> invalidate
+invalidate -> evict -> recreate
+
+startup: "Discovery/startup failure\nclose all candidate sessions;\ndo not replace live registry"
+startup.class: fatal
+startup -> evict: "bounded cleanup"
+
+close: "runtime.close()\nwait accepted work; graceful stop;\nterminate/kill after deadlines; idempotent"
+close.class: runtime
+next_call -> close
+recreate -> close

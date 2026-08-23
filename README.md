@@ -2,6 +2,8 @@
 
 Documentation: <https://roasw.github.io/wmfs/>
 
+Architecture: [diagram-driven project overview](docs/architecture-overview.md)
+
 `wmfs` is a prototype scientific-computing runtime for transparently running
 selected Python function calls in isolated worker processes. Its low-latency
 path uses startup-only Cap'n Proto control, asynchronous command/completion
@@ -106,6 +108,8 @@ the normal CMake `doc` target. The generated site starts at
 `WMFS_BUILD_TYPE`. The data-flow guide follows a simple Python call through
 runtime dispatch, shared-memory allocation, batched FD transfer, worker view
 construction, kernel execution, and reclamation.
+The architecture overview provides the recommended newcomer reading order and
+eight source-linked diagrams without duplicating the detailed protocol guides.
 
 ## Buffer Transport Protocol
 

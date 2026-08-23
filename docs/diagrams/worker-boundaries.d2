@@ -1,0 +1,65 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  artifact: { shape: document; style: { fill: "#F2EAFE"; stroke: "#7C3AED"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  memory: { shape: cylinder; style: { fill: "#E8F6E8"; stroke: "#2E7D32"; stroke-width: 2 } }
+  compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
+}
+
+runtime: "Application process (always Python-owned control)" {
+  shape: package
+  python: "wmfs runtime\nplanning, BufferManager, lifecycle"
+  python.class: runtime
+  ring_client: "_RingClient\nPython producer/consumer threads"
+  ring_client.class: runtime
+  native: "Optional wmfs._native Session\nnanobind C++ startup/FD control"
+  native.class: transport
+  python -> ring_client: "operation hot path"
+  python -> native: "native control mode"
+  native -> ring_client: "does not replace ring client" { style.stroke-dash: 5 }
+}
+
+wire: "Same ring ABI + startup/FD contracts"
+wire.class: transport
+shared: "Runtime-owned mapped CPU bytes"
+shared.class: memory
+
+python_worker: "Python worker distribution" {
+  shape: package
+  sdk: "wmfs-plugin\nworker bootstrap, ring endpoint, FD receiver"
+  sdk.class: worker
+  adapter: "Generated Python adapter"
+  adapter.class: artifact
+  kernel: "Ordinary Python/Torch kernel"
+  kernel.class: compute
+  sdk -> adapter -> kernel
+}
+
+cpp_worker: "C++ reference worker distribution" {
+  shape: package
+  executable: "wmfs-reference-worker\nCap'n Proto startup + ring loop"
+  executable.class: worker
+  dispatch: "Generated worker-specific\nreference_dispatch.inc"
+  dispatch.class: artifact
+  kernel: "Transport-neutral\nLibTorch kernel"
+  kernel.class: compute
+  executable -> dispatch -> kernel
+}
+
+runtime.ring_client -> wire
+runtime.native -> wire
+wire -> python_worker.sdk
+wire -> cpp_worker.executable
+shared -> python_worker.kernel: "Torch mapped view"
+shared -> cpp_worker.kernel: "ATen mapped view"
+
+parity: "Runtime and SDK carry independent protocol copies\nbyte/model/codec parity is tested; neither imports the other"
+parity.style: { stroke-dash: 5; fill: "#FFFFFF"; stroke: "#4B5563" }
+parity -> wire: "compatibility guard" { style.stroke-dash: 5 }
+
+cabi: "Generated C ABI\nfuture/plugin-facing; not current reference ring dispatch"
+cabi.class: artifact
+cabi -> cpp_worker.dispatch: "distinct boundary" { style.stroke-dash: 5 }

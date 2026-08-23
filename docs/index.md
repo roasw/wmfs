@@ -10,6 +10,7 @@ shared `memfd` mappings for tensor payloads.
 maxdepth: 2
 ---
 getting-started
+architecture-overview
 package-roles
 data-flow
 ring-protocol

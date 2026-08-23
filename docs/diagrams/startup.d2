@@ -1,0 +1,49 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  artifact: { shape: document; style: { fill: "#F2EAFE"; stroke: "#7C3AED"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  memory: { shape: cylinder; style: { fill: "#E8F6E8"; stroke: "#2E7D32"; stroke-width: 2 } }
+  fatal: { shape: rectangle; style: { fill: "#FDE8E8"; stroke: "#B91C1C"; stroke-width: 3; double-border: true } }
+}
+
+caller: "runtime.discover_plugins(...)\n(eager and transactional)"
+caller.class: runtime
+manifest: "Generated manifest\nvalidated before launch"
+manifest.class: artifact
+registry: "Candidate operation registry\nqualified + unqualified names"
+registry.class: runtime
+session: "Python-owned session orchestration\nNativeWorkerSession or WorkerSession"
+session.class: runtime
+worker: "Persistent isolated worker\none per discovered plugin"
+worker.class: worker
+
+caller -> manifest: "1. find + parse"
+manifest -> registry: "2. validate metadata"
+registry -> session: "3. create candidate backend"
+session -> worker: "4. launch executable"
+
+startup_control: "Cap'n Proto startup/control socket\nmetadata, environment, close, handshake"
+startup_control.class: transport
+rings: "Two memfd SPSC rings\ncommand -> / completion <-"
+rings.class: memory
+events: "Four eventfds\navailable + space notifications"
+events.class: transport
+fd_socket: "SOCK_SEQPACKET FD-control channel\nSCM_RIGHTS mappings"
+fd_socket.class: transport
+
+session -> startup_control -> worker: "5. versioned validation"
+session -> rings -> worker: "6. ring geometry + generation"
+session -> events -> worker: "7. notification descriptors"
+session -> fd_socket -> worker: "8. mapping channel ready"
+
+publish: "Atomically publish registry + sessions\nfirst operation starts no process"
+publish.class: runtime
+session -> publish: "all workers validated"
+
+reject: "Startup failure\nclose every candidate session;\nleave old registry unchanged"
+reject.class: fatal
+manifest -> reject: "invalid artifact" { style.stroke-dash: 5 }
+worker -> reject: "timeout / mismatch / exit" { style.stroke-dash: 5 }

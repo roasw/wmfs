@@ -122,6 +122,7 @@
               developmentWorkerInputs
             ];
             packages = pre-commit-check.enabledPackages ++ [
+              pkgs.d2
               pkgs.doxygen
               pkgs.just
               pkgs.python3Packages.build

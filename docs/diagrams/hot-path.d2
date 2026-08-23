@@ -1,0 +1,39 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  memory: { shape: cylinder; style: { fill: "#E8F6E8"; stroke: "#2E7D32"; stroke-width: 2 } }
+  compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
+}
+
+public: "wmfs.matmul(a, b)\npublic call blocks until result"
+public.class: runtime
+dispatch: "Runtime.invoke -> IsolatedBackend\nmetadata + session routing"
+dispatch.class: runtime
+plan: "bind_invocation\narguments, access lease, output plan"
+plan.class: runtime
+queue: "_RingClient outbound queue\nmultiple calls may be in flight"
+queue.class: transport
+command: "Command ring producer thread\nsubmission ID + fixed-width record"
+command.class: transport
+worker: "Worker ring consumer\nvalidate descriptors + build views"
+worker.class: worker
+kernel: "Numerical kernel\nwrites runtime-owned output"
+kernel.class: compute
+completion: "Completion ring consumer thread\nmatch submission ID to waiter"
+completion.class: transport
+result: "Managed Torch tensor\nreturned synchronously"
+result.class: runtime
+storage: "Shared tensor bytes\nnever enter ring records"
+storage.class: memory
+
+public -> dispatch -> plan -> queue -> command -> worker -> kernel -> completion -> result
+storage -> worker: "mapped view"
+kernel -> storage: "in-place output bytes"
+result -> storage: "Torch storage alias"
+
+startup: "No hot-path discovery, registration,\nworker launch, or operation RPC"
+startup.style: { stroke-dash: 5; fill: "#FFFFFF"; stroke: "#4B5563" }
+startup -> command: "startup already complete" { style.stroke-dash: 5 }

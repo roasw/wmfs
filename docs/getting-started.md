@@ -9,6 +9,8 @@ Application environments install `wmfs`. Python worker environments install
 `wmfs-plugin`; C++ workers do not. Plugin build and CI environments install
 `wmfs-tool` to generate committed deployment artifacts. See
 {doc}`package-roles` for the complete dependency and workflow matrix.
+For the complete visual path from API call to worker and shared result, follow
+the {doc}`architecture-overview`.
 
 ```python
 from pathlib import Path

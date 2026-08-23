@@ -1,0 +1,54 @@
+direction: down
+
+classes: {
+  runtime: { style: { fill: "#E8F1FF"; stroke: "#2563EB"; stroke-width: 2 } }
+  worker: { shape: hexagon; style: { fill: "#FFF0E5"; stroke: "#C45A12"; stroke-width: 2 } }
+  artifact: { shape: document; style: { fill: "#F2EAFE"; stroke: "#7C3AED"; stroke-width: 2 } }
+  transport: { shape: parallelogram; style: { fill: "#E3F8F7"; stroke: "#0F8B8D"; stroke-width: 2 } }
+  memory: { shape: cylinder; style: { fill: "#E8F6E8"; stroke: "#2E7D32"; stroke-width: 2 } }
+  compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
+}
+
+build: "Plugin build / CI" {
+  shape: package
+  interface: "interface.toml\nsource of truth"
+  interface.class: artifact
+  tool: "wmfs-tool\nbuild-time compiler"
+  tool.class: artifact
+  generated: "Committed generated\nartifacts"
+  generated.class: artifact
+  interface -> tool: "compile"
+  tool -> generated: "manifest + C++/Python"
+}
+
+application: "Application environment" {
+  shape: package
+  user: "Ordinary Python\napplication"
+  wmfs: "wmfs\nAPI + runtime owner"
+  wmfs.class: runtime
+  user -> wmfs: "sync tensor call"
+}
+
+python_environment: "Python worker environment" {
+  shape: package
+  sdk: "wmfs-plugin\nPython worker SDK"
+  sdk.class: worker
+  python_plugin: "Python plugin +\nnumerical library"
+  python_plugin.class: compute
+  sdk -> python_plugin: "InvocationContext"
+}
+
+cpp_environment: "C++ worker environment" {
+  shape: package
+  cpp_worker: "C++ worker executable\n(no Python SDK)"
+  cpp_worker.class: worker
+  libtorch: "LibTorch kernels"
+  libtorch.class: compute
+  cpp_worker -> libtorch: "direct call"
+}
+
+build.generated -> application.wmfs: "manifest read at discovery" { style.stroke-dash: 5 }
+build.generated -> python_environment.sdk: "generated Python adapter" { style.stroke-dash: 5 }
+build.generated -> cpp_environment.cpp_worker: "generated plugin-facing C++11" { style.stroke-dash: 5 }
+application.wmfs -> python_environment.sdk: "rings + FD control" { style.stroke: "#0F8B8D"; style.stroke-width: 2 }
+application.wmfs -> cpp_environment.cpp_worker: "rings + FD control" { style.stroke: "#0F8B8D"; style.stroke-width: 2 }

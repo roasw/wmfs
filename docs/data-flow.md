@@ -4,6 +4,9 @@ This guide follows the `matmul(a, b)` call in the introductory script through
 the native isolated path. The Python-control worker follows the same planning,
 ring, and memory model with a Python ring dispatcher.
 
+Start with the {doc}`architecture-overview` for the system-wide diagrams; this
+page then provides the detailed source-level call trace.
+
 ## End-To-End Flow
 
 ```text
