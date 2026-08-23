@@ -9,9 +9,9 @@ import torch
 
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
+from wmfs.protocol.schema import load_tensor_schema
 from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import _start_worker, inspect_plugin
-from wmfs_plugin.schema import load_tensor_schema
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 

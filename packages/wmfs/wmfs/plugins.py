@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from wmfs.protocol.metadata import validate_plugin_metadata
+from wmfs.protocol.schema import PROTOCOL_VERSION
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -20,8 +22,6 @@ from wmfs.registry import (
     TensorParameter,
     VjpMetadata,
 )
-from wmfs_plugin.metadata import validate_plugin_metadata
-from wmfs_plugin.schema import PROTOCOL_VERSION
 
 _FORMAT_VERSION = 1
 _ABI_VERSION = 1

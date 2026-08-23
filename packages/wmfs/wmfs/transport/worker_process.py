@@ -29,6 +29,8 @@ from wmfs.invocation import (
     share_input,
 )
 from wmfs.memory.buffers import BufferManager, ManagedTensor
+from wmfs.protocol.metadata import metadata_from_reader
+from wmfs.protocol.schema import schema_root
 from wmfs.registry import (
     EnvironmentMetadata,
     OperationMetadata,
@@ -37,8 +39,7 @@ from wmfs.registry import (
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.errors import OperationError, WorkerTransportError
 from wmfs.transport.fd_broker import FdSender
-from wmfs_plugin.metadata import metadata_from_reader
-from wmfs_plugin.ring import (
+from wmfs.transport.ring import (
     ABI_MAJOR,
     ABI_MINOR,
     CAPABILITIES,
@@ -60,7 +61,6 @@ from wmfs_plugin.ring import (
     scalar_arguments,
     tensor_from_descriptor,
 )
-from wmfs_plugin.schema import schema_root
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest

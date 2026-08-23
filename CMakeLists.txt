@@ -137,15 +137,15 @@ endif()
 
 set(
   WMFS_SCHEMA_ROOT
-  "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs-plugin/wmfs_plugin/schemas"
+  "${CMAKE_CURRENT_SOURCE_DIR}/packages/wmfs/wmfs/protocol/schemas"
 )
 set(CAPNPC_SRC_PREFIX "${WMFS_SCHEMA_ROOT}")
 set(CAPNPC_IMPORT_DIRS "${WMFS_SCHEMA_ROOT}")
 capnp_generate_cpp(
   WMFS_CAPNP_SOURCES
   WMFS_CAPNP_HEADERS
-  packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/tensor.capnp
-  packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp
+  packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp
+  packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp
 )
 add_library(wmfs-protocol STATIC ${WMFS_CAPNP_SOURCES})
 add_library(wmfs::protocol ALIAS wmfs-protocol)

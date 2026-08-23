@@ -1,4 +1,4 @@
-from wmfs_plugin.metadata import (
+from wmfs.protocol.metadata import (
     DimensionExpression,
     DTypeExpression,
     EnvironmentMetadata,

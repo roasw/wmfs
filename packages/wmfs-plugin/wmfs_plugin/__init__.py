@@ -1,9 +1,8 @@
 from typing import TYPE_CHECKING, Any
 
-from wmfs_plugin.schema import PROTOCOL_VERSION, schema_root
-
 if TYPE_CHECKING:
     from wmfs_plugin.invocation import InvocationContext, OutputSpec
+    from wmfs_plugin.schema import PROTOCOL_VERSION, schema_root
     from wmfs_plugin.worker import OperationHandler, OutputPlanner
 
 __all__ = [
@@ -23,6 +22,10 @@ def __getattr__(name: str) -> Any:
         from importlib.metadata import version
 
         return version("wmfs-plugin")
+    if name in {"PROTOCOL_VERSION", "schema_root"}:
+        from wmfs_plugin.schema import PROTOCOL_VERSION, schema_root
+
+        return {"PROTOCOL_VERSION": PROTOCOL_VERSION, "schema_root": schema_root}[name]
     if name in {"InvocationContext", "OutputSpec"}:
         from wmfs_plugin.invocation import InvocationContext, OutputSpec
 

@@ -22,23 +22,23 @@ from wmfs.invocation import (
     share_input,
 )
 from wmfs.memory.buffers import BufferManager, ManagedTensor, TensorDescriptor
+from wmfs.protocol.metadata import metadata_from_reader
 from wmfs.registry import EnvironmentMetadata, OperationMetadata, PluginMetadata
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.errors import OperationError, WorkerTransportError
+from wmfs.transport.ring import (
+    COMMAND_PING,
+    COMMAND_PLAN_OUTPUTS,
+    DEFAULT_CAPACITY,
+    Record,
+    RingOwner,
+)
 from wmfs.transport.worker_process import (
     _invocation_record,
     _load_runtime_schema,
     _raise_ring_error,
     _RingClient,
     _start_worker,
-)
-from wmfs_plugin.metadata import metadata_from_reader
-from wmfs_plugin.ring import (
-    COMMAND_PING,
-    COMMAND_PLAN_OUTPUTS,
-    DEFAULT_CAPACITY,
-    Record,
-    RingOwner,
 )
 
 _MAX_NATIVE_DESCRIPTORS = 256

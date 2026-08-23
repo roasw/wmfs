@@ -6,9 +6,9 @@ import torch
 
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
+from wmfs.protocol.metadata import metadata_from_reader, validate_operation_metadata
 from wmfs.registry import OperationMetadata, OutputPlan, TensorParameter
 from wmfs.transport.worker_process import _load_plugin_schema
-from wmfs_plugin.metadata import metadata_from_reader, validate_operation_metadata
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
