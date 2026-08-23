@@ -12,6 +12,11 @@ let
   bundledRuntime = packages.bundled;
   referenceWorker = packages.reference-worker;
   pythonWorker = packages.reference-python-worker;
+  pythonWorkerTestPython = pkgs.python3.withPackages (_: [
+    packages.wmfs-plugin
+    pkgs.python3Packages.pytest
+    runtime
+  ]);
   documentationPython = pkgs.python3.withPackages (ps: [
     ps.breathe
     ps.myst-parser
@@ -97,11 +102,13 @@ in
 
         import torch
         import wmfs
+        import importlib.util
 
         from wmfs.plugins import find_manifests
         from wmfs.transport.worker_process import inspect_worker_environment
 
         runtime = wmfs.runtime
+        assert importlib.util.find_spec("wmfs_plugin") is None
 
         plugin_directory = Path(
             "${pythonWorker}/share/wmfs/plugins/reference"
@@ -135,6 +142,24 @@ in
         finally:
             runtime.close()
         PY
+        touch $out
+      '';
+
+  python-worker-tests =
+    pkgs.runCommand "wmfs-python-worker-tests"
+      {
+        nativeBuildInputs = [
+          pythonWorkerTestPython
+          referenceWorker
+        ];
+      }
+      ''
+        cd ${source}
+        env -u PYTHONPATH pytest \
+          -c ${source}/pytest.ini \
+          -o pythonpath= \
+          -p no:cacheprovider \
+          -q ${source}/tests/python_worker
         touch $out
       '';
 
@@ -185,16 +210,16 @@ in
 
   schemas = pkgs.runCommand "wmfs-schema-check" { nativeBuildInputs = [ pkgs.capnproto ]; } ''
     capnp compile -o- \
-      --src-prefix=${source}/packages/wmfs-plugin/wmfs_plugin/schemas \
-      --import-path=${source}/packages/wmfs-plugin/wmfs_plugin/schemas \
-      ${source}/packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp >/dev/null
+      --src-prefix=${source}/packages/wmfs/wmfs/protocol/schemas \
+      --import-path=${source}/packages/wmfs/wmfs/protocol/schemas \
+      ${source}/packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp >/dev/null
     capnp compile -o- \
-      --src-prefix=${source}/packages/wmfs-plugin/wmfs_plugin/schemas \
-      --import-path=${source}/packages/wmfs-plugin/wmfs_plugin/schemas \
-      ${source}/packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/tensor.capnp >/dev/null
+      --src-prefix=${source}/packages/wmfs/wmfs/protocol/schemas \
+      --import-path=${source}/packages/wmfs/wmfs/protocol/schemas \
+      ${source}/packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp >/dev/null
     capnp compile -o- \
       --src-prefix=${source}/plugins/reference/schemas \
-      --import-path=${source}/packages/wmfs-plugin/wmfs_plugin/schemas \
+      --import-path=${source}/packages/wmfs/wmfs/protocol/schemas \
       --import-path=${source}/plugins/reference/schemas \
       ${source}/plugins/reference/schemas/wmfs-reference/reference.capnp >/dev/null
     touch $out

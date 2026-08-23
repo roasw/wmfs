@@ -7,7 +7,6 @@ let
   version = versions.python;
   workers = import ./reference-workers.nix { inherit pkgs source versions; };
   wmfsTool = import ./wmfs-tool.nix { inherit pkgs source version; };
-  failureWorker = ../tests/integration/fixtures/failure_worker.py;
   buildRuntime =
     {
       bundled ? false,
@@ -19,6 +18,12 @@ let
       src = source;
       SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WMFS = version;
       WMFS_GIT_VERSION = versions.git;
+
+      postPatch = ''
+        substituteInPlace packages/wmfs/wmfs/transport/ring.py \
+          --replace-fail 'find_library("atomic")' \
+          '"${pkgs.stdenv.cc.cc.lib}/lib/libatomic.so.1"'
+      '';
 
       build-system = [
         pkgs.python3Packages.nanobind
@@ -48,7 +53,6 @@ let
         pkgs.python3Packages.numpy
         pkgs.python3Packages.pycapnp
         pkgs.python3Packages.torch
-        workers.wmfs-plugin
       ];
 
       nativeCheckInputs = [
@@ -61,10 +65,7 @@ let
       checkPhase = ''
         runHook preCheck
         cd "$NIX_BUILD_TOP/$sourceRoot"
-        mkdir -p tests/integration/fixtures
-        cp ${failureWorker} tests/integration/fixtures/failure_worker.py
-        chmod u+wx tests/integration/fixtures/failure_worker.py
-        patchShebangs tests/integration/fixtures/failure_worker.py
+        python -c "import importlib.util; assert importlib.util.find_spec('wmfs_plugin') is None"
         for layer in ${if bundled then "contract package" else "unit contract integration native"}; do
           pytest -c pytest.ini -m "$layer" packages/wmfs/tests tests/integration
         done
@@ -87,6 +88,8 @@ let
         -o pythonpath= \
         -p no:cacheprovider \
         -q ${source}/tests/integration/test_bundled.py
+    env -u PYTHONPATH ${bundledTestPython}/bin/python3 -c \
+      "import importlib.util; assert importlib.util.find_spec('wmfs_plugin') is None"
     touch "$out"
   '';
   benchmark = pkgs.writeShellApplication {

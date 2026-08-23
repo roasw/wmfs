@@ -5,9 +5,9 @@ import pytest
 import torch
 
 from wmfs.memory import BufferManager
+from wmfs.protocol.schema import load_tensor_schema
 from wmfs.transport.fd_broker import FdSender
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
-from wmfs_plugin.schema import load_tensor_schema
 
 
 def test_sender_close_makes_later_retirement_a_noop() -> None:

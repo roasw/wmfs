@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Process-isolated scientific computing runtime prototype"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy", "pycapnp", "torch>=2.1", "wmfs-plugin"]
+dependencies = ["numpy", "pycapnp", "torch>=2.1"]
 
 [project.scripts]
 wmfs-benchmark = "wmfs.benchmark:main"
@@ -32,7 +32,7 @@ include = [
     "/inc/**",
     "/packages/wmfs/wmfs/**",
     "/packages/wmfs/tests/**",
-    "/packages/wmfs-plugin/wmfs_plugin/schemas/**",
+    "/packages/wmfs/wmfs/protocol/schemas/**",
     "/plugins/reference/generated/**",
     "/plugins/reference/schemas/**",
     "/src/**",

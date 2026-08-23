@@ -5,7 +5,7 @@ from pathlib import Path
 
 import capnp
 
-from wmfs_plugin.schema import PROTOCOL_VERSION, schema_root
+from wmfs.protocol.schema import PROTOCOL_VERSION, schema_root
 
 ROOT = Path(__file__).parents[2]
 
@@ -22,12 +22,15 @@ def test_distribution_versions_are_derived_from_git() -> None:
         assert "version" not in metadata
         assert "version" in metadata["dynamic"]
 
-    for project in (projects[0], projects[2]):
-        dependencies = tomllib.loads(project.read_text())["project"]["dependencies"]
-        assert "wmfs-plugin" in dependencies
-        assert not any(
-            dependency.startswith("wmfs-plugin==") for dependency in dependencies
-        )
+    runtime_dependencies = tomllib.loads(projects[0].read_text())["project"][
+        "dependencies"
+    ]
+    assert all(not item.startswith("wmfs-plugin") for item in runtime_dependencies)
+    worker_dependencies = tomllib.loads(projects[2].read_text())["project"][
+        "dependencies"
+    ]
+    assert "wmfs-plugin" in worker_dependencies
+    assert not any(item.startswith("wmfs-plugin==") for item in worker_dependencies)
 
     root_metadata = tomllib.loads(projects[0].read_text())
     assert root_metadata["tool"]["dynamic-metadata"] == [

@@ -9,6 +9,7 @@ import torch
 
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
+from wmfs.protocol.metadata import metadata_from_reader
 from wmfs.registry import PluginMetadata
 from wmfs.transport.deadlines import TransportDeadlines
 from wmfs.transport.errors import OperationError, WorkerTransportError
@@ -17,7 +18,6 @@ from wmfs.transport.worker_process import (
     WorkerSession,
     _load_plugin_schema,
 )
-from wmfs_plugin.metadata import metadata_from_reader
 
 
 def _metadata(worker: object) -> PluginMetadata:

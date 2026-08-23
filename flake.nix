@@ -148,7 +148,7 @@
               export WMFS_BUILD_TYPE="''${WMFS_BUILD_TYPE:-Debug}"
               development_output="$repo_root/output/$WMFS_BUILD_TYPE"
               export PATH="$development_output/bin:$PATH"
-              export PYTHONPATH="$development_output:$repo_root/packages/wmfs:$repo_root/packages/wmfs-plugin:$repo_root/packages/wmfs-tool''${PYTHONPATH:+:$PYTHONPATH}"
+              export PYTHONPATH="$development_output:$repo_root/packages/wmfs:$repo_root/packages/wmfs-tool''${PYTHONPATH:+:$PYTHONPATH}"
             '';
           };
         }

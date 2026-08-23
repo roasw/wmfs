@@ -73,12 +73,11 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "pyproject.toml",
             "inc/wmfs/unique_fd.hpp",
             "packages/wmfs/wmfs/__init__.py",
-            "packages/wmfs-plugin/wmfs_plugin/schemas/wmfs/runtime.capnp",
+            "packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp",
             "plugins/reference/generated/reference_dispatch.inc",
             "plugins/reference/schemas/wmfs-reference/reference.capnp",
           "src/native_module.cpp",
           "src/reference_kernels.cpp",
-          "tests/integration/fixtures/failure_worker.py",
         },
         "plugin": {
             "MANIFEST.in",
@@ -146,7 +145,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     checks = {
         "plugin": (
             "wmfs_plugin/schemas/wmfs/runtime.capnp",
-            "wmfs_plugin-${releaseVersion}.dist-info/entry_points.txt",
         ),
         "tool": (
             "wmfs_tool/cli.py",
@@ -160,7 +158,12 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "share/wmfs/plugins/reference/schemas/wmfs-reference/reference.capnp",
             "wmfs_reference-${releaseVersion}.dist-info/entry_points.txt",
         ),
-        "runtime": ("wmfs/__init__.py", "wmfs/_native"),
+        "runtime": (
+            "wmfs/__init__.py",
+            "wmfs/_native",
+            "wmfs/protocol/schemas/wmfs/runtime.capnp",
+            "wmfs/protocol/schemas/wmfs/tensor.capnp",
+        ),
         "bundled": ("wmfs/_native", "wmfs/_bundled"),
     }
     for distribution, fragments in checks.items():
@@ -176,10 +179,8 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             )
     PY
 
-    for environment in runtime bundled; do
+    for environment in runtime bundled python-worker; do
       python -m venv --system-site-packages "$work/venv-$environment"
-      "$work/venv-$environment/bin/python" -m pip install \
-        --no-index --no-deps "$work"/wheel/plugin/*.whl
     done
     python -m venv --system-site-packages "$work/venv-tool"
     "$work/venv-tool/bin/python" -m pip install \
@@ -195,62 +196,67 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     )
     PY
     "$work/venv-runtime/bin/python" -m pip install --no-index --no-deps \
-      "$work"/wheel/reference/*.whl "$work"/wheel/runtime/*.whl
+      "$work"/wheel/runtime/*.whl
     "$work/venv-bundled/bin/python" -m pip install --no-index --no-deps \
       "$work"/wheel/bundled/*.whl
+    "$work/venv-python-worker/bin/python" -m pip install --no-index --no-deps \
+      "$work"/wheel/plugin/*.whl "$work"/wheel/reference/*.whl
 
     cd "$work/run"
     env -u PYTHONPATH "$work/venv-runtime/bin/python" - <<'PY'
     import importlib.metadata
+    import importlib.util
     import sys
     from pathlib import Path
 
-    import capnp
     import torch
     import wmfs
     import wmfs._native
-    import wmfs_plugin
-    import wmfs_reference
-    from wmfs_reference._generated import PLUGIN_VERSION
-    from wmfs.plugins import find_manifests
-    from wmfs_plugin.schema import load_runtime_schema, schema_root
+    from wmfs.protocol.schema import load_runtime_schema, schema_root
 
     assert Path(wmfs.__file__).is_relative_to(Path(sys.prefix))
     expected_version = "${releaseVersion}"
-    for distribution, module in (
-        ("wmfs", wmfs),
-        ("wmfs-plugin", wmfs_plugin),
-        ("wmfs-reference", wmfs_reference),
-    ):
+    for distribution, module in (("wmfs", wmfs),):
         assert importlib.metadata.version(distribution) == expected_version
         assert module.__version__ == expected_version
     assert (schema_root() / "wmfs" / "tensor.capnp").is_file()
     assert int(load_runtime_schema().protocolVersion) > 0
     scripts = {
         entry.name: entry.value
-        for distribution in ("wmfs", "wmfs-plugin", "wmfs-reference")
+        for distribution in ("wmfs",)
         for entry in importlib.metadata.distribution(distribution).entry_points
         if entry.group == "console_scripts"
     }
     assert scripts["wmfs-benchmark"] == "wmfs.benchmark:main"
-    assert scripts["wmfs-plugin-codegen"] == "wmfs_plugin.codegen:main"
-    assert scripts["wmfs-reference-worker"] == "wmfs_reference.worker:main"
-    plugin_root = Path(sys.prefix) / "share/wmfs/plugins/reference"
-    manifest = find_manifests([plugin_root])[0]
-    assert PLUGIN_VERSION == manifest.version
-    assert manifest.schema_path.is_file()
-    reference_schema = capnp.load(
-        str(manifest.schema_path), imports=[str(schema_root()), str(manifest.schema_path.parent.parent)]
-    )
-    assert str(reference_schema.pluginMetadata.version) == manifest.version
-    assert (Path(sys.prefix) / "bin/wmfs-reference-worker").is_file()
+    assert importlib.util.find_spec("wmfs_plugin") is None
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     wmfs.runtime.use_backend("local")
     torch.testing.assert_close(wmfs.add_scalar(value, 2.0), value + 2.0)
     wmfs.runtime.close()
     PY
 
+    env -u PYTHONPATH "$work/venv-python-worker/bin/python" - <<'PY'
+    import importlib.metadata
+    import importlib.util
+
+    import wmfs_plugin
+    import wmfs_reference
+
+    assert importlib.util.find_spec("wmfs_plugin") is not None
+    assert importlib.metadata.version("wmfs-plugin") == "${releaseVersion}"
+    assert importlib.metadata.version("wmfs-reference") == "${releaseVersion}"
+    assert wmfs_plugin.__version__ == "${releaseVersion}"
+    assert wmfs_reference.__version__ == "${releaseVersion}"
+    scripts = {
+        entry.name: entry.value
+        for entry in importlib.metadata.distribution("wmfs-reference").entry_points
+        if entry.group == "console_scripts"
+    }
+    assert scripts["wmfs-reference-worker"] == "wmfs_reference.worker:main"
+    PY
+
     env -u PYTHONPATH "$work/venv-bundled/bin/python" - <<'PY'
+    import importlib.util
     import sys
     from pathlib import Path
 
@@ -260,6 +266,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     import wmfs._native
 
     assert Path(wmfs.__file__).is_relative_to(Path(sys.prefix))
+    assert importlib.util.find_spec("wmfs_plugin") is None
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     wmfs.runtime.use_backend("bundled")
     torch.testing.assert_close(wmfs.add_scalar(value, 2.0), value + 2.0)

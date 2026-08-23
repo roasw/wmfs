@@ -21,6 +21,22 @@
       source = builtins.path {
         path = wmfs.outPath;
         name = "wmfs-source";
+        filter =
+          path: type:
+          let
+            name = baseNameOf path;
+          in
+          !(
+            type == "directory"
+            && builtins.elem name [
+              ".git"
+              ".pytest_cache"
+              "__pycache__"
+              "build"
+              "output"
+            ]
+          )
+          && !(type == "regular" && nixpkgs.lib.hasSuffix ".pyc" name);
       };
       versions = {
         git = wmfs.packages.${system}.default.gitVersion;
@@ -44,6 +60,7 @@
           ''
             env -u PYTHONPATH ${runtimePython}/bin/python3 - <<'PY'
             import ctypes
+            import importlib.util
             import sys
             from pathlib import Path
 
@@ -54,6 +71,7 @@
             from wmfs.transport.worker_process import inspect_worker_environment
 
             runtime = wmfs.runtime
+            assert importlib.util.find_spec("wmfs_plugin") is None
 
             plugin_directory = Path(
                 "${reference-worker}/share/wmfs/plugins/reference"

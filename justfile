@@ -71,6 +71,7 @@ test-all profile=build_type:
     just _test-root-layer "{{ profile }}" contract
     just _test-root-layer "{{ profile }}" integration
     just _test-sdk
+    just _test-python-worker
     just _test-tool
     just _test-root-layer "{{ profile }}" native
     ctest --test-dir "{{ root }}/build/{{ profile }}" --output-on-failure
@@ -80,7 +81,7 @@ test-all profile=build_type:
 _test-root-layer profile layer:
     env \
       PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
-      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
+      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs${PYTHONPATH:+:$PYTHONPATH}" \
       WMFS_REQUIRE_BUNDLED="$([[ "{{ profile }}" == "Debug" ]] && printf 1 || printf 0)" \
       pytest -q -m "{{ layer }}" \
         "{{ root }}/packages/wmfs/tests" \
@@ -91,6 +92,12 @@ _test-sdk:
     env \
       PYTHONPATH="{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
       pytest -q "{{ root }}/packages/wmfs-plugin/tests"
+
+[private]
+_test-python-worker:
+    env \
+      PYTHONPATH="{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
+      pytest -q "{{ root }}/tests/python_worker"
 
 [private]
 _test-tool:
