@@ -2,6 +2,7 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
 import socket
 import sys
 import threading
@@ -29,7 +30,7 @@ from wmfs_plugin.control import (
 )
 from wmfs_plugin.fd_transport import FdReceiver, MappedBufferCache
 from wmfs_plugin.invocation import InvocationContext, OutputSpec
-from wmfs_plugin.logging import NullLogger
+from wmfs_plugin.logging import AsyncLogger, NullLogger, operation_context
 from wmfs_plugin.metadata import (
     DimensionExpression,
     DTypeExpression,
@@ -108,6 +109,7 @@ def _serve(
     request_id = 0
     initialized = False
     shutdown: Callable[[], None] | None = None
+    logger = NullLogger
     try:
         request_id, startup = decode_startup(packet)
         expected_roles = (
@@ -118,17 +120,36 @@ def _serve(
             DescriptorRole.COMPLETION_DATA_EVENT,
             DescriptorRole.COMPLETION_SPACE_EVENT,
             DescriptorRole.FD_CONTROL,
-        )
-        if startup.descriptor_roles != expected_roles or len(descriptors) != 7:
+        ) + (() if startup.log_mode == 0 else (DescriptorRole.LOG,))
+        if startup.descriptor_roles != expected_roles or len(descriptors) != len(
+            expected_roles
+        ):
             raise ValueError("STARTUP_REQUEST descriptor roles are not exact")
         _validate_startup_identity(startup, operations)
         config = json.loads(startup.config)
         if not isinstance(config, dict) or _canonical_json(config) != startup.config:
             raise ValueError("startup configuration is not a canonical JSON object")
+        if startup.log_mode != 0:
+            log_fd = descriptors[7]
+            logger = AsyncLogger(
+                level=int(os.environ.get("WMFS_LOG_LEVEL", "20")),
+                capacity=int(os.environ.get("WMFS_LOG_QUEUE_CAPACITY", "256")),
+                record_bytes=int(os.environ.get("WMFS_LOG_RECORD_BYTES", "16384")),
+                socket_sink=socket.socket(fileno=log_fd)
+                if startup.log_mode == 1
+                else None,
+                file_fd=log_fd if startup.log_mode == 2 else None,
+            )
         initialize = getattr(operations, "initialize", None)
         shutdown = getattr(operations, "shutdown", None)
         if initialize is not None:
-            initialize(config, NullLogger)
+            with operation_context(
+                session=startup.session_generation,
+                submission=0,
+                invocation=0,
+                operation=0,
+            ):
+                initialize(config, logger)
             initialized = True
         command_fds = tuple(descriptors[:3])
         completion_fds = tuple(descriptors[3:6])
@@ -169,6 +190,8 @@ def _serve(
                 shutdown()
             except Exception:
                 pass
+        if logger is not NullLogger:
+            logger.close()
         try:
             sendmsg_strict(
                 bootstrap,
@@ -229,9 +252,17 @@ def _serve(
         if shutdown_request is not None:
             if initialized and shutdown is not None:
                 try:
-                    shutdown()
+                    with operation_context(
+                        session=startup.session_generation,
+                        submission=0,
+                        invocation=0,
+                        operation=0,
+                    ):
+                        shutdown()
                 except Exception:
                     pass
+            if logger is not NullLogger:
+                logger.close()
             sendmsg_strict(
                 bootstrap,
                 encode_empty(Kind.SHUTDOWN_ACK, request_id=shutdown_request),
@@ -436,12 +467,18 @@ def _ring_worker_loop(
         completion.profile = tuple(profile)
         try:
             if command.kind == COMMAND_INVOKE:
-                measured = _invoke_known(
-                    command.invocation(),
-                    mapped_buffers,
-                    operations,
-                    profiled=bool(command.flags & FLAG_PROFILE),
-                )
+                with operation_context(
+                    session=command.generation,
+                    submission=command.submission_id,
+                    invocation=command.invocation_id,
+                    operation=command.operation_id,
+                ):
+                    measured = _invoke_known(
+                        command.invocation(),
+                        mapped_buffers,
+                        operations,
+                        profiled=bool(command.flags & FLAG_PROFILE),
+                    )
                 if measured:
                     completion.profile = (
                         *completion.profile[:3],
@@ -452,12 +489,18 @@ def _ring_worker_loop(
                         completion.profile[7],
                     )
             elif command.kind == COMMAND_PLAN_OUTPUTS:
-                planned = _plan_outputs(
-                    command.invocation(include_outputs=False),
-                    mapped_buffers,
-                    operations,
-                    planners,
-                )
+                with operation_context(
+                    session=command.generation,
+                    submission=command.submission_id,
+                    invocation=command.invocation_id,
+                    operation=command.operation_id,
+                ):
+                    planned = _plan_outputs(
+                        command.invocation(include_outputs=False),
+                        mapped_buffers,
+                        operations,
+                        planners,
+                    )
                 completion.outputs = tuple(
                     PlannedOutput(
                         int(item["output"]), tuple(item["shape"]), str(item["dtype"])

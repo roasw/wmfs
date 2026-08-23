@@ -3,6 +3,7 @@ from typing import Callable
 
 import torch
 
+from wmfs.logging import InProcessLogger, local_operation_context
 from wmfs.plugins import PluginManifest
 from wmfs.registry import OperationMetadata, OperationRegistry
 from wmfs.tensors import TensorFactory, native_tensor
@@ -15,7 +16,7 @@ class BundledBackend:
         self._operations: dict[
             str, tuple[Callable[..., object], Callable[..., object], OperationMetadata]
         ] = {}
-        self._initialized: dict[str, bytes] = {}
+        self._initialized: dict[str, tuple[bytes, object | None]] = {}
         self._module: object | None = None
 
     @property
@@ -57,30 +58,47 @@ class BundledBackend:
                     continue
                 existing = self._initialized.get(manifest.name)
                 if existing is not None:
-                    if existing != manifest.configuration_bytes:
+                    if existing[0] != manifest.configuration_bytes:
                         raise RuntimeError(
                             f"Plugin {manifest.name!r} is already initialized with different configuration"
                         )
                     continue
-                module.initialize(manifest.name, manifest.configuration_bytes)
-                self._initialized[manifest.name] = manifest.configuration_bytes
+                logger = (
+                    None
+                    if manifest.logging.mode == "disabled"
+                    else InProcessLogger(manifest.name, manifest.logging)
+                )
+                if logger is None:
+                    module.initialize(manifest.name, manifest.configuration_bytes)
+                else:
+                    module.initialize(
+                        manifest.name, manifest.configuration_bytes, logger
+                    )
+                self._initialized[manifest.name] = (
+                    manifest.configuration_bytes,
+                    logger,
+                )
                 initialized_now.append(manifest.name)
         except BaseException:
             for plugin in reversed(initialized_now):
                 module.shutdown(plugin)
-                self._initialized.pop(plugin, None)
+                _configuration, logger = self._initialized.pop(plugin)
+                if logger is not None:
+                    logger.close()
             raise
         self._module = module
         self._operations = operations
 
     def close(self) -> None:
         module = self._module
-        initialized = tuple(self._initialized)
+        initialized = tuple(self._initialized.items())
         self._initialized.clear()
         self._operations = {}
         if module is not None:
-            for plugin in reversed(initialized):
+            for plugin, (_configuration, logger) in reversed(initialized):
                 module.shutdown(plugin)
+                if logger is not None:
+                    logger.close()
 
     def invoke(
         self,
@@ -95,7 +113,8 @@ class BundledBackend:
         except KeyError:
             raise ValueError(f"Unknown operation {operation!r}") from None
         if out is None:
-            return function(*args, **self._scalar_kwargs(metadata, kwargs))
+            with local_operation_context(metadata.operation_id):
+                return function(*args, **self._scalar_kwargs(metadata, kwargs))
         outputs = out if isinstance(out, tuple) else (out,)
         if len(outputs) != len(metadata.tensor_outputs):
             raise ValueError(
@@ -109,7 +128,10 @@ class BundledBackend:
                 for item, value in zip(metadata.tensor_outputs, outputs, strict=True)
             }
         )
-        out_function(*args, **self._scalar_kwargs(metadata, kwargs), **output_kwargs)
+        with local_operation_context(metadata.operation_id):
+            out_function(
+                *args, **self._scalar_kwargs(metadata, kwargs), **output_kwargs
+            )
         return out
 
     @staticmethod

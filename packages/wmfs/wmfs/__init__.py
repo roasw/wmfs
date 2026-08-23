@@ -7,12 +7,14 @@ __path__ = extend_path(__path__, __name__)
 
 from wmfs.api import empty, ones, randn, zeros
 from wmfs.configuration import ConfigurationMetadata
+from wmfs.logging import LoggingOptions
 from wmfs.operations import create_operation
 from wmfs.runtime import runtime
 
 __all__ = [
     "__version__",
     "ConfigurationMetadata",
+    "LoggingOptions",
     "empty",
     "list_configurable",
     "ones",

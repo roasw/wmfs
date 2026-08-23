@@ -10,6 +10,7 @@ from wmfs.configuration import (
     ConfigurationMetadata,
     parse_configuration_metadata,
 )
+from wmfs.logging import DISABLED_LOGGING, LoggingOptions
 from wmfs.protocol import PROTOCOL_VERSION
 from wmfs.protocol.metadata import validate_plugin_metadata
 from wmfs.registry import (
@@ -54,6 +55,7 @@ class PluginManifest:
     control_abi_version: int = 1
     has_initialize: bool = False
     has_shutdown: bool = False
+    logging: LoggingOptions = DISABLED_LOGGING
 
 
 def load_manifest(path: Path) -> PluginManifest:

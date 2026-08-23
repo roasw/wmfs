@@ -17,6 +17,7 @@ from wmfs.configuration import (
     ConfigurationMetadata,
     validate_and_canonicalize,
 )
+from wmfs.logging import DISABLED_LOGGING, LoggingOptions
 from wmfs.operations import python_parameter_name
 from wmfs.plugins import PluginManifest, find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
@@ -77,6 +78,7 @@ class Runtime:
         self._registry = OperationRegistry()
         self._manifests: dict[str, PluginManifest] = {}
         self._plugin_configurations: dict[str, bytes] = {}
+        self._plugin_logging: dict[str, LoggingOptions] = {}
         self._initialized_plugins: set[str] = set()
         self._operation_generation = 0
         self._memory_mode = "pooled"
@@ -162,6 +164,7 @@ class Runtime:
             self._registry = registry
             self._manifests = loaded
             self._plugin_configurations = configurations
+            self._plugin_logging = {name: DISABLED_LOGGING for name in loaded}
             self._initialized_plugins.clear()
             self._operation_generation += 1
 
@@ -194,7 +197,11 @@ class Runtime:
             )
 
     def configure_plugin(
-        self, plugin: str, config: Mapping[str, object] | None = None
+        self,
+        plugin: str,
+        config: Mapping[str, object] | None = None,
+        *,
+        logging: LoggingOptions | None = None,
     ) -> None:
         """Store immutable configuration bytes before plugin initialization."""
         with self._condition:
@@ -208,6 +215,10 @@ class Runtime:
                 config, manifest.configuration, plugin=plugin
             )
             self._plugin_configurations[plugin] = encoded
+            if logging is not None:
+                if not isinstance(logging, LoggingOptions):
+                    raise TypeError("logging must be a LoggingOptions value")
+                self._plugin_logging[plugin] = logging
 
     def discover_plugins(self, *plugin_directories: Path) -> None:
         """Discover plugins and retain one validated worker session per plugin.
@@ -233,6 +244,7 @@ class Runtime:
                     configuration_bytes=_configuration_for_manifest(
                         manifest, loaded.get(manifest.name), configured
                     ),
+                    logging=self._plugin_logging.get(manifest.name, DISABLED_LOGGING),
                 )
                 for manifest in manifests
             )
@@ -255,6 +267,9 @@ class Runtime:
                 self._plugin_configurations = {
                     manifest.name: manifest.configuration_bytes
                     for manifest in manifests
+                }
+                self._plugin_logging = {
+                    manifest.name: manifest.logging for manifest in manifests
                 }
                 self._initialized_plugins = set(self._manifests)
                 self._backends["isolated"] = replacement
@@ -549,6 +564,7 @@ class Runtime:
             self._registry = OperationRegistry()
             self._manifests = {}
             self._plugin_configurations = {}
+            self._plugin_logging = {}
             self._initialized_plugins = set()
             self._operation_generation += 1
             self._memory_mode = "pooled"
@@ -599,6 +615,7 @@ class Runtime:
                 configuration_bytes=self._plugin_configurations.get(
                     manifest.name, EMPTY_CONFIGURATION_BYTES
                 ),
+                logging=self._plugin_logging.get(manifest.name, DISABLED_LOGGING),
             )
             for manifest in self._manifests.values()
         )

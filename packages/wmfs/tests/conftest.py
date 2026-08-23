@@ -8,6 +8,7 @@ UNIT_TESTS = {
     "test_configuration.py",
     "test_control.py",
     "test_dynamic_api.py",
+    "test_logging.py",
     "test_memory.py",
     "test_registry.py",
     "test_runtime_lifecycle.py",

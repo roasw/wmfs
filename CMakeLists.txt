@@ -59,6 +59,11 @@ set_target_properties(
     CXX_STANDARD_REQUIRED ON
 )
 
+add_library(wmfs-log STATIC src/log.cpp)
+add_library(wmfs::log ALIAS wmfs-log)
+target_include_directories(wmfs-log PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc")
+set_target_properties(wmfs-log PROPERTIES CXX_EXTENSIONS OFF CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
+
 option(WMFS_BUILD_PYTHON_RUNTIME "Build the Python runtime extension" ON)
 option(WMFS_BUILD_REFERENCE_WORKER "Build the C++ reference plugin worker" OFF)
 option(WMFS_BUILD_DOCUMENTATION "Build the unified API documentation" OFF)
@@ -103,6 +108,11 @@ if(BUILD_TESTING)
   target_link_libraries(wmfs-control-test PRIVATE wmfs::control)
   set_target_properties(wmfs-control-test PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
   add_test(NAME wmfs-control COMMAND wmfs-control-test)
+
+  add_executable(wmfs-log-test tests/cpp/log_test.cpp)
+  target_link_libraries(wmfs-log-test PRIVATE wmfs::log)
+  set_target_properties(wmfs-log-test PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME wmfs-log COMMAND wmfs-log-test)
 
   add_executable(wmfs-unique-fd-test tests/cpp/unique_fd_test.cpp)
   target_include_directories(

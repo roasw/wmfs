@@ -66,6 +66,7 @@ class logger {
     void critical(const char *message, std::uint64_t size) const {
         log(WMFS_LOG_CRITICAL, message, size);
     }
+    const wmfs_logger_v1 *native_handle() const { return value_; }
 
   private:
     const wmfs_logger_v1 *value_;

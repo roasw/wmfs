@@ -29,6 +29,7 @@ from wmfs.invocation import (
     reserve_invocation_access,
     share_input,
 )
+from wmfs.logging import LogCollector, open_log_file
 from wmfs.memory.buffers import BufferManager, ManagedTensor
 from wmfs.protocol.control import (
     DescriptorRole,
@@ -864,6 +865,19 @@ async def _worker_connection(
         )
     bootstrap_parent, bootstrap_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
     fd_parent, fd_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
+    log_parent: socket.socket | None = None
+    log_child: socket.socket | None = None
+    log_file_fd: int | None = None
+    collector: LogCollector | None = None
+    if manifest.logging.mode == "centralized":
+        log_parent, log_child = socket.socketpair(type=socket.SOCK_SEQPACKET)
+        log_child.setblocking(False)
+        collector = LogCollector(
+            log_parent, manifest.name, manifest.logging.record_bytes
+        )
+    elif manifest.logging.mode == "worker_file":
+        assert manifest.logging.file is not None
+        log_file_fd = open_log_file(manifest.logging.file)
     bootstrap_parent.settimeout(deadlines.startup)
     capacity = int(os.environ.get("WMFS_RING_CAPACITY", DEFAULT_CAPACITY))
     generation = secrets.randbits(64) or 1
@@ -880,6 +894,16 @@ async def _worker_connection(
     except Exception:
         bootstrap_parent.close()
         fd_parent.close()
+        fd_child.close()
+        if log_child is not None:
+            log_child.close()
+        if log_file_fd is not None:
+            os.close(log_file_fd)
+        if collector is not None:
+            collector.close()
+        command_owner.close()
+        completion_owner.close()
+        ring_client.close()
         raise
     finally:
         bootstrap_child.close()
@@ -912,16 +936,32 @@ async def _worker_connection(
                 DescriptorRole.COMPLETION_DATA_EVENT,
                 DescriptorRole.COMPLETION_SPACE_EVENT,
                 DescriptorRole.FD_CONTROL,
-            ),
-            LogMode.DISABLED,
+            )
+            + (() if manifest.logging.mode == "disabled" else (DescriptorRole.LOG,)),
+            {
+                "disabled": LogMode.DISABLED,
+                "centralized": LogMode.CENTRALIZED,
+                "worker_file": LogMode.WORKER_FILE,
+            }[manifest.logging.mode],
         )
         request_id = secrets.randbits(64) or 1
         sendmsg_strict(
             bootstrap_parent,
             encode_startup(startup, request_id=request_id),
-            (*command_owner.fds, *completion_owner.fds, fd_child.fileno()),
+            (*command_owner.fds, *completion_owner.fds, fd_child.fileno())
+            + (
+                ()
+                if manifest.logging.mode == "disabled"
+                else (log_child.fileno() if log_child is not None else log_file_fd,)
+            ),
         )
         fd_child.close()
+        if log_child is not None:
+            log_child.close()
+            log_child = None
+        if log_file_fd is not None:
+            os.close(log_file_fd)
+            log_file_fd = None
         response_packet, response_fds = recvmsg_strict(bootstrap_parent)
         if response_fds:
             raise RuntimeError("STARTUP_RESPONSE carried file descriptors")
@@ -1034,6 +1074,12 @@ async def _worker_connection(
         command_owner.close()
         completion_owner.close()
         ring_client.close()
+        if log_child is not None:
+            log_child.close()
+        if log_file_fd is not None:
+            os.close(log_file_fd)
+        if collector is not None:
+            collector.close()
         if cleanup_error is not None:
             raise cleanup_error
 
@@ -1045,6 +1091,9 @@ def _start_worker(
     environment = os.environ.copy()
     for variable in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH"):
         environment.pop(variable, None)
+    environment["WMFS_LOG_LEVEL"] = str(manifest.logging.level)
+    environment["WMFS_LOG_QUEUE_CAPACITY"] = str(manifest.logging.queue_capacity)
+    environment["WMFS_LOG_RECORD_BYTES"] = str(manifest.logging.record_bytes)
     worker = shutil.which(manifest.worker, path=environment.get("PATH"))
     if worker is None:
         raise RuntimeError(f"Worker executable {manifest.worker!r} was not found")

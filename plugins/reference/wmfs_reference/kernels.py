@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 _state_lock = threading.Lock()
 _state: Mapping[str, object] | None = None
 _state_references = 0
+_logger: Logger | None = None
 
 
 def _freeze(value: object) -> object:
@@ -24,7 +25,7 @@ def _freeze(value: object) -> object:
 
 
 def initialize(config: dict[str, object], logger: Logger) -> None:
-    global _state, _state_references
+    global _logger, _state, _state_references
     frozen = _freeze(config)
     assert isinstance(frozen, Mapping)
     with _state_lock:
@@ -35,6 +36,7 @@ def initialize(config: dict[str, object], logger: Logger) -> None:
             raise RuntimeError("reference plugin is already initialized")
         _state = frozen
         _state_references = 1
+        _logger = logger
     if config.get("emit_diagnostics") and logger.enabled(20):
         logger.info(
             "reference plugin initialized",
@@ -43,12 +45,15 @@ def initialize(config: dict[str, object], logger: Logger) -> None:
 
 
 def shutdown() -> None:
-    global _state, _state_references
+    global _logger, _state, _state_references
+    if _logger is not None and _state is not None and _state.get("emit_diagnostics"):
+        _logger.info("reference plugin shutdown")
     with _state_lock:
         if _state_references:
             _state_references -= 1
         if not _state_references:
             _state = None
+            _logger = None
 
 
 def matmul(
@@ -71,6 +76,8 @@ def add_scalar(
 ) -> torch.Tensor:
     if isinstance(value, bool) or not isinstance(value, (float, int)):
         raise TypeError("value must be numeric")
+    if _logger is not None and _state is not None and _state.get("emit_diagnostics"):
+        _logger.debug("reference add_scalar", fields={"elements": a.numel()})
     return torch.add(a, float(value), out=out)
 
 

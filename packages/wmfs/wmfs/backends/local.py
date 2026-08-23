@@ -6,6 +6,7 @@ from typing import Callable
 import torch
 
 from wmfs._null_logger import NULL_LOGGER
+from wmfs.logging import InProcessLogger, local_operation_context
 from wmfs.plugins import PluginManifest
 from wmfs.registry import OperationRegistry
 from wmfs.tensors import TensorFactory, native_tensor
@@ -16,7 +17,8 @@ class LocalBackend:
 
     def __init__(self) -> None:
         self._operations: dict[str, Callable[..., object]] = {}
-        self._initialized: dict[str, tuple[ModuleType, bytes, bool]] = {}
+        self._initialized: dict[str, tuple[ModuleType, bytes, bool, object]] = {}
+        self._operation_ids: dict[str, int] = {}
 
     @property
     def operation_names(self) -> tuple[str, ...]:
@@ -44,11 +46,15 @@ class LocalBackend:
                         f"implement {metadata.name!r}"
                     )
                 operations[f"{manifest.name}.{metadata.name}"] = implementation
+                self._operation_ids[f"{manifest.name}.{metadata.name}"] = (
+                    metadata.operation_id
+                )
         for name in registry.operation_names:
             plugin = registry.plugin_for_operation(name)
             qualified = f"{plugin}.{name}"
             if qualified in operations:
                 operations[name] = operations[qualified]
+                self._operation_ids[name] = self._operation_ids[qualified]
         initialized_now: list[tuple[str, ModuleType]] = []
         try:
             for manifest in manifests:
@@ -68,11 +74,19 @@ class LocalBackend:
                         raise RuntimeError(
                             f"Local provider {manifest.local_provider!r} has no initialize hook"
                         )
-                    hook(json.loads(manifest.configuration_bytes), NULL_LOGGER)
+                    logger = (
+                        NULL_LOGGER
+                        if manifest.logging.mode == "disabled"
+                        else InProcessLogger(manifest.name, manifest.logging)
+                    )
+                    hook(json.loads(manifest.configuration_bytes), logger)
+                else:
+                    logger = NULL_LOGGER
                 self._initialized[manifest.name] = (
                     provider,
                     manifest.configuration_bytes,
                     manifest.has_shutdown,
+                    logger,
                 )
                 initialized_now.append((manifest.name, provider))
         except BaseException:
@@ -82,7 +96,12 @@ class LocalBackend:
                     shutdown = getattr(provider, "shutdown", None)
                     if callable(shutdown):
                         shutdown()
-                self._initialized.pop(name, None)
+                _provider, _configuration, _has_shutdown, logger = (
+                    self._initialized.pop(name)
+                )
+                close = getattr(logger, "close", None)
+                if close is not None:
+                    close()
             raise
         self._operations = operations
 
@@ -90,11 +109,16 @@ class LocalBackend:
         initialized = tuple(self._initialized.items())
         self._initialized.clear()
         self._operations = {}
-        for _name, (provider, _configuration, has_shutdown) in reversed(initialized):
+        for _name, (provider, _configuration, has_shutdown, logger) in reversed(
+            initialized
+        ):
             if has_shutdown:
                 shutdown = getattr(provider, "shutdown", None)
                 if callable(shutdown):
                     shutdown()
+            close = getattr(logger, "close", None)
+            if close is not None:
+                close()
 
     def invoke(
         self,
@@ -108,7 +132,8 @@ class LocalBackend:
             function = self._operations[operation]
         except KeyError:
             raise ValueError(f"Unknown operation {operation!r}") from None
-        return function(*args, out=out, **kwargs)
+        with local_operation_context(self._operation_ids.get(operation, 0)):
+            return function(*args, out=out, **kwargs)
 
     def construct_tensor(
         self,

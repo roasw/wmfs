@@ -22,6 +22,7 @@ struct ConfigurationState {
 
 std::mutex configuration_mutex;
 std::unique_ptr<const ConfigurationState> configuration_state;
+wmfs_logger_v1 plugin_logger{};
 
 void set_error(wmfs_error_buffer_v1 *error, const char *message) {
     if (!error || error->struct_size < sizeof(*error) || !error->data ||
@@ -107,6 +108,20 @@ std::int32_t invoke_svd(const wmfs_invocation_v1 *value) {
 std::int32_t invoke_add_scalar(const wmfs_invocation_v1 *value) {
     auto a = tensor(value->inputs[0]);
     auto out = tensor(value->outputs[0]);
+    if (configuration_state && configuration_state->emit_diagnostics &&
+        plugin_logger.enabled &&
+        plugin_logger.enabled(plugin_logger.context, WMFS_LOG_DEBUG)) {
+        static const char message[] = "reference add_scalar";
+        static const char elements_name[] = "elements";
+        const wmfs_log_field_v1 field{
+            sizeof(wmfs_log_field_v1),
+            WMFS_LOG_FIELD_UINT64,
+            {elements_name, sizeof(elements_name) - 1},
+            static_cast<std::uint64_t>(a.numel()),
+            {nullptr, 0}};
+        plugin_logger.log(plugin_logger.context, WMFS_LOG_DEBUG,
+                          {message, sizeof(message) - 1}, {}, &field, 1);
+    }
     wmfs::reference::add_scalar_out(a, floating_scalar(value->scalars[0]), out);
     return WMFS_STATUS_OK;
 }
@@ -187,16 +202,34 @@ std::int32_t initialize(wmfs_json_view_v1 configuration, logger log,
         return WMFS_STATUS_INVALID_ARGUMENT;
     }
     configuration_state.reset(new const ConfigurationState(parsed));
+    if (log.native_handle())
+        plugin_logger = *log.native_handle();
     if (parsed.emit_diagnostics && log.enabled(WMFS_LOG_INFO)) {
         static const char message[] = "reference plugin initialized";
-        log.info(message, sizeof(message) - 1);
+        static const char threads_name[] = "threads";
+        const wmfs_log_field_v1 field{
+            sizeof(wmfs_log_field_v1),
+            WMFS_LOG_FIELD_INT64,
+            {threads_name, sizeof(threads_name) - 1},
+            static_cast<std::uint64_t>(parsed.threads),
+            {nullptr, 0}};
+        log.log(WMFS_LOG_INFO, message, sizeof(message) - 1, nullptr, 0, &field,
+                1);
     }
     return WMFS_STATUS_OK;
 }
 
 void shutdown() {
     std::lock_guard<std::mutex> lock(configuration_mutex);
+    if (configuration_state && configuration_state->emit_diagnostics &&
+        plugin_logger.enabled &&
+        plugin_logger.enabled(plugin_logger.context, WMFS_LOG_INFO)) {
+        static const char message[] = "reference plugin shutdown";
+        plugin_logger.log(plugin_logger.context, WMFS_LOG_INFO,
+                          {message, sizeof(message) - 1}, {}, nullptr, 0);
+    }
     configuration_state.reset();
+    plugin_logger = {};
 }
 
 #define WMFS_SPECIALIZE(operation, type, function)                             \

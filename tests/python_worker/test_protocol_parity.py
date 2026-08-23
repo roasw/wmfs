@@ -7,6 +7,12 @@ import wmfs.transport.ring as runtime_ring
 import wmfs_plugin.control as worker_control
 import wmfs_plugin.metadata as worker_metadata
 import wmfs_plugin.ring as worker_ring
+from wmfs.logging import LogContext as RuntimeLogContext
+from wmfs.logging import LogRecord as RuntimeLogRecord
+from wmfs.logging import decode_log_record as decode_runtime_log_record
+from wmfs.logging import encode_log_record as encode_runtime_log_record
+from wmfs_plugin.log_codec import decode_log_record as decode_worker_log_record
+from wmfs_plugin.log_codec import encode_log_record as encode_worker_log_record
 
 ROOT = Path(__file__).parents[2]
 
@@ -143,3 +149,27 @@ def test_runtime_and_worker_ring_abis_and_codecs_have_parity() -> None:
     runtime_record = runtime_ring.Record(runtime_ring.COMMAND_PING, 7, 10, 11)
     decoded_worker = worker_ring.decode(runtime_ring.encode(runtime_record), 7)
     assert decoded_worker.kind == worker_ring.COMMAND_PING
+
+
+def test_runtime_and_worker_log_codecs_have_parity() -> None:
+    runtime_record = RuntimeLogRecord(
+        30,
+        "parity",
+        "codec",
+        {
+            "boolean": True,
+            "signed": -2,
+            "unsigned": 3,
+            "float": 0.25,
+            "text": "ok",
+        },
+        4,
+        5,
+        RuntimeLogContext(6, 7, 8, 9),
+    )
+    worker_decoded = decode_worker_log_record(encode_runtime_log_record(runtime_record))
+    runtime_decoded = decode_runtime_log_record(
+        encode_worker_log_record(worker_decoded)
+    )
+
+    assert runtime_decoded == runtime_record

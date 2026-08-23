@@ -31,10 +31,17 @@ def __getattr__(name: str) -> Any:
         from wmfs_plugin.invocation import InvocationContext, OutputSpec
 
         return {"InvocationContext": InvocationContext, "OutputSpec": OutputSpec}[name]
-    if name in {"Logger", "LogLevel", "LogValue", "NullLogger"}:
-        from wmfs_plugin.logging import Logger, LogLevel, LogValue, NullLogger
+    if name in {"AsyncLogger", "Logger", "LogLevel", "LogValue", "NullLogger"}:
+        from wmfs_plugin.logging import (
+            AsyncLogger,
+            Logger,
+            LogLevel,
+            LogValue,
+            NullLogger,
+        )
 
         return {
+            "AsyncLogger": AsyncLogger,
             "Logger": Logger,
             "LogLevel": LogLevel,
             "LogValue": LogValue,

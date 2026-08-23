@@ -20,6 +20,7 @@ TEST_LAYERS = {
         "test_generated_v1_compatibility.py",
         "test_invocation.py",
         "test_isolated.py",
+        "test_logging.py",
         "test_output_metadata.py",
         "test_plugins.py",
         "test_tensor_transport.py",

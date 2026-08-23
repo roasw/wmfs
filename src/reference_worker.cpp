@@ -3,6 +3,7 @@
 #include "wmfs/ring.hpp"
 #include "wmfs/unique_fd.hpp"
 #include <wmfs/protocol/control.h>
+#include <wmfs/protocol/log.h>
 #include <wmfs/reference_plugin.hpp>
 
 #include <ATen/ops/count_nonzero.h>
@@ -16,12 +17,16 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -43,7 +48,299 @@ struct StartupResources {
     std::uint64_t generation{};
     const wmfs_plugin_api_v1 *api{};
     bool initialized{};
+    struct LogSink;
+    std::unique_ptr<LogSink> log;
 };
+
+struct StartupResources::LogSink {
+    struct Item {
+        std::uint32_t level;
+        std::vector<std::uint8_t> bytes;
+    };
+    UniqueFd fd;
+    std::uint32_t mode{};
+    std::uint32_t level{20};
+    std::size_t record_bytes{16384};
+    std::uint64_t generation{};
+    std::uint64_t sequence{};
+    std::size_t capacity{256};
+    std::uint64_t dropped{};
+    std::mutex mutex;
+    std::condition_variable condition;
+    std::deque<Item> queue;
+    bool closing{};
+    std::thread sender;
+
+    ~LogSink() { close(); }
+    void start() {
+        sender = std::thread([this] { run(); });
+    }
+    void enqueue(std::uint32_t level, std::vector<std::uint8_t> bytes) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (closing)
+            return;
+        if (queue.size() == capacity) {
+            auto lowest =
+                std::min_element(queue.begin(), queue.end(),
+                                 [](const Item &left, const Item &right) {
+                                     return left.level < right.level;
+                                 });
+            if (lowest != queue.end() && lowest->level <= level) {
+                queue.erase(lowest);
+                queue.push_back({level, std::move(bytes)});
+            }
+            ++dropped;
+        } else
+            queue.push_back({level, std::move(bytes)});
+        condition.notify_one();
+    }
+    void close() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            closing = true;
+            condition.notify_all();
+        }
+        if (sender.joinable())
+            sender.join();
+    }
+    void run() {
+        for (;;) {
+            Item item;
+            std::uint64_t dropped_before{};
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                condition.wait(lock,
+                               [this] { return closing || !queue.empty(); });
+                if (queue.empty())
+                    return;
+                item = std::move(queue.front());
+                queue.pop_front();
+                dropped_before = dropped;
+                dropped = 0;
+            }
+            if (mode == WMFS_CONTROL_LOG_CENTRALIZED) {
+                if (dropped_before &&
+                    item.bytes.size() >= WMFS_LOG_HEADER_SIZE) {
+                    auto synthetic = item.bytes;
+                    synthetic[20] |= WMFS_LOG_RECORD_SYNTHETIC;
+                    synthetic[24] = WMFS_LOG_WARNING;
+                    for (unsigned index = 0; index < 8; ++index)
+                        synthetic[92 + index] = static_cast<std::uint8_t>(
+                            dropped_before >> (index * 8));
+                    (void)::send(fd.get(), synthetic.data(), synthetic.size(),
+                                 MSG_DONTWAIT | MSG_NOSIGNAL);
+                }
+                (void)::send(fd.get(), item.bytes.data(), item.bytes.size(),
+                             MSG_DONTWAIT | MSG_NOSIGNAL);
+                continue;
+            }
+            if (dropped_before) {
+                const auto warning =
+                    std::string("{\"level\":30,\"message\":\"dropped ") +
+                    std::to_string(dropped_before) +
+                    " plugin log records\",\"category\":\"wmfs.logging\","
+                    "\"fields\":{},\"droppedBefore\":" +
+                    std::to_string(dropped_before) + "}\n";
+                const auto ignored =
+                    ::write(fd.get(), warning.data(), warning.size());
+                (void)ignored;
+            }
+            std::size_t offset = 0;
+            while (offset < item.bytes.size()) {
+                const auto written =
+                    ::write(fd.get(), item.bytes.data() + offset,
+                            item.bytes.size() - offset);
+                if (written > 0)
+                    offset += static_cast<std::size_t>(written);
+                else if (written < 0 && errno == EINTR)
+                    continue;
+                else
+                    break;
+            }
+        }
+    }
+};
+
+std::uint64_t steady_nanoseconds();
+thread_local std::uint64_t log_submission_id{};
+thread_local std::uint64_t log_invocation_id{};
+thread_local std::uint64_t log_operation_id{};
+
+void store32(std::uint8_t *p, std::uint32_t value) {
+    for (unsigned index = 0; index < 4; ++index)
+        p[index] = static_cast<std::uint8_t>(value >> (index * 8));
+}
+void store64(std::uint8_t *p, std::uint64_t value) {
+    for (unsigned index = 0; index < 8; ++index)
+        p[index] = static_cast<std::uint8_t>(value >> (index * 8));
+}
+
+std::size_t utf8_prefix(const char *data, std::size_t size, std::size_t limit) {
+    if (size <= limit)
+        return size;
+    size = limit;
+    while (size && (static_cast<unsigned char>(data[size]) & 0xc0) == 0x80)
+        --size;
+    return size;
+}
+
+std::string json_escape(const char *data, std::size_t size) {
+    std::string result;
+    for (std::size_t index = 0; index < size; ++index) {
+        const unsigned char value = static_cast<unsigned char>(data[index]);
+        if (value == '"' || value == '\\') {
+            result.push_back('\\');
+            result.push_back(static_cast<char>(value));
+        } else if (value >= 0x20)
+            result.push_back(static_cast<char>(value));
+    }
+    return result;
+}
+
+std::string json_fields(const wmfs_log_field_v1 *fields,
+                        std::uint32_t field_count) {
+    std::string result{"{"};
+    bool first = true;
+    for (std::uint32_t index = 0; fields && index < field_count; ++index) {
+        const auto &field = fields[index];
+        if (field.struct_size < sizeof(wmfs_log_field_v1) || !field.name.data ||
+            !field.name.size || field.kind < WMFS_LOG_FIELD_BOOLEAN ||
+            field.kind > WMFS_LOG_FIELD_TEXT)
+            continue;
+        result += first ? "\"" : ",\"";
+        first = false;
+        result += json_escape(field.name.data, field.name.size) + "\":";
+        if (field.kind == WMFS_LOG_FIELD_BOOLEAN)
+            result += field.bits ? "true" : "false";
+        else if (field.kind == WMFS_LOG_FIELD_INT64)
+            result += std::to_string(static_cast<std::int64_t>(field.bits));
+        else if (field.kind == WMFS_LOG_FIELD_UINT64)
+            result += std::to_string(field.bits);
+        else if (field.kind == WMFS_LOG_FIELD_FLOAT64) {
+            double value{};
+            std::memcpy(&value, &field.bits, sizeof(value));
+            result += std::to_string(value);
+        } else
+            result += "\"" +
+                      json_escape(field.text.data ? field.text.data : "",
+                                  field.text.data ? field.text.size : 0) +
+                      "\"";
+    }
+    return result + "}";
+}
+
+std::uint8_t log_enabled(void *context, std::uint32_t level) {
+    const auto *sink = static_cast<StartupResources::LogSink *>(context);
+    return sink && level >= sink->level && level >= 10 && level <= 50 &&
+           level % 10 == 0;
+}
+
+void log_write(void *context, std::uint32_t level, wmfs_text_view_v1 message,
+               wmfs_text_view_v1 category, const wmfs_log_field_v1 *fields,
+               std::uint32_t field_count) {
+    auto *sink = static_cast<StartupResources::LogSink *>(context);
+    if (!log_enabled(context, level) || (!message.data && message.size) ||
+        (!category.data && category.size))
+        return;
+    try {
+        std::uint64_t sequence;
+        {
+            std::lock_guard<std::mutex> lock(sink->mutex);
+            sequence = ++sink->sequence;
+        }
+        if (sink->mode == WMFS_CONTROL_LOG_WORKER_FILE) {
+            const auto document =
+                std::string("{\"timeNs\":") +
+                std::to_string(steady_nanoseconds()) +
+                ",\"sequence\":" + std::to_string(sequence) +
+                ",\"level\":" + std::to_string(level) + ",\"message\":\"" +
+                json_escape(message.data, message.size) + "\",\"category\":\"" +
+                json_escape(category.data, category.size) +
+                "\",\"fields\":" + json_fields(fields, field_count) +
+                ",\"sessionId\":" + std::to_string(sink->generation) +
+                ",\"submissionId\":" + std::to_string(log_submission_id) +
+                ",\"invocationId\":" + std::to_string(log_invocation_id) +
+                ",\"operationId\":" + std::to_string(log_operation_id) +
+                ",\"droppedBefore\":0}\n";
+            sink->enqueue(level, std::vector<std::uint8_t>(document.begin(),
+                                                           document.end()));
+            return;
+        }
+        const auto category_size = utf8_prefix(category.data, category.size,
+                                               WMFS_LOG_MAX_CATEGORY_BYTES);
+        const auto available =
+            sink->record_bytes > WMFS_LOG_HEADER_SIZE + category_size
+                ? sink->record_bytes - WMFS_LOG_HEADER_SIZE - category_size
+                : 0;
+        const auto message_size = utf8_prefix(
+            message.data, message.size,
+            std::min<std::size_t>(available, WMFS_LOG_MAX_MESSAGE_BYTES));
+        std::vector<std::uint8_t> packet(WMFS_LOG_HEADER_SIZE + category_size +
+                                         message_size);
+        store64(packet.data(), WMFS_LOG_MAGIC);
+        packet[8] = WMFS_LOG_ABI_MAJOR;
+        packet[10] = WMFS_LOG_ABI_MINOR;
+        store32(packet.data() + 12, WMFS_LOG_HEADER_SIZE);
+        store32(packet.data() + 16, packet.size());
+        store32(packet.data() + 20,
+                category_size != category.size || message_size != message.size
+                    ? WMFS_LOG_RECORD_TRUNCATED
+                    : 0);
+        store32(packet.data() + 24, level);
+        std::uint32_t encoded_fields = 0;
+        store32(packet.data() + 32, category_size);
+        store32(packet.data() + 36, message_size);
+        store64(packet.data() + 44, sequence);
+        store64(packet.data() + 52, steady_nanoseconds());
+        store64(packet.data() + 60, sink->generation);
+        store64(packet.data() + 68, log_submission_id);
+        store64(packet.data() + 76, log_invocation_id);
+        store64(packet.data() + 84, log_operation_id);
+        std::memcpy(packet.data() + WMFS_LOG_HEADER_SIZE, category.data,
+                    category_size);
+        std::memcpy(packet.data() + WMFS_LOG_HEADER_SIZE + category_size,
+                    message.data, message_size);
+        for (std::uint32_t index = 0;
+             fields && index < field_count && index < WMFS_LOG_MAX_FIELDS;
+             ++index) {
+            const auto &field = fields[index];
+            if (!field.name.data || !field.name.size ||
+                field.name.size > WMFS_LOG_MAX_NAME_BYTES ||
+                field.kind < WMFS_LOG_FIELD_BOOLEAN ||
+                field.kind > WMFS_LOG_FIELD_TEXT)
+                continue;
+            const auto text_size =
+                field.kind == WMFS_LOG_FIELD_TEXT && field.text.data
+                    ? utf8_prefix(field.text.data, field.text.size,
+                                  sink->record_bytes)
+                    : 0;
+            const auto required =
+                WMFS_LOG_FIELD_SIZE + field.name.size + text_size;
+            if (required > sink->record_bytes - packet.size()) {
+                packet[20] |= WMFS_LOG_RECORD_TRUNCATED;
+                break;
+            }
+            const auto offset = packet.size();
+            packet.resize(offset + required);
+            packet[offset] = static_cast<std::uint8_t>(field.kind);
+            store32(packet.data() + offset + 4, field.name.size);
+            store32(packet.data() + offset + 8, text_size);
+            store64(packet.data() + offset + 12,
+                    field.kind == WMFS_LOG_FIELD_TEXT ? 0 : field.bits);
+            std::memcpy(packet.data() + offset + WMFS_LOG_FIELD_SIZE,
+                        field.name.data, field.name.size);
+            if (text_size)
+                std::memcpy(packet.data() + offset + WMFS_LOG_FIELD_SIZE +
+                                field.name.size,
+                            field.text.data, text_size);
+            ++encoded_fields;
+        }
+        store32(packet.data() + 16, packet.size());
+        store32(packet.data() + 28, encoded_fields);
+        sink->enqueue(level, std::move(packet));
+    } catch (...) {
+    }
+}
 
 void require(bool condition, const char *message) {
     if (!condition)
@@ -222,9 +519,7 @@ void send_packet(int fd, const std::uint8_t *data, std::size_t size) {
 StartupResources accept_startup(int bootstrap_fd) {
     StartupResources result;
     result.bootstrap = UniqueFd(bootstrap_fd);
-    auto received = receive_packet(bootstrap_fd, 7);
-    require(received.second.size() == 7,
-            "STARTUP_REQUEST must transfer exactly seven descriptors");
+    auto received = receive_packet(bootstrap_fd, 8);
     std::array<wmfs_control_descriptor_role_record_v1,
                WMFS_CONTROL_MAX_DESCRIPTOR_ROLES>
         roles{};
@@ -235,7 +530,7 @@ StartupResources accept_startup(int bootstrap_fd) {
                                            &request, roles.data(),
                                            roles.size()) == 0,
             "Invalid STARTUP_REQUEST");
-    const std::array<std::uint16_t, 7> expected_roles{
+    const std::array<std::uint16_t, 7> base_roles{
         WMFS_CONTROL_DESCRIPTOR_COMMAND_RING,
         WMFS_CONTROL_DESCRIPTOR_COMMAND_DATA_EVENT,
         WMFS_CONTROL_DESCRIPTOR_COMMAND_SPACE_EVENT,
@@ -243,11 +538,18 @@ StartupResources accept_startup(int bootstrap_fd) {
         WMFS_CONTROL_DESCRIPTOR_COMPLETION_DATA_EVENT,
         WMFS_CONTROL_DESCRIPTOR_COMPLETION_SPACE_EVENT,
         WMFS_CONTROL_DESCRIPTOR_FD_CONTROL};
-    require(request.startup.descriptor_count == expected_roles.size(),
+    const bool logging = request.startup.log_mode != WMFS_CONTROL_LOG_DISABLED;
+    const std::size_t expected_count = base_roles.size() + (logging ? 1 : 0);
+    require(received.second.size() == expected_count,
+            "STARTUP_REQUEST descriptor count differs");
+    require(request.startup.descriptor_count == expected_count,
             "STARTUP_REQUEST descriptor role count differs");
-    for (std::size_t index = 0; index < expected_roles.size(); ++index)
-        require(roles[index].role == expected_roles[index],
+    for (std::size_t index = 0; index < base_roles.size(); ++index)
+        require(roles[index].role == base_roles[index],
                 "STARTUP_REQUEST descriptor role order differs");
+    if (logging)
+        require(roles[7].role == WMFS_CONTROL_DESCRIPTOR_LOG,
+                "STARTUP_REQUEST log descriptor role differs");
     require(request.startup.session_generation != 0 &&
                 request.startup.metadata_fingerprint ==
                     WMFS_REFERENCE_METADATA_FINGERPRINT &&
@@ -259,7 +561,7 @@ StartupResources accept_startup(int bootstrap_fd) {
                     WMFS_REFERENCE_PROTOCOL_VERSION &&
                 request.startup.configuration_schema_version ==
                     WMFS_REFERENCE_CONFIGURATION_SCHEMA_VERSION &&
-                request.startup.log_mode == WMFS_CONTROL_LOG_DISABLED &&
+                request.startup.log_mode <= WMFS_CONTROL_LOG_WORKER_FILE &&
                 request.startup.status == WMFS_CONTROL_STATUS_OK &&
                 std::memcmp(request.startup.interface_fingerprint,
                             interface_fingerprint_sha256, 32) == 0 &&
@@ -275,6 +577,19 @@ StartupResources accept_startup(int bootstrap_fd) {
     const bool has_lifecycle =
         api->struct_size >=
         offsetof(wmfs_plugin_api_v1, shutdown) + sizeof(api->shutdown);
+    if (logging) {
+        result.log.reset(new StartupResources::LogSink());
+        result.log->fd = std::move(received.second[7]);
+        result.log->mode = request.startup.log_mode;
+        result.log->generation = request.startup.session_generation;
+        if (const char *value = std::getenv("WMFS_LOG_LEVEL"))
+            result.log->level = static_cast<std::uint32_t>(std::stoul(value));
+        if (const char *value = std::getenv("WMFS_LOG_RECORD_BYTES"))
+            result.log->record_bytes = std::stoul(value);
+        if (const char *value = std::getenv("WMFS_LOG_QUEUE_CAPACITY"))
+            result.log->capacity = std::stoul(value);
+        result.log->start();
+    }
     if (has_lifecycle && (api->features & WMFS_PLUGIN_FEATURE_INITIALIZE)) {
         require(api->initialize != nullptr,
                 "Generated plugin initialize callback is missing");
@@ -286,6 +601,11 @@ StartupResources accept_startup(int bootstrap_fd) {
         args.features = api->features;
         args.configuration = {configuration.data(), configuration.size()};
         args.logger.struct_size = sizeof(args.logger);
+        if (result.log) {
+            args.logger.context = result.log.get();
+            args.logger.enabled = &log_enabled;
+            args.logger.log = &log_write;
+        }
         args.error = &error;
         if (api->initialize(&args) != WMFS_STATUS_OK) {
             const std::size_t error_size =
@@ -495,6 +815,9 @@ void run_ring(RingConsumer commands, RingProducer completions,
         completion.profile.worker_started_ns =
             profiled ? steady_nanoseconds() : 0;
         try {
+            log_submission_id = command.submission_id;
+            log_invocation_id = command.invocation_id;
+            log_operation_id = command.operation_id;
             c10::InferenceMode inference_mode;
             std::vector<TensorLease> inputs;
             std::vector<TensorLease> outputs;
