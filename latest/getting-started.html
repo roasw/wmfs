@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Getting Started &#8212; WMFS 5ccd995c85da</title>
+    <title>Getting Started &#8212; WMFS 7d052d2faf98</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=00907de2"></script>
+    <script src="_static/documentation_options.js?v=0e4f9371"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -62,6 +62,26 @@ the <a class="reference internal" href="architecture-overview.html"><span class=
 <span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </pre></div>
 </div>
+<p>To inspect and configure a plugin without importing or launching it, separate
+manifest loading from initialization:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">wmfs</span><span class="w"> </span><span class="kn">import</span> <span class="n">LoggingOptions</span>
+
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">load_plugins</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;plugins&quot;</span><span class="p">))</span>
+<span class="n">schema</span> <span class="o">=</span> <span class="n">wmfs</span><span class="o">.</span><span class="n">list_configurable</span><span class="p">(</span><span class="s2">&quot;reference&quot;</span><span class="p">)</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">validate_config</span><span class="p">(</span><span class="s2">&quot;reference&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;threads&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">})</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">configure_plugin</span><span class="p">(</span>
+    <span class="s2">&quot;reference&quot;</span><span class="p">,</span>
+    <span class="p">{</span><span class="s2">&quot;threads&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">},</span>
+    <span class="n">logging</span><span class="o">=</span><span class="n">LoggingOptions</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;centralized&quot;</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="mi">20</span><span class="p">),</span>
+<span class="p">)</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">discover_plugins</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;plugins&quot;</span><span class="p">))</span>
+<span class="n">wmfs</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">use_backend</span><span class="p">(</span><span class="s2">&quot;isolated&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Configuration is canonicalized once and immutable after initialization. Local
+and bundled initialization occurs when that backend is selected; isolated
+initialization occurs during eager discovery. The default disabled logger
+creates no logging transport or queue. See <a class="reference internal" href="ring-protocol.html"><span class="doc">Command and Completion Ring Protocol</span></a>.</p>
 <p>Use <code class="docutils literal notranslate"><span class="pre">local</span></code> for direct PyTorch execution, <code class="docutils literal notranslate"><span class="pre">bundled</span></code> for the in-process reference
 plugin when it was compiled, and <code class="docutils literal notranslate"><span class="pre">isolated</span></code> for process isolation. Plugin
 discovery starts and validates persistent workers eagerly, so the first

@@ -1,26 +1,151 @@
 {
     "abiVersion": 1,
+    "configuration": {
+        "encoding": "wmfs-configuration-schema-v1",
+        "examples": {
+            "conservative": {
+                "emit_diagnostics": false,
+                "precision": "accurate",
+                "solver": {
+                    "algorithm": "qrIteration",
+                    "tolerance": 1e-10
+                },
+                "tags": [
+                    "production"
+                ],
+                "threads": 1
+            },
+            "throughput": {
+                "precision": "fast",
+                "solver": {
+                    "algorithm": "divideAndConquer"
+                },
+                "threads": 8
+            }
+        },
+        "fingerprint": "sha256:7487dddfb9cbe8c7e33d14e6d12dffe1aba04cf1bc190ed9b2cdae7fea6159cf",
+        "schema": {
+            "additionalProperties": false,
+            "description": "Initialization settings for the reference numerical plugin.",
+            "properties": {
+                "emit_diagnostics": {
+                    "default": false,
+                    "description": "Enable plugin diagnostic records when logging is available.",
+                    "type": "boolean"
+                },
+                "precision": {
+                    "default": "balanced",
+                    "description": "Numerical precision policy for supported kernels.",
+                    "enum": [
+                        "fast",
+                        "balanced",
+                        "accurate"
+                    ],
+                    "maxLength": 8,
+                    "minLength": 4,
+                    "type": "string"
+                },
+                "solver": {
+                    "additionalProperties": false,
+                    "description": "SVD solver controls.",
+                    "properties": {
+                        "algorithm": {
+                            "description": "SVD algorithm family.",
+                            "enum": [
+                                "divideAndConquer",
+                                "qrIteration"
+                            ],
+                            "type": "string"
+                        },
+                        "tolerance": {
+                            "default": 1e-07,
+                            "description": "Relative convergence tolerance.",
+                            "maximum": 1.0,
+                            "minimum": 0.0,
+                            "type": "number"
+                        }
+                    },
+                    "required": [
+                        "algorithm"
+                    ],
+                    "type": "object"
+                },
+                "tags": {
+                    "default": [],
+                    "description": "Bounded labels attached to diagnostic records.",
+                    "items": {
+                        "maxLength": 24,
+                        "minLength": 1,
+                        "type": "string"
+                    },
+                    "maxItems": 8,
+                    "minItems": 0,
+                    "type": "array"
+                },
+                "threads": {
+                    "default": 1,
+                    "description": "Maximum number of kernel threads.",
+                    "maximum": 64,
+                    "minimum": 1,
+                    "type": "integer"
+                }
+            },
+            "required": [],
+            "type": "object"
+        },
+        "schemaVersion": 1
+    },
+    "controlAbiVersion": 1,
     "deployment": {
-        "interface": "ReferencePlugin",
+        "bundledNamespace": "wmfs_reference",
+        "entrySymbol": "wmfs_reference_plugin_get_api",
+        "localProvider": "wmfs_reference.kernels",
         "root": "..",
-        "schema": "../schemas/wmfs-reference/reference.capnp",
         "worker": "wmfs-reference-worker"
     },
-    "formatVersion": 1,
-    "generator": "wmfs-tool/1",
-    "interfaceFingerprint": "sha256:b0f2005fae597c883fc5caf85c3b78f88996b0141b5c7a71bdd9d7163efc3123",
-    "metadataFingerprint": "0x549fb18b7a4b6c75",
+    "enums": [
+        {
+            "name": "IndexOrder",
+            "values": [
+                "rowMajor",
+                "columnMajor"
+            ]
+        }
+    ],
+    "formatVersion": 2,
+    "generator": "wmfs-tool/2",
+    "interfaceFingerprint": "sha256:b734e7a8e8d52ed04df2074b8d936e5c441d6d17f836997d3df9ba964d07cabd",
+    "lifecycle": {
+        "initialize": true,
+        "shutdown": true
+    },
+    "metadataFingerprint": "0xf6ed5672a8a496cb",
     "operationCount": 6,
     "operations": [
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 1,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 },
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "b"
                 }
             ],
@@ -50,10 +175,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "result",
                     "same_shape_as_input": null
@@ -78,10 +204,21 @@
             }
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 2,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 }
             ],
@@ -146,10 +283,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "u",
                     "same_shape_as_input": null
@@ -187,10 +325,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "s",
                     "same_shape_as_input": null
@@ -253,10 +392,11 @@
                         }
                     ],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "vh",
                     "same_shape_as_input": null
@@ -265,6 +405,8 @@
             "scalars": [
                 {
                     "default": true,
+                    "enum": null,
+                    "enum_values": [],
                     "kind": "boolean",
                     "name": "fullMatrices",
                     "required": false
@@ -273,10 +415,23 @@
             "vjp": null
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 3,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 }
             ],
@@ -290,7 +445,8 @@
                         "input": 0,
                         "kind": "promote_tensor_scalar",
                         "scalar": 0,
-                        "value": null
+                        "value": null,
+                        "variable": null
                     },
                     "name": "result",
                     "same_shape_as_input": 0
@@ -299,6 +455,8 @@
             "scalars": [
                 {
                     "default": null,
+                    "enum": null,
+                    "enum_values": [],
                     "kind": "float64",
                     "name": "value",
                     "required": true
@@ -318,18 +476,35 @@
             }
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 4,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "a"
                 },
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "b"
                 },
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "resultCotangent"
                 }
             ],
@@ -340,10 +515,11 @@
                     "allocation": "known",
                     "dimensions": [],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "aGradient",
                     "same_shape_as_input": 0
@@ -352,10 +528,11 @@
                     "allocation": "known",
                     "dimensions": [],
                     "dtype": {
-                        "input": 1,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "bGradient",
                     "same_shape_as_input": 1
@@ -365,10 +542,23 @@
             "vjp": null
         },
         {
+            "dtype_variables": [
+                {
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
+                    "name": "T"
+                }
+            ],
             "id": 5,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": "T",
+                    "dtypes": [],
                     "name": "resultCotangent"
                 }
             ],
@@ -379,10 +569,11 @@
                     "allocation": "known",
                     "dimensions": [],
                     "dtype": {
-                        "input": 0,
-                        "kind": "input",
+                        "input": null,
+                        "kind": "variable",
                         "scalar": null,
-                        "value": null
+                        "value": null,
+                        "variable": "T"
                     },
                     "name": "aGradient",
                     "same_shape_as_input": 0
@@ -392,10 +583,18 @@
             "vjp": null
         },
         {
+            "dtype_variables": [],
             "id": 6,
             "inputs": [
                 {
                     "access": "read_only",
+                    "dtype_variable": null,
+                    "dtypes": [
+                        "float32",
+                        "float64",
+                        "int64",
+                        "uint8"
+                    ],
                     "name": "a"
                 }
             ],
@@ -410,7 +609,19 @@
                     "same_shape_as_input": null
                 }
             ],
-            "scalars": [],
+            "scalars": [
+                {
+                    "default": "rowMajor",
+                    "enum": "IndexOrder",
+                    "enum_values": [
+                        "rowMajor",
+                        "columnMajor"
+                    ],
+                    "kind": "int64",
+                    "name": "order",
+                    "required": false
+                }
+            ],
             "vjp": null
         }
     ],
@@ -420,5 +631,6 @@
         "pythonModule": "wmfs_reference",
         "version": "0.1.0"
     },
-    "protocolVersion": 11
+    "protocolVersion": 11,
+    "startupCapabilities": 255
 }

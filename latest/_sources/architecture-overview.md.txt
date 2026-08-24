@@ -82,17 +82,18 @@ artifacts.
 ```
 
 `interface.toml` declares operation IDs, parameters, access, output expressions,
-and VJPs. `wmfs-tool` validates it and emits committed deployment artifacts. The
-runtime reads the manifest without running the tool or importing plugin code.
+VJPs, lifecycle hooks, and a typed configuration schema. `wmfs-tool` validates
+it and emits committed deployment artifacts. The runtime reads the manifest
+without running the tool or importing plugin code.
 
 **Key invariants and nuances**
 
 - The interface definition is the only handwritten operation registry.
 - Generated artifacts have explicit format, ABI, protocol, generator, and
   fingerprint fields; old supported artifacts remain deployment inputs.
-- The generated C ABI is future/plugin-facing. The current C++ reference worker
-  uses `reference_dispatch.inc` for its compatibility RPC methods; its normal
-  ring dispatch remains worker-specific and is not the same boundary.
+- One generated C++11 plugin entry table is linked into both the bundled adapter
+  and isolated worker; the transport loop is generic mode-specific glue around
+  the same operation catalog and kernels.
 
 **Read the implementation**
 
@@ -102,8 +103,8 @@ runtime reads the manifest without running the tool or importing plugin code.
   deterministic output set, fingerprints, ABI, and adapters.
 - [`plugins/reference/generated/manifest.json`](../plugins/reference/generated/manifest.json):
   runtime deployment metadata.
-- [`plugins/reference/generated/reference_dispatch.inc`](../plugins/reference/generated/reference_dispatch.inc):
-  generated compatibility RPC dispatch.
+- [`plugins/reference/generated/src/reference_plugin_stub.cpp`](../plugins/reference/generated/src/reference_plugin_stub.cpp):
+  mode-neutral generated plugin entry table and typed dispatch.
 - [`tests/integration/test_generated_v1_compatibility.py`](../tests/integration/test_generated_v1_compatibility.py):
   old generated artifact compatibility.
 
@@ -118,10 +119,13 @@ Discovery validates and starts every candidate worker before publishing a new
 operation catalog.
 ```
 
+Manifest loading, schema introspection, and configuration are worker-free.
 Discovery is eager and transactional: one persistent worker per plugin starts
-during `discover_plugins`, not on the first operation. Cap'n Proto currently
-carries startup metadata, environment inspection, lifecycle control, and the
-versioned ring handshake. Operation traffic uses the rings after startup.
+during `discover_plugins`, not on the first operation. The fixed control ABI
+carries startup identity and environment, canonical configuration, lifecycle
+acceptance, logging selection, and exact ring/event/FD/log descriptor roles over
+`SOCK_SEQPACKET` with `SCM_RIGHTS`. Operation traffic uses the rings after
+startup.
 
 **Key invariants and nuances**
 
@@ -129,7 +133,10 @@ versioned ring handshake. Operation traffic uses the rings after startup.
 - Failed discovery closes all sessions created by that attempt and leaves the
   prior registry intact.
 - Startup establishes two SPSC rings, four eventfds, an FD-control socket, a
-  session generation, and bounded deadlines.
+  session generation, an optional independent log service, and bounded
+  deadlines.
+- Disabled logging establishes no log socket or queue; local and bundled modes
+  establish none of the isolated transport resources.
 
 **Read the implementation**
 
@@ -141,8 +148,8 @@ versioned ring handshake. Operation traffic uses the rings after startup.
   Python control-mode startup and validation.
 - [`NativeWorkerSession.__init__`](../packages/wmfs/wmfs/transport/native_worker.py):
   native control-mode startup orchestrated from Python.
-- [`runtime.capnp`](../packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp):
-  current startup/control schema.
+- [`control.py`](../packages/wmfs/wmfs/protocol/control.py): fixed startup,
+  lifecycle, and FD-control codec.
 
 ## 4. Steady-State Hot Path
 
@@ -164,8 +171,8 @@ pages; records contain bounded fixed-width descriptors and scalar metadata.
 
 - No public future, command, ring, worker, or shared-memory handle leaks into the
   ordinary API.
-- Discovery, registration, and worker launch happen before this path. Cap'n
-  Proto is not used for normal operation calls.
+- Discovery, registration, and worker launch happen before this path. Control
+  messages are not used for normal operation calls.
 - Full rings apply bounded backpressure and eventfd waits; they never overwrite
   unread records or busy-spin without bound.
 
@@ -200,7 +207,7 @@ without copying; an unmanaged CPU tensor incurs one ingress copy.
 
 **Key invariants and nuances**
 
-- Numerical payload bytes never enter Cap'n Proto or a ring record.
+- Numerical payload bytes never enter control frames or ring records.
 - Read-only input access is the default; writable mappings and access leases are
   explicit. Pooled mode preserves per-buffer capabilities, while trusted arena
   mode deliberately exposes one persistent writable mapping.
@@ -218,8 +225,8 @@ without copying; an unmanaged CPU tensor incurs one ingress copy.
   worker mapped-buffer endpoint.
 - [`MappedBufferCache`](../src/reference_mapped_buffers.cpp): C++ worker mapping
   validation, ATen view construction, and lifetime.
-- [`tensor.capnp`](../packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp):
-  startup/control mapping descriptors, not tensor payload serialization.
+- [`control.h`](../inc/wmfs/protocol/control.h): fixed transactional mapping
+  descriptors and acknowledgements, not tensor payload serialization.
 
 ## 6. Output Allocation
 
@@ -313,23 +320,24 @@ The application runtime remains Python-owned in both control modes. Native mode
 uses the nanobind `wmfs._native.Session` for startup and FD control, but ordinary
 ring submissions still flow through Python's `_RingClient`. A Python worker uses
 the standalone SDK and generated Python adapter. The current C++ reference
-worker owns a worker-specific ring loop and generated dispatch include before
-calling transport-neutral LibTorch kernels.
+worker owns the ring loop and invokes the same generated plugin entry table used
+by the bundled build before calling transport-neutral LibTorch kernels.
 
 **Key invariants and nuances**
 
 - `wmfs-plugin` never imports `wmfs`, and the runtime never imports the SDK.
-- Their independently packaged startup schemas, metadata models, ring constants,
+- Their independently packaged control codecs, metadata models, ring constants,
   and codecs are parity-tested.
-- The generated plugin-facing C ABI describes the intended stable C++ plugin
-  boundary, but current reference ring dispatch remains worker-specific.
+- Generated plugin-facing C/C++11 declarations are the stable source boundary;
+  only process transport glue differs by execution mode. CI compiles that
+  generated scope, including lifecycle/config/log declarations, with GCC 4.8.5.
 
 **Read the implementation**
 
 - [`native_worker.py`](../packages/wmfs/wmfs/transport/native_worker.py): Python
   orchestration combining native startup/FD control with `_RingClient`.
 - [`src/native_session.cpp`](../src/native_session.cpp): nanobind session's
-  Cap'n Proto and FD-control implementation.
+  fixed lifecycle and FD-control implementation.
 - [`wmfs_plugin/worker.py`](../packages/wmfs-plugin/wmfs_plugin/worker.py): Python
   worker bootstrap and ring dispatch.
 - [`src/reference_worker.cpp`](../src/reference_worker.cpp): C++ reference
@@ -342,11 +350,12 @@ calling transport-neutral LibTorch kernels.
 ## Benchmarks and Cross-Boundary Tests
 
 The architecture is measured rather than inferred. `wmfs-benchmark` separates
-worker startup, Cap'n Proto startup/control ping, ring enqueue and wakeups,
+local/bundled/isolated initialization, fixed startup/control ping, logging-mode
+initialization, ring enqueue and wakeups,
 backpressure, first-use FD transfer and mapping, cached mappings, output
-allocation, worker view construction, kernel time, result materialization, and
-reclamation. It compares local, bundled, and isolated execution using equivalent
-kernels where possible.
+allocation, known/dynamic output paths, direct/profiled calls, worker view
+construction, kernel time, result materialization, and reclamation. It compares
+local, bundled, and isolated execution using equivalent kernels where possible.
 
 **Read the implementation**
 

@@ -46,7 +46,24 @@ do not depend on `wmfs-tool` at runtime. Python worker distributions depend on
 
 .. autoclass:: wmfs.transport.deadlines.TransportDeadlines
    :members:
+
+.. autoclass:: wmfs.configuration.ConfigurationMetadata
+   :members:
+
+.. autoclass:: wmfs.logging.LoggingOptions
+   :members:
 ```
+
+`Runtime.load_plugins` is the worker-free manifest path used before
+`list_configurable`, `validate_config`, and `configure_plugin`. Configuration is
+canonicalized without inserting defaults and becomes immutable at plugin
+initialization. Local and bundled plugins initialize when selected; isolated
+plugins initialize during eager discovery. `Runtime.close` invokes enabled
+shutdown hooks and resets lifecycle state.
+
+`LoggingOptions()` selects the zero-resource disabled path. Centralized mode
+uses an independent bounded log channel and worker-file mode uses an independent
+bounded local sink; neither shares operation or FD-control traffic.
 
 ## Plugin SDK
 

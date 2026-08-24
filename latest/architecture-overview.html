@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Architecture Overview &#8212; WMFS 5ccd995c85da</title>
+    <title>Architecture Overview &#8212; WMFS 7d052d2faf98</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=00907de2"></script>
+    <script src="_static/documentation_options.js?v=0e4f9371"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -115,16 +115,17 @@ artifacts.</span><a class="headerlink" href="#id2" title="Link to this image">¶
 </figcaption>
 </figure>
 <p><code class="docutils literal notranslate"><span class="pre">interface.toml</span></code> declares operation IDs, parameters, access, output expressions,
-and VJPs. <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> validates it and emits committed deployment artifacts. The
-runtime reads the manifest without running the tool or importing plugin code.</p>
+VJPs, lifecycle hooks, and a typed configuration schema. <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> validates
+it and emits committed deployment artifacts. The runtime reads the manifest
+without running the tool or importing plugin code.</p>
 <p><strong>Key invariants and nuances</strong></p>
 <ul class="simple">
 <li><p>The interface definition is the only handwritten operation registry.</p></li>
 <li><p>Generated artifacts have explicit format, ABI, protocol, generator, and
 fingerprint fields; old supported artifacts remain deployment inputs.</p></li>
-<li><p>The generated C ABI is future/plugin-facing. The current C++ reference worker
-uses <code class="docutils literal notranslate"><span class="pre">reference_dispatch.inc</span></code> for its compatibility RPC methods; its normal
-ring dispatch remains worker-specific and is not the same boundary.</p></li>
+<li><p>One generated C++11 plugin entry table is linked into both the bundled adapter
+and isolated worker; the transport loop is generic mode-specific glue around
+the same operation catalog and kernels.</p></li>
 </ul>
 <p><strong>Read the implementation</strong></p>
 <ul class="simple">
@@ -134,8 +135,8 @@ reference plugin source of truth.</p></li>
 deterministic output set, fingerprints, ABI, and adapters.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/062217d2045d03aaefe0c5e29e297a33/manifest.json"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">plugins/reference/generated/manifest.json</span></code></span></a>:
 runtime deployment metadata.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/34a3ddd184e582236d354b7cf66e5490/reference_dispatch.inc"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">plugins/reference/generated/reference_dispatch.inc</span></code></span></a>:
-generated compatibility RPC dispatch.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/bf0f5ff7e68962093f426312f9e9a232/reference_plugin_stub.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">plugins/reference/generated/src/reference_plugin_stub.cpp</span></code></span></a>:
+mode-neutral generated plugin entry table and typed dispatch.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/81dde9c9eae5839d04fa339e24ec15da/test_generated_v1_compatibility.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">tests/integration/test_generated_v1_compatibility.py</span></code></span></a>:
 old generated artifact compatibility.</p></li>
 </ul>
@@ -150,17 +151,23 @@ old generated artifact compatibility.</p></li>
 operation catalog.</span><a class="headerlink" href="#id3" title="Link to this image">¶</a></p>
 </figcaption>
 </figure>
-<p>Discovery is eager and transactional: one persistent worker per plugin starts
-during <code class="docutils literal notranslate"><span class="pre">discover_plugins</span></code>, not on the first operation. Cap’n Proto currently
-carries startup metadata, environment inspection, lifecycle control, and the
-versioned ring handshake. Operation traffic uses the rings after startup.</p>
+<p>Manifest loading, schema introspection, and configuration are worker-free.
+Discovery is eager and transactional: one persistent worker per plugin starts
+during <code class="docutils literal notranslate"><span class="pre">discover_plugins</span></code>, not on the first operation. The fixed control ABI
+carries startup identity and environment, canonical configuration, lifecycle
+acceptance, logging selection, and exact ring/event/FD/log descriptor roles over
+<code class="docutils literal notranslate"><span class="pre">SOCK_SEQPACKET</span></code> with <code class="docutils literal notranslate"><span class="pre">SCM_RIGHTS</span></code>. Operation traffic uses the rings after
+startup.</p>
 <p><strong>Key invariants and nuances</strong></p>
 <ul class="simple">
 <li><p>A candidate registry is published only after all workers validate.</p></li>
 <li><p>Failed discovery closes all sessions created by that attempt and leaves the
 prior registry intact.</p></li>
 <li><p>Startup establishes two SPSC rings, four eventfds, an FD-control socket, a
-session generation, and bounded deadlines.</p></li>
+session generation, an optional independent log service, and bounded
+deadlines.</p></li>
+<li><p>Disabled logging establishes no log socket or queue; local and bundled modes
+establish none of the isolated transport resources.</p></li>
 </ul>
 <p><strong>Read the implementation</strong></p>
 <ul class="simple">
@@ -172,8 +179,8 @@ session creation per manifest.</p></li>
 Python control-mode startup and validation.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/14193a6595d87e4b7d4a507f179024d6/native_worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">NativeWorkerSession.__init__</span></code></span></a>:
 native control-mode startup orchestrated from Python.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/0db4344fb81cccb17e07e2be9ba48a3d/runtime.capnp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">runtime.capnp</span></code></span></a>:
-current startup/control schema.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/aafede7bb7b73519179c362028220f1f/control.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">control.py</span></code></span></a>: fixed startup,
+lifecycle, and FD-control codec.</p></li>
 </ul>
 </section>
 <section id="steady-state-hot-path">
@@ -194,8 +201,8 @@ pages; records contain bounded fixed-width descriptors and scalar metadata.</p>
 <ul class="simple">
 <li><p>No public future, command, ring, worker, or shared-memory handle leaks into the
 ordinary API.</p></li>
-<li><p>Discovery, registration, and worker launch happen before this path. Cap’n
-Proto is not used for normal operation calls.</p></li>
+<li><p>Discovery, registration, and worker launch happen before this path. Control
+messages are not used for normal operation calls.</p></li>
 <li><p>Full rings apply bounded backpressure and eventfd waits; they never overwrite
 unread records or busy-spin without bound.</p></li>
 </ul>
@@ -229,7 +236,7 @@ and view metadata in its ring record. A managed tensor can cross repeated calls
 without copying; an unmanaged CPU tensor incurs one ingress copy.</p>
 <p><strong>Key invariants and nuances</strong></p>
 <ul class="simple">
-<li><p>Numerical payload bytes never enter Cap’n Proto or a ring record.</p></li>
+<li><p>Numerical payload bytes never enter control frames or ring records.</p></li>
 <li><p>Read-only input access is the default; writable mappings and access leases are
 explicit. Pooled mode preserves per-buffer capabilities, while trusted arena
 mode deliberately exposes one persistent writable mapping.</p></li>
@@ -247,8 +254,8 @@ batched map and retirement protocol.</p></li>
 worker mapped-buffer endpoint.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/beb33451f69c99e2ff618044af64b19d/reference_mapped_buffers.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">MappedBufferCache</span></code></span></a>: C++ worker mapping
 validation, ATen view construction, and lifetime.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/6cfaa39cf3466b00b1bad9206f619316/tensor.capnp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">tensor.capnp</span></code></span></a>:
-startup/control mapping descriptors, not tensor payload serialization.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/74dadc0f6b6df47bcec5d4498cac285a/control.h"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">control.h</span></code></span></a>: fixed transactional mapping
+descriptors and acknowledgements, not tensor payload serialization.</p></li>
 </ul>
 </section>
 <section id="output-allocation">
@@ -340,22 +347,23 @@ packaging and adapter boundaries.</span><a class="headerlink" href="#id8" title=
 uses the nanobind <code class="docutils literal notranslate"><span class="pre">wmfs._native.Session</span></code> for startup and FD control, but ordinary
 ring submissions still flow through Python’s <code class="docutils literal notranslate"><span class="pre">_RingClient</span></code>. A Python worker uses
 the standalone SDK and generated Python adapter. The current C++ reference
-worker owns a worker-specific ring loop and generated dispatch include before
-calling transport-neutral LibTorch kernels.</p>
+worker owns the ring loop and invokes the same generated plugin entry table used
+by the bundled build before calling transport-neutral LibTorch kernels.</p>
 <p><strong>Key invariants and nuances</strong></p>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> never imports <code class="docutils literal notranslate"><span class="pre">wmfs</span></code>, and the runtime never imports the SDK.</p></li>
-<li><p>Their independently packaged startup schemas, metadata models, ring constants,
+<li><p>Their independently packaged control codecs, metadata models, ring constants,
 and codecs are parity-tested.</p></li>
-<li><p>The generated plugin-facing C ABI describes the intended stable C++ plugin
-boundary, but current reference ring dispatch remains worker-specific.</p></li>
+<li><p>Generated plugin-facing C/C++11 declarations are the stable source boundary;
+only process transport glue differs by execution mode. CI compiles that
+generated scope, including lifecycle/config/log declarations, with GCC 4.8.5.</p></li>
 </ul>
 <p><strong>Read the implementation</strong></p>
 <ul class="simple">
 <li><p><a class="reference download internal" download="" href="_downloads/14193a6595d87e4b7d4a507f179024d6/native_worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">native_worker.py</span></code></span></a>: Python
 orchestration combining native startup/FD control with <code class="docutils literal notranslate"><span class="pre">_RingClient</span></code>.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/ef8a7315ebf183fa2879e84fc6873307/native_session.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code></span></a>: nanobind session’s
-Cap’n Proto and FD-control implementation.</p></li>
+fixed lifecycle and FD-control implementation.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/3a29c808d22353ef5cd55e9ae77ca509/worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">wmfs_plugin/worker.py</span></code></span></a>: Python
 worker bootstrap and ring dispatch.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/55e5412f734af5ce4934795a6447fff9/reference_worker.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/reference_worker.cpp</span></code></span></a>: C++ reference
@@ -369,11 +377,12 @@ independent runtime/SDK protocol-copy parity.</p></li>
 <section id="benchmarks-and-cross-boundary-tests">
 <h2>Benchmarks and Cross-Boundary Tests<a class="headerlink" href="#benchmarks-and-cross-boundary-tests" title="Link to this heading">¶</a></h2>
 <p>The architecture is measured rather than inferred. <code class="docutils literal notranslate"><span class="pre">wmfs-benchmark</span></code> separates
-worker startup, Cap’n Proto startup/control ping, ring enqueue and wakeups,
+local/bundled/isolated initialization, fixed startup/control ping, logging-mode
+initialization, ring enqueue and wakeups,
 backpressure, first-use FD transfer and mapping, cached mappings, output
-allocation, worker view construction, kernel time, result materialization, and
-reclamation. It compares local, bundled, and isolated execution using equivalent
-kernels where possible.</p>
+allocation, known/dynamic output paths, direct/profiled calls, worker view
+construction, kernel time, result materialization, and reclamation. It compares
+local, bundled, and isolated execution using equivalent kernels where possible.</p>
 <p><strong>Read the implementation</strong></p>
 <ul class="simple">
 <li><p><a class="reference download internal" download="" href="_downloads/1dd75b50f0ce50da20a82b6f01e204ad/benchmark.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">benchmark.py</span></code></span></a>: measurement boundaries,

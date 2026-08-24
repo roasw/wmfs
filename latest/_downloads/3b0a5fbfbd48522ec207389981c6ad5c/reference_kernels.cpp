@@ -1,6 +1,7 @@
 #include "wmfs/reference/kernels.hpp"
 
 #include <ATen/ops/add.h>
+#include <ATen/ops/flip.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/nonzero.h>
@@ -80,8 +81,15 @@ at::Tensor &add_scalar_out(const at::Tensor &a, double value, at::Tensor &out) {
     return at::add_out(out, a, scalar, at::Scalar(1));
 }
 
-at::Tensor &nonzero_out(const at::Tensor &a, at::Tensor &out) {
+at::Tensor nonzero(const at::Tensor &a, std::int64_t order) {
+    require(order == 0 || order == 1, "Invalid nonzero index order");
     auto result = at::nonzero(a);
+    return order == 1 ? at::flip(result, {1}) : result;
+}
+
+at::Tensor &nonzero_out(const at::Tensor &a, std::int64_t order,
+                        at::Tensor &out) {
+    auto result = nonzero(a, order);
     validate_output(out, result.sizes(), at::ScalarType::Long);
     return out.copy_(result);
 }

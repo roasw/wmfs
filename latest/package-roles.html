@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Package Roles &#8212; WMFS 5ccd995c85da</title>
+    <title>Package Roles &#8212; WMFS 7d052d2faf98</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=00907de2"></script>
+    <script src="_static/documentation_options.js?v=0e4f9371"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -78,7 +78,7 @@ and lifetimes. They are not a stack that every environment should install.</p>
 <span class="n">result</span> <span class="o">=</span> <span class="n">wmfs</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>The distribution owns the application-side protocol model, startup schemas,
+<p>The distribution owns the application-side fixed control model,
 ring producer/completion dispatcher, shared-memory allocator, FD sender, and
 worker process lifecycle. It reads generated plugin manifests but does not
 import plugin implementations.</p>
@@ -133,7 +133,7 @@ include:</p>
 <p>Generated artifacts are committed to or packaged with the plugin. Neither the
 application runtime nor the deployed worker runs <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>, so it is not a
 runtime dependency. The compiler itself has no dependency on <code class="docutils literal notranslate"><span class="pre">wmfs</span></code>,
-<code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>, PyTorch, or Cap’n Proto.</p>
+<code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>, PyTorch, or runtime transport libraries.</p>
 </section>
 <section id="plugin-workflows">
 <h2>Plugin Workflows<a class="headerlink" href="#plugin-workflows" title="Link to this heading">¶</a></h2>
@@ -160,8 +160,13 @@ are packaged independently so neither environment imports the other package.</p>
 <li><p>Package the generated manifest and worker executable together.</p></li>
 </ol>
 <p>The deployed C++ worker requires neither <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> nor <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>. It
-communicates with <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> only through the generated startup contract,
-command/completion rings, the FD-control channel, and shared tensor mappings.</p>
+communicates with <code class="docutils literal notranslate"><span class="pre">wmfs</span></code> only through the fixed startup/lifecycle protocol,
+generated manifest identity and plugin entry table, command/completion rings,
+the FD-control and optional logging channels, and shared tensor mappings.</p>
+<p>The same generated manifest, C++11 entry table, operation IDs, lifecycle hooks,
+configuration declarations, and Python metadata are execution-mode-neutral.
+Local, bundled, and isolated targets add generic mode adapters around those
+artifacts; they do not regenerate or maintain separate operation catalogs.</p>
 </section>
 </section>
 <section id="dependency-direction">

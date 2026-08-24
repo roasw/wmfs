@@ -3,6 +3,7 @@ from collections.abc import Sequence
 import torch
 
 from wmfs.memory.buffers import BufferManager, ManagedTensor
+from wmfs.protocol.metadata import SUPPORTED_OUTPUT_DTYPES
 from wmfs.registry import (
     DimensionExpression,
     DTypeExpression,
@@ -32,7 +33,9 @@ def evaluate_outputs(
             )
         if not shape or len(shape) > _MAX_RANK or any(item <= 0 for item in shape):
             raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
-        results.append((shape, _evaluate_dtype(known.dtype, inputs, scalars)))
+        results.append(
+            (shape, _evaluate_dtype(known.dtype, operation, inputs, scalars))
+        )
     return tuple(results)
 
 
@@ -47,7 +50,7 @@ def complete_outputs(
             raise ValueError("Worker planned an unknown or statically known output")
         if not shape or len(shape) > _MAX_RANK or any(item <= 0 for item in shape):
             raise ValueError(f"Operation {operation.name!r} produced an invalid shape")
-        if dtype not in {"float32", "float64", "int64", "uint8"}:
+        if dtype not in SUPPORTED_OUTPUT_DTYPES:
             raise ValueError(f"Operation {operation.name!r} produced an invalid dtype")
         results[index] = (shape, dtype)
     if any(item is None for item in results):
@@ -129,6 +132,7 @@ def _evaluate_dimension(
 
 def _evaluate_dtype(
     expression: DTypeExpression,
+    operation: OperationMetadata,
     inputs: Sequence[ManagedTensor],
     scalars: Sequence[object],
 ) -> str:
@@ -136,6 +140,11 @@ def _evaluate_dtype(
         return str(expression.value)
     if expression.kind == "input":
         return inputs[int(expression.value)].descriptor.dtype
+    if expression.kind == "variable":
+        for index, parameter in enumerate(operation.tensor_inputs):
+            if parameter.dtype_variable == expression.value:
+                return inputs[index].descriptor.dtype
+        raise ValueError(f"Dtype variable {expression.value!r} is not bound")
     promotion = expression.value
     scalar = scalars[promotion.scalar_parameter]
     if isinstance(scalar, str):

@@ -31,14 +31,10 @@ let
         pkgs.python3Packages.setuptools-scm
       ];
       nativeBuildInputs = [
-        pkgs.capnproto
         pkgs.cmake
         pkgs.ninja
       ];
-      buildInputs = [
-        pkgs.capnproto
-      ]
-      ++ pkgs.lib.optionals bundled [
+      buildInputs = pkgs.lib.optionals bundled [
         pkgs.python3Packages.torch.dev
         pkgs.python3Packages.torch.lib
       ];
@@ -51,9 +47,9 @@ let
       dontUseCmakeConfigure = true;
       dependencies = [
         pkgs.python3Packages.numpy
-        pkgs.python3Packages.pycapnp
         pkgs.python3Packages.torch
-      ];
+      ]
+      ++ pkgs.lib.optionals bundled [ workers.reference-local ];
 
       nativeCheckInputs = [
         pkgs.python3Packages.pytest

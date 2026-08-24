@@ -1,4 +1,4 @@
-format_version = 1
+format_version = 2
 abi_version = 1
 protocol_version = 11
 
@@ -9,20 +9,98 @@ namespace = "reference"
 python_module = "wmfs_reference"
 
 [deployment]
-schema = "../schemas/wmfs-reference/reference.capnp"
-interface = "ReferencePlugin"
 root = ".."
 worker = "wmfs-reference-worker"
+local_provider = "wmfs_reference.kernels"
+bundled_namespace = "wmfs_reference"
+
+[lifecycle]
+initialize = true
+shutdown = true
+
+[configuration]
+schema_version = 1
+type = "object"
+description = "Initialization settings for the reference numerical plugin."
+additional_properties = false
+
+[configuration.properties.threads]
+type = "integer"
+description = "Maximum number of kernel threads."
+default = 1
+minimum = 1
+maximum = 64
+
+[configuration.properties.precision]
+type = "string"
+description = "Numerical precision policy for supported kernels."
+default = "balanced"
+enum = ["fast", "balanced", "accurate"]
+min_length = 4
+max_length = 8
+
+[configuration.properties.emit_diagnostics]
+type = "boolean"
+description = "Enable plugin diagnostic records when logging is available."
+default = false
+
+[configuration.properties.tags]
+type = "array"
+description = "Bounded labels attached to diagnostic records."
+default = []
+min_items = 0
+max_items = 8
+items = { type = "string", min_length = 1, max_length = 24 }
+
+[configuration.properties.solver]
+type = "object"
+description = "SVD solver controls."
+additional_properties = false
+required = ["algorithm"]
+
+[configuration.properties.solver.properties.algorithm]
+type = "string"
+description = "SVD algorithm family."
+enum = ["divideAndConquer", "qrIteration"]
+
+[configuration.properties.solver.properties.tolerance]
+type = "number"
+description = "Relative convergence tolerance."
+default = 1.0e-7
+minimum = 0.0
+maximum = 1.0
+
+[configuration.examples.conservative]
+threads = 1
+precision = "accurate"
+emit_diagnostics = false
+tags = ["production"]
+solver = { algorithm = "qrIteration", tolerance = 1.0e-10 }
+
+[configuration.examples.throughput]
+threads = 8
+precision = "fast"
+solver = { algorithm = "divideAndConquer" }
+
+[[enums]]
+name = "IndexOrder"
+values = ["rowMajor", "columnMajor"]
 
 [[operations]]
 id = 1
 name = "matmul"
 
+[[operations.dtype_variables]]
+name = "T"
+dtypes = ["float32", "float64", "int64", "uint8"]
+
 [[operations.inputs]]
 name = "a"
+dtype = { variable = "T" }
 
 [[operations.inputs]]
 name = "b"
+dtype = { variable = "T" }
 
 [[operations.outputs]]
 name = "result"
@@ -30,7 +108,7 @@ dimensions = [
   { input_axis = { input = 0, axis = 0 } },
   { input_axis = { input = 1, axis = 1 } },
 ]
-dtype = { input = 0 }
+dtype = { variable = "T" }
 
 [operations.vjp]
 operation_id = 4
@@ -42,8 +120,13 @@ input_gradients = [0, 1]
 id = 2
 name = "svd"
 
+[[operations.dtype_variables]]
+name = "T"
+dtypes = ["float32", "float64"]
+
 [[operations.inputs]]
 name = "a"
+dtype = { variable = "T" }
 
 [[operations.scalars]]
 name = "fullMatrices"
@@ -57,14 +140,14 @@ dimensions = [
   { input_axis = { input = 0, axis = 0 } },
   { select = { scalar = 0, when_true = { input_axis = { input = 0, axis = 0 } }, when_false = { minimum = { values = [{ input_axis = { input = 0, axis = 0 } }, { input_axis = { input = 0, axis = 1 } }] } } } },
 ]
-dtype = { input = 0 }
+dtype = { variable = "T" }
 
 [[operations.outputs]]
 name = "s"
 dimensions = [
   { minimum = { values = [{ input_axis = { input = 0, axis = 0 } }, { input_axis = { input = 0, axis = 1 } }] } },
 ]
-dtype = { input = 0 }
+dtype = { variable = "T" }
 
 [[operations.outputs]]
 name = "vh"
@@ -72,14 +155,19 @@ dimensions = [
   { select = { scalar = 0, when_true = { input_axis = { input = 0, axis = 1 } }, when_false = { minimum = { values = [{ input_axis = { input = 0, axis = 0 } }, { input_axis = { input = 0, axis = 1 } }] } } } },
   { input_axis = { input = 0, axis = 1 } },
 ]
-dtype = { input = 0 }
+dtype = { variable = "T" }
 
 [[operations]]
 id = 3
 name = "add_scalar"
 
+[[operations.dtype_variables]]
+name = "T"
+dtypes = ["float32", "float64", "int64", "uint8"]
+
 [[operations.inputs]]
 name = "a"
+dtype = { variable = "T" }
 
 [[operations.scalars]]
 name = "value"
@@ -100,37 +188,49 @@ id = 4
 name = "matmul_vjp"
 internal = true
 
+[[operations.dtype_variables]]
+name = "T"
+dtypes = ["float32", "float64", "int64", "uint8"]
+
 [[operations.inputs]]
 name = "a"
+dtype = { variable = "T" }
 
 [[operations.inputs]]
 name = "b"
+dtype = { variable = "T" }
 
 [[operations.inputs]]
 name = "resultCotangent"
+dtype = { variable = "T" }
 
 [[operations.outputs]]
 name = "aGradient"
 same_shape_as_input = 0
-dtype = { input = 0 }
+dtype = { variable = "T" }
 
 [[operations.outputs]]
 name = "bGradient"
 same_shape_as_input = 1
-dtype = { input = 1 }
+dtype = { variable = "T" }
 
 [[operations]]
 id = 5
 name = "add_scalar_vjp"
 internal = true
 
+[[operations.dtype_variables]]
+name = "T"
+dtypes = ["float32", "float64", "int64", "uint8"]
+
 [[operations.inputs]]
 name = "resultCotangent"
+dtype = { variable = "T" }
 
 [[operations.outputs]]
 name = "aGradient"
 same_shape_as_input = 0
-dtype = { input = 0 }
+dtype = { variable = "T" }
 
 [[operations]]
 id = 6
@@ -138,6 +238,13 @@ name = "nonzero"
 
 [[operations.inputs]]
 name = "a"
+dtype = { fixed = ["float32", "float64", "int64", "uint8"] }
+
+[[operations.scalars]]
+name = "order"
+kind = { enum = "IndexOrder" }
+required = false
+default = "rowMajor"
 
 [[operations.outputs]]
 name = "indices"

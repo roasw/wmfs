@@ -1,6 +1,8 @@
 import atexit
 import keyword
 import threading
+from collections.abc import Mapping
+from dataclasses import replace
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Protocol
@@ -10,8 +12,14 @@ import torch
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
 from wmfs.backends.local import LocalBackend
+from wmfs.configuration import (
+    EMPTY_CONFIGURATION_BYTES,
+    ConfigurationMetadata,
+    validate_and_canonicalize,
+)
+from wmfs.logging import DISABLED_LOGGING, LoggingOptions
 from wmfs.operations import python_parameter_name
-from wmfs.plugins import find_manifests
+from wmfs.plugins import PluginManifest, find_manifests
 from wmfs.registry import OperationMetadata, OperationRegistry
 from wmfs.tensors import Size, TensorFactory, normalize_shape
 from wmfs.transport.deadlines import (
@@ -68,6 +76,10 @@ class Runtime:
         self._backends = _initial_backends()
         self._backend_name: str | None = None
         self._registry = OperationRegistry()
+        self._manifests: dict[str, PluginManifest] = {}
+        self._plugin_configurations: dict[str, bytes] = {}
+        self._plugin_logging: dict[str, LoggingOptions] = {}
+        self._initialized_plugins: set[str] = set()
         self._operation_generation = 0
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
@@ -127,6 +139,116 @@ class Runtime:
             self._condition.wait_for(lambda: self._state == "open")
             return self._registry.operation(name)
 
+    def load_plugins(self, *plugin_directories: Path) -> None:
+        """Load manifests transactionally without importing or starting plugins.
+
+        This worker-free path enables configuration introspection and validation.
+        Configure loaded plugins before selecting an in-process backend or
+        discovering isolated workers.
+        """
+        manifests = find_manifests(list(plugin_directories))
+        registry = OperationRegistry()
+        for manifest in manifests:
+            registry.register(manifest.metadata)
+        _validate_public_operations(registry)
+        loaded = {manifest.name: manifest for manifest in manifests}
+        configurations = {name: EMPTY_CONFIGURATION_BYTES for name in loaded}
+        with self._condition:
+            self._ensure_open()
+            if self._backend_name in {"local", "bundled"}:
+                initialize = getattr(self._backends[self._backend_name], "initialize")
+                initialize(
+                    tuple(
+                        replace(
+                            manifest, configuration_bytes=configurations[manifest.name]
+                        )
+                        for manifest in manifests
+                    ),
+                    registry,
+                )
+            self._registry = registry
+            self._manifests = loaded
+            self._plugin_configurations = configurations
+            self._plugin_logging = {name: DISABLED_LOGGING for name in loaded}
+            self._initialized_plugins.clear()
+            self._operation_generation += 1
+
+    def list_configurable(
+        self, plugin: str | None = None
+    ) -> tuple[ConfigurationMetadata, ...] | ConfigurationMetadata:
+        """Return immutable manifest configuration metadata without initialization.
+
+        Args:
+            plugin: Optional loaded plugin name. When omitted, return metadata
+                for every configurable plugin in name order.
+
+        Raises:
+            KeyError: If the named plugin is not loaded.
+            ValueError: If the named plugin has no configuration schema.
+        """
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            if plugin is not None:
+                manifest = self._manifest_locked(plugin)
+                if manifest.configuration is None:
+                    raise ValueError(f"Plugin {plugin!r} is not configurable")
+                return manifest.configuration
+            return tuple(
+                manifest.configuration
+                for name, manifest in sorted(self._manifests.items())
+                if manifest.configuration is not None
+            )
+
+    def validate_config(
+        self, plugin: str, config: Mapping[str, object] | None
+    ) -> bytes:
+        """Validate configuration and return canonical UTF-8 JSON bytes.
+
+        Defaults described by metadata are not inserted. ``None`` and an empty
+        mapping both return the canonical bytes ``b"{}"``.
+        """
+        with self._condition:
+            self._condition.wait_for(lambda: self._state == "open")
+            manifest = self._manifest_locked(plugin)
+            return validate_and_canonicalize(
+                config, manifest.configuration, plugin=plugin
+            )
+
+    def configure_plugin(
+        self,
+        plugin: str,
+        config: Mapping[str, object] | None = None,
+        *,
+        logging: LoggingOptions | None = None,
+    ) -> None:
+        """Configure immutable initialization data and logging for a plugin.
+
+        Args:
+            plugin: Loaded plugin name.
+            config: Configuration mapping, or ``None`` for canonical ``{}``.
+            logging: Session logging selection. Omission preserves the current
+                selection, which defaults to disabled.
+
+        Raises:
+            RuntimeError: If the plugin has already initialized.
+            ValueError: If configuration or logging values are invalid.
+        """
+        with self._condition:
+            self._ensure_open()
+            manifest = self._manifest_locked(plugin)
+            if plugin in self._initialized_plugins:
+                raise RuntimeError(
+                    f"Configure plugin {plugin!r} before it is initialized"
+                )
+            encoded = validate_and_canonicalize(
+                config, manifest.configuration, plugin=plugin
+            )
+            self._plugin_configurations[plugin] = encoded
+            if logging is not None:
+                if not isinstance(logging, LoggingOptions):
+                    raise TypeError("logging must be a LoggingOptions value")
+                self._plugin_logging[plugin] = logging
+
     def discover_plugins(self, *plugin_directories: Path) -> None:
         """Discover plugins and retain one validated worker session per plugin.
 
@@ -142,6 +264,19 @@ class Runtime:
             self._accept_work()
         try:
             manifests = find_manifests(list(plugin_directories))
+            with self._condition:
+                configured = dict(self._plugin_configurations)
+                loaded = dict(self._manifests)
+            manifests = tuple(
+                replace(
+                    manifest,
+                    configuration_bytes=_configuration_for_manifest(
+                        manifest, loaded.get(manifest.name), configured
+                    ),
+                    logging=self._plugin_logging.get(manifest.name, DISABLED_LOGGING),
+                )
+                for manifest in manifests
+            )
             registry, replacement = IsolatedBackend.discover(
                 manifests,
                 memory_mode=self._memory_mode,
@@ -157,6 +292,15 @@ class Runtime:
             with self._condition:
                 previous = self._backends.get("isolated")
                 self._registry = registry
+                self._manifests = {manifest.name: manifest for manifest in manifests}
+                self._plugin_configurations = {
+                    manifest.name: manifest.configuration_bytes
+                    for manifest in manifests
+                }
+                self._plugin_logging = {
+                    manifest.name: manifest.logging for manifest in manifests
+                }
+                self._initialized_plugins = set(self._manifests)
                 self._backends["isolated"] = replacement
                 if self._backend_name == "isolated":
                     self._backend_name = None
@@ -212,7 +356,7 @@ class Runtime:
 
         Args:
             startup: Worker startup and handshake timeout in seconds.
-            request: Operation RPC timeout in seconds.
+            request: Operation completion timeout in seconds.
             fd_transfer: Buffer-control acknowledgement timeout in seconds.
             shutdown: Graceful worker shutdown timeout in seconds.
             kill_grace: Timeout after termination before forcing a kill.
@@ -244,6 +388,8 @@ class Runtime:
                     f"Unknown backend {name!r}; available backends: {available}"
                 )
             previous_names = self._operation_names_locked()
+            if name in {"local", "bundled"}:
+                self._initialize_in_process_backend_locked(name)
             self._backend_name = name
             if self._operation_names_locked() != previous_names:
                 self._operation_generation += 1
@@ -337,6 +483,7 @@ class Runtime:
             self._accept_work()
             try:
                 backend = self._selected_backend_locked()
+                self._mark_operation_plugin_initialized_locked(operation)
             except BaseException:
                 self._active_work -= 1
                 self._condition.notify_all()
@@ -371,6 +518,7 @@ class Runtime:
                 raise RuntimeError(f"Operation {operation!r} is no longer registered")
             try:
                 backend = self._selected_backend_locked()
+                self._mark_operation_plugin_initialized_locked(operation)
             except BaseException:
                 self._active_work -= 1
                 self._condition.notify_all()
@@ -443,6 +591,10 @@ class Runtime:
             self._backends = replacements
             self._backend_name = None
             self._registry = OperationRegistry()
+            self._manifests = {}
+            self._plugin_configurations = {}
+            self._plugin_logging = {}
+            self._initialized_plugins = set()
             self._operation_generation += 1
             self._memory_mode = "pooled"
             self._arena_bytes = None
@@ -482,12 +634,22 @@ class Runtime:
         )
 
     def _backend_operation(self, operation: str, backend: Backend) -> str:
-        if backend is self._backends.get("isolated"):
-            return operation
-        try:
-            return self._registry.operation(operation).name
-        except KeyError:
-            return operation
+        return operation
+
+    def _initialize_in_process_backend_locked(self, name: str) -> None:
+        initialize = getattr(self._backends[name], "initialize")
+        manifests = tuple(
+            replace(
+                manifest,
+                configuration_bytes=self._plugin_configurations.get(
+                    manifest.name, EMPTY_CONFIGURATION_BYTES
+                ),
+                logging=self._plugin_logging.get(manifest.name, DISABLED_LOGGING),
+            )
+            for manifest in self._manifests.values()
+        )
+        initialize(manifests, self._registry)
+        self._initialized_plugins.update(manifest.name for manifest in manifests)
 
     def _selected_backend_locked(self) -> Backend:
         if self._backend_name is None:
@@ -495,6 +657,20 @@ class Runtime:
                 "No execution backend is selected; call runtime.use_backend() first"
             )
         return self._backends[self._backend_name]
+
+    def _manifest_locked(self, plugin: str) -> PluginManifest:
+        try:
+            return self._manifests[plugin]
+        except KeyError:
+            raise KeyError(f"Plugin {plugin!r} is not loaded") from None
+
+    def _mark_operation_plugin_initialized_locked(self, operation: str) -> None:
+        try:
+            self._initialized_plugins.add(
+                self._registry.plugin_for_operation(operation)
+            )
+        except KeyError:
+            pass
 
 
 def _initial_backends() -> dict[str, Backend]:
@@ -504,10 +680,27 @@ def _initial_backends() -> dict[str, Backend]:
     return backends
 
 
+def _configuration_for_manifest(
+    manifest: PluginManifest,
+    loaded: PluginManifest | None,
+    configurations: dict[str, bytes],
+) -> bytes:
+    encoded = configurations.get(manifest.name, EMPTY_CONFIGURATION_BYTES)
+    if encoded == EMPTY_CONFIGURATION_BYTES or loaded is None:
+        return EMPTY_CONFIGURATION_BYTES
+    if loaded.configuration is None or manifest.configuration is None:
+        return EMPTY_CONFIGURATION_BYTES
+    if loaded.configuration.fingerprint != manifest.configuration.fingerprint:
+        return EMPTY_CONFIGURATION_BYTES
+    return encoded
+
+
 _RESERVED_OPERATION_NAMES = {
+    "ConfigurationMetadata",
     "__version__",
     "api",
     "empty",
+    "list_configurable",
     "ones",
     "ops",
     "randn",

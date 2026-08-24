@@ -1,52 +1,31 @@
 #include "wmfs/native/session.hpp"
-#include "wmfs/protocol/ring.h"
+#include "wmfs/protocol/control.h"
 #include "wmfs/unique_fd.hpp"
 
-#include <capnp/message.h>
-#include <capnp/rpc-twoparty.h>
-#include <capnp/serialize.h>
-#include <kj/async-io.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <fcntl.h>
+
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <exception>
-#include <functional>
 #include <limits>
 #include <mutex>
-#include <optional>
-#include <semaphore>
 #include <stdexcept>
-#include <thread>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
-
-#include <wmfs/runtime.capnp.h>
-#include <wmfs/tensor.capnp.h>
 
 namespace wmfs::native {
 namespace {
 
-template <typename Reader>
-std::vector<std::uint8_t> serialize_reader(Reader reader) {
-    capnp::MallocMessageBuilder message;
-    message.setRoot(reader);
-    auto words = capnp::messageToFlatArray(message);
-    auto bytes = words.asBytes();
-    return {bytes.begin(), bytes.end()};
-}
-
 struct MappingKey {
     std::uint64_t buffer_id;
     std::uint32_t generation;
-
     bool operator==(const MappingKey &) const = default;
 };
 
@@ -57,815 +36,352 @@ struct MappingKeyHash {
     }
 };
 
-std::chrono::nanoseconds timeout_from_seconds(double seconds) {
-    const auto nanoseconds = static_cast<long double>(seconds) * 1'000'000'000;
-    if (!std::isfinite(seconds) || seconds <= 0 ||
-        nanoseconds > std::numeric_limits<std::int64_t>::max()) {
-        throw std::invalid_argument("Native transport deadline must be finite, "
-                                    "positive, and convertible");
-    }
-    return std::chrono::nanoseconds(
-        std::max<std::int64_t>(1, static_cast<std::int64_t>(nanoseconds)));
-}
-
-timeval timeval_from_timeout(std::chrono::nanoseconds timeout) {
-    const auto seconds =
-        std::chrono::duration_cast<std::chrono::seconds>(timeout);
-    const auto microseconds =
-        std::chrono::duration_cast<std::chrono::microseconds>(timeout -
-                                                              seconds);
-    using TimevalSeconds = decltype(timeval{}.tv_sec);
-    using TimevalMicroseconds = decltype(timeval{}.tv_usec);
-    if (seconds.count() > std::numeric_limits<TimevalSeconds>::max()) {
+timeval timeout(double seconds) {
+    if (!std::isfinite(seconds) || seconds <= 0)
         throw std::invalid_argument(
-            "Native FD transfer deadline is not convertible to timeval");
-    }
-    return timeval{static_cast<TimevalSeconds>(seconds.count()),
-                   static_cast<TimevalMicroseconds>(
-                       std::max<std::int64_t>(1, microseconds.count()))};
+            "Native transport deadline must be positive");
+    const auto integral = static_cast<time_t>(seconds);
+    return timeval{integral,
+                   static_cast<suseconds_t>((seconds - integral) * 1'000'000)};
 }
 
-void set_socket_timeout(int fd, std::chrono::nanoseconds duration) {
-    const auto timeout = timeval_from_timeout(duration);
-    if (::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) <
-            0 ||
-        ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) <
-            0) {
-        throw std::runtime_error("Failed to configure native control timeout");
-    }
-}
-
-::DType dtype_from_native(TensorDType dtype) {
-    switch (dtype) {
-    case TensorDType::float32:
-        return ::DType::FLOAT32;
-    case TensorDType::float64:
-        return ::DType::FLOAT64;
-    case TensorDType::int64:
-        return ::DType::INT64;
-    case TensorDType::uint8:
-        return ::DType::UINT8;
-    }
-    throw std::invalid_argument("Unsupported native tensor dtype");
-}
-
-TensorDType dtype_to_native(::DType dtype) {
-    switch (dtype) {
-    case ::DType::FLOAT32:
-        return TensorDType::float32;
-    case ::DType::FLOAT64:
-        return TensorDType::float64;
-    case ::DType::INT64:
-        return TensorDType::int64;
-    case ::DType::UINT8:
-        return TensorDType::uint8;
-    }
-    throw std::runtime_error("Worker planned an unsupported tensor dtype");
-}
-
-void write_descriptor(::TensorDescriptor::Builder target,
-                      const TensorDescriptor &source) {
-    target.setBufferId(source.buffer_id);
-    target.setGeneration(source.generation);
-    target.setAllocationId(source.allocation_id);
-    target.setOffset(source.offset);
-    target.setByteLength(source.byte_length);
-    target.setDtype(dtype_from_native(source.dtype));
-    auto shape = target.initShape(source.shape.size());
-    for (std::size_t index = 0; index < source.shape.size(); ++index) {
-        shape.set(index, source.shape[index]);
-    }
-    auto strides = target.initStrides(source.strides.size());
-    for (std::size_t index = 0; index < source.strides.size(); ++index) {
-        strides.set(index, source.strides[index]);
-    }
-}
-
-std::runtime_error kj_error(const kj::Exception &error) {
-    return std::runtime_error(error.getDescription().cStr());
+void set_timeout(int fd, double seconds) {
+    const auto flags = ::fcntl(fd, F_GETFL);
+    if (flags < 0 || ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0)
+        throw std::runtime_error(
+            "Cannot configure blocking native control socket");
+    const auto value = timeout(seconds);
+    if (::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) < 0 ||
+        ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value)) < 0)
+        throw std::runtime_error("Cannot set native fixed-protocol deadline");
 }
 
 } // namespace
 
 struct Session::Impl {
-    struct Worker {
-        explicit Worker(UniqueFd rpc_fd, UniqueFd control_fd,
-                        std::uint64_t expected_fingerprint,
-                        std::uint64_t expected_ring_generation,
-                        std::uint32_t expected_ring_capacity,
-                        std::chrono::nanoseconds startup_timeout,
-                        std::chrono::nanoseconds request_timeout,
-                        std::chrono::nanoseconds fd_transfer_timeout)
-            : control_fd(std::move(control_fd)), io(kj::setupAsyncIo()),
-              stream(io.lowLevelProvider->wrapSocketFd(
-                  kj::AutoCloseFd(rpc_fd.release()))),
-              client(*stream), plugin(client.bootstrap().castAs<::Plugin>()),
-              request_timeout(request_timeout) {
-            set_socket_timeout(this->control_fd.get(), fd_transfer_timeout);
-            auto version =
-                io.provider->getTimer()
-                    .timeoutAfter(startup_timeout.count() * kj::NANOSECONDS,
-                                  plugin.getProtocolVersionRequest().send())
-                    .wait(io.waitScope);
-            if (version.getVersion() != PROTOCOL_VERSION) {
-                throw std::runtime_error(
-                    "Worker protocol does not match native runtime");
-            }
-            if (expected_ring_generation != 0) {
-                auto response =
-                    io.provider->getTimer()
-                        .timeoutAfter(startup_timeout.count() * kj::NANOSECONDS,
-                                      plugin.getRingHandshakeRequest().send())
-                        .wait(io.waitScope);
-                auto ring = response.getRing();
-                if (ring.getAbiMajor() != WMFS_RING_ABI_MAJOR ||
-                    ring.getAbiMinor() != WMFS_RING_ABI_MINOR ||
-                    ring.getHeaderSize() != WMFS_RING_HEADER_SIZE ||
-                    ring.getRecordSize() != WMFS_RING_RECORD_SIZE ||
-                    ring.getCapacity() != expected_ring_capacity ||
-                    ring.getGeneration() != expected_ring_generation ||
-                    (ring.getCapabilities() & 3) != 3) {
-                    throw std::runtime_error(
-                        "Worker ring handshake does not match native runtime");
-                }
-            }
-            auto metadata =
-                io.provider->getTimer()
-                    .timeoutAfter(startup_timeout.count() * kj::NANOSECONDS,
-                                  plugin.getMetadataRequest().send())
-                    .wait(io.waitScope);
-            metadata_bytes = serialize_reader(metadata.getMetadata());
-            if (expected_fingerprint != 0 &&
-                metadata.getMetadata().getFingerprint() !=
-                    expected_fingerprint) {
-                throw std::runtime_error(
-                    "Worker metadata does not match discovered plugin");
-            }
-        }
-
-        std::vector<std::uint8_t> environment() {
-            auto response =
-                io.provider->getTimer()
-                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
-                                  plugin.getEnvironmentRequest().send())
-                    .wait(io.waitScope);
-            return serialize_reader(response.getEnvironment());
-        }
-
-        void ping(std::uint64_t nonce) {
-            auto request = plugin.pingRequest();
-            request.setNonce(nonce);
-            auto response =
-                io.provider->getTimer()
-                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
-                                  request.send())
-                    .wait(io.waitScope);
-            if (response.getNonce() != nonce) {
-                throw std::runtime_error(
-                    "Worker returned an invalid ping response");
-            }
-        }
-
-        std::vector<std::uint8_t> metadata_bytes;
-
-        void transfer_buffers(const std::vector<Mapping> &entries,
-                              const std::vector<bool> &maps,
-                              const std::vector<int> &fds,
-                              std::uint64_t transfer_id) {
-            capnp::MallocMessageBuilder message;
-            auto transfer = message.initRoot<::BufferTransfer>();
-            transfer.setTransferId(transfer_id);
-            auto builders = transfer.initEntries(entries.size());
-            for (std::size_t index = 0; index < entries.size(); ++index) {
-                const auto &mapping = entries[index];
-                auto entry = builders[index];
-                entry.setInvocationId(maps[index] ? mapping.invocation_id : 0);
-                entry.setBufferId(mapping.buffer_id);
-                entry.setGeneration(mapping.generation);
-                entry.setAllocationId(mapping.allocation_id);
-                entry.setByteLength(mapping.byte_length);
-                entry.setWritable(maps[index] && mapping.writable);
-                entry.setArena(maps[index] && mapping.arena);
-                if (maps[index])
-                    entry.setMap();
-                else
-                    entry.setRetire();
-            }
-            send_control(message, transfer_id, fds);
-        }
-
-        void write_invocation(::KnownInvocation::Builder invocation,
-                              std::uint64_t invocation_id,
-                              std::uint32_t operation_id,
-                              const TensorDescriptors &inputs,
-                              const TensorDescriptors &outputs,
-                              const std::vector<ScalarArgument> &scalars) {
-            invocation.setInvocationId(invocation_id);
-            invocation.setOperationId(operation_id);
-            auto input_builders = invocation.initInputs(inputs.size());
-            for (std::size_t index = 0; index < inputs.size(); ++index) {
-                write_descriptor(input_builders[index], *inputs[index]);
-            }
-            auto output_builders = invocation.initOutputs(outputs.size());
-            for (std::size_t index = 0; index < outputs.size(); ++index) {
-                write_descriptor(output_builders[index], *outputs[index]);
-            }
-            auto scalar_builders = invocation.initScalars(scalars.size());
-            for (std::size_t index = 0; index < scalars.size(); ++index) {
-                const auto &source = scalars[index];
-                auto target = scalar_builders[index];
-                target.setParameter(source.parameter);
-                switch (source.kind) {
-                case ScalarKind::boolean:
-                    target.setBoolean(source.boolean_value);
-                    break;
-                case ScalarKind::float64:
-                    target.setFloat64(source.float64_value);
-                    break;
-                case ScalarKind::int64:
-                    target.setInt64(source.int64_value);
-                    break;
-                case ScalarKind::text:
-                    target.setText(source.text_value);
-                    break;
-                }
-            }
-        }
-
-        static InvocationOutcome
-        read_outcome(::InvocationOutcome::Reader outcome) {
-            if (outcome.isSuccess())
-                return {};
-            if (!outcome.isOperationError())
-                throw std::runtime_error("Worker returned an invalid outcome");
-            auto error = outcome.getOperationError();
-            return {error.getType(), error.getMessage()};
-        }
-
-        InvocationOutcome invoke(std::uint64_t invocation_id,
-                                 std::uint32_t operation_id,
-                                 const TensorDescriptors &inputs,
-                                 const TensorDescriptors &outputs,
-                                 const std::vector<ScalarArgument> &scalars) {
-            auto request = plugin.invokeKnownRequest();
-            write_invocation(request.initInvocation(), invocation_id,
-                             operation_id, inputs, outputs, scalars);
-            auto response =
-                io.provider->getTimer()
-                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
-                                  request.send())
-                    .wait(io.waitScope);
-            return read_outcome(response.getOutcome());
-        }
-
-        InvocationProfile
-        invoke_profiled(std::uint64_t invocation_id, std::uint32_t operation_id,
-                        const TensorDescriptors &inputs,
-                        const TensorDescriptors &outputs,
-                        const std::vector<ScalarArgument> &scalars) {
-            auto request = plugin.invokeKnownProfiledRequest();
-            write_invocation(request.initInvocation(), invocation_id,
-                             operation_id, inputs, outputs, scalars);
-            const auto rpc_started = std::chrono::steady_clock::now();
-            auto response =
-                io.provider->getTimer()
-                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
-                                  request.send())
-                    .wait(io.waitScope);
-            const auto rpc_ns =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - rpc_started)
-                    .count();
-            const auto worker = response.getMetrics();
-            return InvocationProfile{
-                .outcome = read_outcome(response.getOutcome()),
-                .rpc_ns = static_cast<std::uint64_t>(rpc_ns),
-                .worker_input_views_ns = worker.getInputViewsNs(),
-                .worker_output_views_ns = worker.getOutputViewsNs(),
-                .worker_dispatch_ns = worker.getDispatchNs(),
-                .worker_kernel_ns = worker.getKernelNs(),
-            };
-        }
-
-        OutputPlanningResult
-        plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
-                     const TensorDescriptors &inputs,
-                     const std::vector<ScalarArgument> &scalars) {
-            auto request = plugin.planOutputsRequest();
-            auto invocation = request.initInvocation();
-            invocation.setInvocationId(invocation_id);
-            invocation.setOperationId(operation_id);
-            auto input_builders = invocation.initInputs(inputs.size());
-            for (std::size_t index = 0; index < inputs.size(); ++index)
-                write_descriptor(input_builders[index], *inputs[index]);
-            auto scalar_builders = invocation.initScalars(scalars.size());
-            for (std::size_t index = 0; index < scalars.size(); ++index) {
-                const auto &source = scalars[index];
-                auto target = scalar_builders[index];
-                target.setParameter(source.parameter);
-                switch (source.kind) {
-                case ScalarKind::boolean:
-                    target.setBoolean(source.boolean_value);
-                    break;
-                case ScalarKind::float64:
-                    target.setFloat64(source.float64_value);
-                    break;
-                case ScalarKind::int64:
-                    target.setInt64(source.int64_value);
-                    break;
-                case ScalarKind::text:
-                    target.setText(source.text_value);
-                    break;
-                }
-            }
-            auto response =
-                io.provider->getTimer()
-                    .timeoutAfter(request_timeout.count() * kj::NANOSECONDS,
-                                  request.send())
-                    .wait(io.waitScope);
-            OutputPlanningResult result;
-            result.outcome = read_outcome(response.getOutcome());
-            if (!result.outcome.error_type.empty())
-                return result;
-            for (auto item : response.getOutputs()) {
-                std::vector<std::uint64_t> shape;
-                for (auto dimension : item.getShape())
-                    shape.push_back(dimension);
-                result.outputs.push_back({item.getOutput(), std::move(shape),
-                                          dtype_to_native(item.getDtype())});
-            }
-            return result;
-        }
-
-        void send_control(capnp::MessageBuilder &message,
-                          std::uint64_t transfer_id,
-                          const std::vector<int> &fds) {
-            auto words = capnp::messageToFlatArray(message);
-            auto bytes = words.asBytes();
-            iovec io_vector{const_cast<kj::byte *>(bytes.begin()),
-                            bytes.size()};
-            msghdr header{};
-            header.msg_iov = &io_vector;
-            header.msg_iovlen = 1;
-            std::vector<char> ancillary;
-            if (!fds.empty()) {
-                ancillary.resize(CMSG_SPACE(sizeof(int) * fds.size()));
-                header.msg_control = ancillary.data();
-                header.msg_controllen = ancillary.size();
-                auto *control = CMSG_FIRSTHDR(&header);
-                control->cmsg_level = SOL_SOCKET;
-                control->cmsg_type = SCM_RIGHTS;
-                control->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
-                std::memcpy(CMSG_DATA(control), fds.data(),
-                            sizeof(int) * fds.size());
-            }
-            ssize_t sent;
-            do {
-                sent = ::sendmsg(control_fd.get(), &header, MSG_NOSIGNAL);
-            } while (sent < 0 && errno == EINTR);
-            if (sent < 0 || static_cast<std::size_t>(sent) != bytes.size()) {
-                throw std::runtime_error(
-                    "Failed to send buffer control message");
-            }
-
-            alignas(capnp::word) std::array<std::byte, 64 * 1024> response{};
-            ssize_t received;
-            do {
-                received = ::recv(control_fd.get(), response.data(),
-                                  response.size(), 0);
-            } while (received < 0 && errno == EINTR);
-            if (received <= 0 || received % sizeof(capnp::word) != 0) {
-                throw std::runtime_error(
-                    "Invalid buffer control acknowledgement");
-            }
-            auto word_array = kj::arrayPtr(
-                reinterpret_cast<const capnp::word *>(response.data()),
-                static_cast<std::size_t>(received) / sizeof(capnp::word));
-            capnp::FlatArrayMessageReader reader(word_array);
-            auto acknowledgement = reader.getRoot<::BufferTransferAck>();
-            if (acknowledgement.getTransferId() != transfer_id) {
-                throw std::runtime_error(
-                    "Worker acknowledged an unexpected buffer request");
-            }
-            if (acknowledgement.which() == ::BufferTransferAck::ERROR) {
-                throw std::runtime_error(
-                    "Worker rejected buffer request: " +
-                    std::string(acknowledgement.getError().cStr()));
-            }
-        }
-
-        UniqueFd control_fd;
-        kj::AsyncIoContext io;
-        kj::Own<kj::AsyncIoStream> stream;
-        capnp::TwoPartyClient client;
-        ::Plugin::Client plugin;
-        std::chrono::nanoseconds request_timeout;
-    };
-
-    struct Command {
-        Command(void *callable, void (*execute)(void *, Worker &))
-            : callable(callable), execute(execute) {}
-
-        void *callable;
-        void (*execute)(void *, Worker &);
-        std::exception_ptr error;
-        std::binary_semaphore complete{0};
-    };
-
-    Impl(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
-         std::uint64_t expected_ring_generation,
-         std::uint32_t expected_ring_capacity, double startup_timeout_seconds,
-         double request_timeout_seconds, double fd_transfer_timeout_seconds)
-        : rpc_fd(rpc_fd), control_fd(control_fd),
-          interrupt_rpc_fd(this->rpc_fd.duplicate_cloexec()),
-          interrupt_control_fd(this->control_fd.duplicate_cloexec()),
-          expected_fingerprint(expected_fingerprint),
-          expected_ring_generation(expected_ring_generation),
-          expected_ring_capacity(expected_ring_capacity),
-          startup_timeout(timeout_from_seconds(startup_timeout_seconds)),
-          request_timeout(timeout_from_seconds(request_timeout_seconds)),
-          fd_transfer_timeout(
-              timeout_from_seconds(fd_transfer_timeout_seconds)),
-          thread([this] { run(); }) {
-        startup_complete.acquire();
-        if (startup_error) {
-            thread.join();
-            std::rethrow_exception(startup_error);
-        }
+    Impl(int lifecycle_fd, int fd_control, std::uint64_t,
+         std::uint64_t ring_generation, std::uint32_t, double,
+         double request_timeout, double fd_timeout)
+        : lifecycle(lifecycle_fd), control(fd_control),
+          generation(ring_generation) {
+        set_timeout(lifecycle.get(), request_timeout);
+        set_timeout(control.get(), fd_timeout);
     }
 
-    ~Impl() { close(); }
-
-    template <typename Function> void submit(Function &&function) {
-        std::unique_lock serial(submit_mutex);
-        if (stopping.load(std::memory_order_acquire)) {
-            throw std::runtime_error("Native worker session is closed");
-        }
-
-        using Callable = std::decay_t<Function>;
-        Callable callable(std::forward<Function>(function));
-        Command current(&callable, [](void *value, Worker &worker) {
-            (*static_cast<Callable *>(value))(worker);
-        });
-        command = &current;
-        command_ready.release();
-        current.complete.acquire();
-        command = nullptr;
-        if (current.error) {
-            std::rethrow_exception(current.error);
-        }
-    }
-
-    void run() {
-        std::optional<Worker> worker;
+    ~Impl() {
         try {
-            worker.emplace(std::move(rpc_fd), std::move(control_fd),
-                           expected_fingerprint, expected_ring_generation,
-                           expected_ring_capacity, startup_timeout,
-                           request_timeout, fd_transfer_timeout);
-        } catch (const kj::Exception &error) {
-            try {
-                startup_error = std::make_exception_ptr(kj_error(error));
-            } catch (...) {
-                startup_error = std::current_exception();
+            close();
+        } catch (...) {
+        }
+    }
+
+    void transfer(const std::vector<Mapping> &values,
+                  const std::vector<bool> &maps, std::vector<int> fds) {
+        if (values.empty() || values.size() > WMFS_CONTROL_MAX_FD_ENTRIES)
+            throw std::invalid_argument("Native FD batch size is invalid");
+        std::vector<wmfs_control_fd_entry_v1> entries(values.size());
+        std::uint16_t fd_count = 0;
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            const auto &value = values[index];
+            auto &entry = entries[index];
+            entry.kind = maps[index] ? WMFS_CONTROL_FD_ENTRY_MAP
+                                     : WMFS_CONTROL_FD_ENTRY_RETIRE;
+            entry.flags =
+                maps[index]
+                    ? (value.writable ? WMFS_CONTROL_FD_FLAG_WRITABLE : 0) |
+                          (value.arena ? WMFS_CONTROL_FD_FLAG_ARENA : 0)
+                    : 0;
+            entry.buffer_id = value.buffer_id;
+            entry.generation = value.generation;
+            entry.allocation_id = value.allocation_id;
+            entry.invocation_id = maps[index] ? value.invocation_id : 0;
+            entry.byte_length = value.byte_length;
+            fd_count += maps[index];
+        }
+        const auto transfer_id = next_transfer++;
+        const auto request_id = next_request++;
+        wmfs_control_fd_batch_v1 batch{
+            transfer_id,
+            generation,
+            static_cast<std::uint16_t>(values.size()),
+            fd_count,
+            WMFS_CONTROL_FD_BATCH_FLAG_TRANSACTIONAL,
+            0};
+        std::array<std::uint8_t, WMFS_CONTROL_MAX_PACKET_BYTES> packet{};
+        wmfs_control_mutable_bytes_v1 output{packet.data(), packet.size(), 0};
+        if (wmfs_control_encode_fd_batch_v1(request_id, &batch, entries.data(),
+                                            &output) != 0)
+            throw std::runtime_error("Cannot encode native FD batch");
+        iovec vector{packet.data(), output.size};
+        msghdr message{};
+        message.msg_iov = &vector;
+        message.msg_iovlen = 1;
+        std::vector<std::byte> ancillary;
+        if (!fds.empty()) {
+            ancillary.resize(CMSG_SPACE(sizeof(int) * fds.size()));
+            message.msg_control = ancillary.data();
+            message.msg_controllen = ancillary.size();
+            auto *item = CMSG_FIRSTHDR(&message);
+            item->cmsg_level = SOL_SOCKET;
+            item->cmsg_type = SCM_RIGHTS;
+            item->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+            std::memcpy(CMSG_DATA(item), fds.data(), sizeof(int) * fds.size());
+        }
+        ssize_t sent;
+        do {
+            sent = ::sendmsg(control.get(), &message, MSG_NOSIGNAL);
+        } while (sent < 0 && errno == EINTR);
+        for (int fd : fds)
+            ::close(fd);
+        if (sent < 0 || static_cast<std::size_t>(sent) != output.size)
+            throw std::runtime_error("Cannot send native FD batch");
+        ssize_t received;
+        do {
+            received = ::recv(control.get(), packet.data(), packet.size(), 0);
+        } while (received < 0 && errno == EINTR);
+        if (received <= 0)
+            throw std::runtime_error(
+                "Native FD acknowledgement was not received");
+        wmfs_control_fd_ack_v1 acknowledgement{};
+        wmfs_control_bytes_v1 error{};
+        std::uint64_t response_id = 0;
+        const wmfs_control_bytes_v1 response{
+            packet.data(), static_cast<std::size_t>(received)};
+        if (wmfs_control_decode_fd_ack_v1(response, &response_id,
+                                          &acknowledgement, &error) != 0 ||
+            response_id != request_id ||
+            acknowledgement.transfer_id != transfer_id ||
+            acknowledgement.session_generation != generation)
+            throw std::runtime_error("Worker rejected native FD batch");
+        if (acknowledgement.status != WMFS_CONTROL_STATUS_OK)
+            throw std::runtime_error(
+                "Worker rejected native FD batch: " +
+                std::string(reinterpret_cast<const char *>(error.data),
+                            error.size));
+    }
+
+    std::size_t transfer_batched(const std::vector<Mapping> &values,
+                                 const std::vector<bool> &maps,
+                                 std::vector<int> fds) {
+        std::size_t fd_index = 0;
+        std::size_t batches = 0;
+        try {
+            for (std::size_t offset = 0; offset < values.size();
+                 offset += WMFS_CONTROL_MAX_FD_ENTRIES) {
+                const auto end = std::min<std::size_t>(
+                    values.size(), offset + WMFS_CONTROL_MAX_FD_ENTRIES);
+                std::vector<Mapping> batch_values(values.begin() + offset,
+                                                  values.begin() + end);
+                std::vector<bool> batch_maps(maps.begin() + offset,
+                                             maps.begin() + end);
+                const auto count = static_cast<std::size_t>(
+                    std::count(batch_maps.begin(), batch_maps.end(), true));
+                std::vector<int> batch_fds(fds.begin() + fd_index,
+                                           fds.begin() + fd_index + count);
+                fd_index += count;
+                transfer(batch_values, batch_maps, std::move(batch_fds));
+                ++batches;
             }
         } catch (...) {
-            startup_error = std::current_exception();
+            for (; fd_index < fds.size(); ++fd_index)
+                ::close(fds[fd_index]);
+            throw;
         }
-        startup_complete.release();
-        if (!worker)
-            return;
+        return batches;
+    }
 
-        while (true) {
-            command_ready.acquire();
-            auto *current = command;
-            if (current == nullptr) {
-                return;
-            }
-            try {
-                current->execute(current->callable, *worker);
-            } catch (const kj::Exception &error) {
-                try {
-                    current->error = std::make_exception_ptr(kj_error(error));
-                } catch (...) {
-                    current->error = std::current_exception();
-                }
-            } catch (...) {
-                current->error = std::current_exception();
-            }
-            current->complete.release();
-        }
+    void lifecycle_round_trip(std::uint16_t request_kind,
+                              std::uint16_t response_kind) {
+        std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE> packet{};
+        const auto request_id = next_request++;
+        wmfs_control_mutable_bytes_v1 output{packet.data(), packet.size(), 0};
+        if (wmfs_control_encode_empty_v1(request_kind, request_id, &output) !=
+            0)
+            throw std::runtime_error("Cannot encode native lifecycle request");
+        ssize_t sent;
+        do {
+            sent = ::send(lifecycle.get(), packet.data(), output.size,
+                          MSG_NOSIGNAL);
+        } while (sent < 0 && errno == EINTR);
+        if (sent != static_cast<ssize_t>(output.size))
+            throw std::runtime_error("Cannot send native lifecycle request");
+        ssize_t received;
+        do {
+            received = ::recv(lifecycle.get(), packet.data(), packet.size(), 0);
+        } while (received < 0 && errno == EINTR);
+        std::uint64_t response_id = 0;
+        const wmfs_control_bytes_v1 response{
+            packet.data(),
+            received > 0 ? static_cast<std::size_t>(received) : 0};
+        const auto decoded =
+            received > 0 ? wmfs_control_decode_empty_v1(response, response_kind,
+                                                        &response_id)
+                         : -1;
+        if (received <= 0 || decoded != 0 || response_id != request_id)
+            throw std::runtime_error(
+                "Invalid native lifecycle response (bytes=" +
+                std::to_string(received) +
+                ", decode=" + std::to_string(decoded) +
+                ", request=" + std::to_string(request_id) +
+                ", response=" + std::to_string(response_id) + ", errno=" +
+                std::to_string(errno) + ":" + std::strerror(errno) + ")");
     }
 
     void close() {
-        std::lock_guard closing(close_mutex);
-        if (stopping.exchange(true, std::memory_order_acq_rel))
+        std::lock_guard lock(mutex);
+        if (closed)
             return;
-        ::shutdown(interrupt_rpc_fd.get(), SHUT_RDWR);
-        ::shutdown(interrupt_control_fd.get(), SHUT_RDWR);
-        {
-            std::lock_guard serial(submit_mutex);
-            command_ready.release();
+        closed = true;
+        std::exception_ptr error;
+        try {
+            lifecycle_round_trip(WMFS_CONTROL_SHUTDOWN,
+                                 WMFS_CONTROL_SHUTDOWN_ACK);
+        } catch (...) {
+            error = std::current_exception();
         }
-        if (thread.joinable())
-            thread.join();
-        {
-            std::lock_guard lock(mapping_mutex);
-            mappings.clear();
-        }
+        ::shutdown(lifecycle.get(), SHUT_RDWR);
+        ::shutdown(control.get(), SHUT_RDWR);
+        mappings.clear();
+        if (error)
+            std::rethrow_exception(error);
     }
 
-    void finish_invocation(std::uint64_t invocation_id) {
-        std::lock_guard lock(mapping_mutex);
-        std::erase_if(mappings, [invocation_id](const auto &item) {
-            return !item.second.arena && item.second.writable &&
-                   item.second.invocation_id == invocation_id;
-        });
-    }
-
-    void abort_invocation(std::uint64_t invocation_id) {
-        std::lock_guard lock(mapping_mutex);
-        std::vector<Mapping> expired;
-        for (const auto &item : mappings) {
-            const auto &mapping = item.second;
-            if (!mapping.arena && mapping.writable &&
-                mapping.invocation_id == invocation_id)
-                expired.push_back(mapping);
-        }
-        if (!expired.empty()) {
-            const auto transfer_id = next_transfer_id++;
-            std::vector<bool> maps(expired.size(), false);
-            try {
-                submit([&](Worker &worker) {
-                    worker.transfer_buffers(expired, maps, {}, transfer_id);
-                });
-            } catch (...) {
-                mappings.clear();
-                throw;
-            }
-            for (const auto &mapping : expired)
-                mappings.erase(
-                    MappingKey{mapping.buffer_id, mapping.generation});
-            retirements += expired.size();
-            ++retirement_batches;
-        }
-    }
-
-    UniqueFd rpc_fd;
-    UniqueFd control_fd;
-    UniqueFd interrupt_rpc_fd;
-    UniqueFd interrupt_control_fd;
-    std::uint64_t expected_fingerprint;
-    std::uint64_t expected_ring_generation;
-    std::uint32_t expected_ring_capacity;
-    std::chrono::nanoseconds startup_timeout;
-    std::chrono::nanoseconds request_timeout;
-    std::chrono::nanoseconds fd_transfer_timeout;
-    std::binary_semaphore startup_complete{0};
-    std::binary_semaphore command_ready{0};
-    std::mutex submit_mutex;
-    std::mutex close_mutex;
-    std::atomic<bool> stopping{false};
-    Command *command = nullptr;
-    std::exception_ptr startup_error;
-    mutable std::mutex mapping_mutex;
+    UniqueFd lifecycle;
+    UniqueFd control;
+    std::uint64_t generation;
+    std::uint64_t next_transfer{1};
+    std::uint64_t next_request{1};
     std::unordered_map<MappingKey, Mapping, MappingKeyHash> mappings;
-    std::uint64_t next_transfer_id = 1;
-    std::uint64_t transfers = 0;
-    std::uint64_t mapping_batches = 0;
-    std::uint64_t retirements = 0;
-    std::uint64_t retirement_batches = 0;
-    std::thread thread;
+    std::uint64_t transfers{};
+    std::uint64_t mapping_batches{};
+    std::uint64_t retirements{};
+    std::uint64_t retirement_batches{};
+    bool closed{};
+    mutable std::mutex mutex;
 };
 
-Session::Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
+Session::Session(int lifecycle_fd, int control_fd,
+                 std::uint64_t expected_fingerprint,
                  double startup_timeout_seconds, double request_timeout_seconds,
                  double fd_transfer_timeout_seconds,
                  std::uint64_t ring_generation, std::uint32_t ring_capacity)
     : impl_(std::make_unique<Impl>(
-          rpc_fd, control_fd, expected_fingerprint, ring_generation,
+          lifecycle_fd, control_fd, expected_fingerprint, ring_generation,
           ring_capacity, startup_timeout_seconds, request_timeout_seconds,
           fd_transfer_timeout_seconds)) {}
 
 Session::~Session() = default;
 
-std::vector<std::uint8_t> Session::metadata() {
-    std::vector<std::uint8_t> result;
-    impl_->submit(
-        [&result](Impl::Worker &worker) { result = worker.metadata_bytes; });
-    return result;
-}
-
-std::vector<std::uint8_t> Session::environment() {
-    std::vector<std::uint8_t> result;
-    impl_->submit(
-        [&result](Impl::Worker &worker) { result = worker.environment(); });
-    return result;
-}
-
 bool Session::mapping_required(const Mapping &mapping) const {
-    std::lock_guard lock(impl_->mapping_mutex);
-    const auto existing =
+    std::lock_guard lock(impl_->mutex);
+    const auto item =
         impl_->mappings.find(MappingKey{mapping.buffer_id, mapping.generation});
-    if (existing == impl_->mappings.end())
-        return true;
-    if (existing->second.writable || !mapping.writable)
-        return false;
-    return true;
+    return item == impl_->mappings.end() ||
+           (!item->second.writable && mapping.writable);
 }
 
 void Session::map_buffer(const Mapping &mapping, int fd) {
-    map_buffers({std::pair{mapping, fd}});
+    map_buffers({{mapping, fd}});
 }
 
 std::vector<bool>
-Session::map_buffers(std::vector<std::pair<Mapping, int>> requested) {
-    std::vector<UniqueFd> owned_fds;
-    owned_fds.reserve(requested.size());
-    for (const auto &item : requested)
-        owned_fds.emplace_back(item.second);
-    std::lock_guard lock(impl_->mapping_mutex);
-    auto planned = impl_->mappings;
-    std::vector<Mapping> entries;
+Session::map_buffers(std::vector<std::pair<Mapping, int>> mappings) {
+    std::lock_guard lock(impl_->mutex);
+    std::vector<Mapping> values;
     std::vector<bool> maps;
     std::vector<int> fds;
-    std::vector<bool> results;
-    std::uint64_t retired = 0;
-    for (std::size_t index = 0; index < requested.size(); ++index) {
-        const auto &mapping = requested[index].first;
-        const MappingKey key{mapping.buffer_id, mapping.generation};
-        const auto existing = planned.find(key);
-        if (existing != planned.end() &&
-            (existing->second.writable || !mapping.writable)) {
-            results.push_back(false);
+    std::vector<bool> result;
+    for (auto &item : mappings) {
+        const MappingKey key{item.first.buffer_id, item.first.generation};
+        const auto existing = impl_->mappings.find(key);
+        const bool needed = existing == impl_->mappings.end() ||
+                            (!existing->second.writable && item.first.writable);
+        result.push_back(needed);
+        if (!needed) {
+            ::close(item.second);
             continue;
         }
-        if (existing != planned.end()) {
-            entries.push_back(existing->second);
+        if (existing != impl_->mappings.end()) {
+            values.push_back(existing->second);
             maps.push_back(false);
-            planned.erase(existing);
-            ++retired;
         }
-        entries.push_back(mapping);
+        values.push_back(item.first);
         maps.push_back(true);
-        fds.push_back(owned_fds[index].get());
-        planned.emplace(key, mapping);
-        results.push_back(true);
+        fds.push_back(item.second);
+        impl_->mappings[key] = item.first;
     }
-    if (fds.empty())
-        return results;
-    const auto transfer_id = impl_->next_transfer_id++;
-    try {
-        impl_->submit([&](Impl::Worker &worker) {
-            worker.transfer_buffers(entries, maps, fds, transfer_id);
-        });
-    } catch (...) {
-        impl_->mappings.clear();
-        throw;
+    if (!values.empty()) {
+        const auto batches =
+            impl_->transfer_batched(values, maps, std::move(fds));
+        impl_->transfers += std::count(maps.begin(), maps.end(), true);
+        impl_->mapping_batches += batches;
     }
-    impl_->mappings = std::move(planned);
-    impl_->transfers += fds.size();
-    ++impl_->mapping_batches;
-    impl_->retirements += retired;
-    impl_->retirement_batches += retired != 0;
-    return results;
+    return result;
 }
 
 void Session::retire_buffer(const Mapping &mapping) {
     retire_buffers({mapping});
 }
 
-void Session::retire_buffers(const std::vector<Mapping> &requested) {
-    std::lock_guard lock(impl_->mapping_mutex);
-    std::vector<Mapping> mappings;
-    std::unordered_map<MappingKey, bool, MappingKeyHash> seen;
-    for (const auto &mapping : requested) {
-        const MappingKey key{mapping.buffer_id, mapping.generation};
-        if (!seen.emplace(key, true).second)
-            continue;
-        auto existing = impl_->mappings.find(key);
-        if (existing == impl_->mappings.end())
-            continue;
-        mappings.push_back(existing->second);
-    }
+void Session::retire_buffers(const std::vector<Mapping> &mappings) {
     if (mappings.empty())
         return;
-    const auto transfer_id = impl_->next_transfer_id++;
+    std::lock_guard lock(impl_->mutex);
     std::vector<bool> maps(mappings.size(), false);
-    try {
-        impl_->submit([&](Impl::Worker &worker) {
-            worker.transfer_buffers(mappings, maps, {}, transfer_id);
-        });
-    } catch (...) {
-        impl_->mappings.clear();
-        throw;
-    }
-    for (const auto &mapping : mappings) {
+    const auto batches = impl_->transfer_batched(mappings, maps, {});
+    for (const auto &mapping : mappings)
         impl_->mappings.erase(
             MappingKey{mapping.buffer_id, mapping.generation});
-    }
     impl_->retirements += mappings.size();
-    ++impl_->retirement_batches;
+    impl_->retirement_batches += batches;
 }
 
 void Session::abort_invocation(std::uint64_t invocation_id) {
-    impl_->abort_invocation(invocation_id);
+    std::vector<Mapping> expired;
+    {
+        std::lock_guard lock(impl_->mutex);
+        for (const auto &item : impl_->mappings)
+            if (!item.second.arena && item.second.writable &&
+                item.second.invocation_id == invocation_id)
+                expired.push_back(item.second);
+    }
+    retire_buffers(expired);
 }
 
-InvocationOutcome Session::invoke(std::uint64_t invocation_id,
-                                  std::uint32_t operation_id,
-                                  const TensorDescriptors &inputs,
-                                  const TensorDescriptors &outputs,
-                                  const std::vector<ScalarArgument> &scalars) {
-    if (impl_->expected_ring_generation != 0)
-        throw std::logic_error(
-            "Operation RPC is disabled for a ring-capable session");
-    InvocationOutcome outcome;
-    try {
-        impl_->submit([&](Impl::Worker &worker) {
-            outcome = worker.invoke(invocation_id, operation_id, inputs,
-                                    outputs, scalars);
-        });
-    } catch (...) {
-        impl_->finish_invocation(invocation_id);
-        throw;
-    }
-    impl_->finish_invocation(invocation_id);
-    return outcome;
+InvocationOutcome Session::invoke(std::uint64_t, std::uint32_t,
+                                  const TensorDescriptors &,
+                                  const TensorDescriptors &,
+                                  const std::vector<ScalarArgument> &) {
+    throw std::runtime_error("Operations are available only through rings");
 }
 
-InvocationProfile Session::invoke_profiled(
-    std::uint64_t invocation_id, std::uint32_t operation_id,
-    const TensorDescriptors &inputs, const TensorDescriptors &outputs,
-    const std::vector<ScalarArgument> &scalars) {
-    if (impl_->expected_ring_generation != 0)
-        throw std::logic_error(
-            "Operation RPC is disabled for a ring-capable session");
-    InvocationProfile profile;
-    const auto submitted = std::chrono::steady_clock::now();
-    try {
-        impl_->submit([&](Impl::Worker &worker) {
-            profile.queue_wait_ns = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - submitted)
-                    .count());
-            const auto worker_profile = worker.invoke_profiled(
-                invocation_id, operation_id, inputs, outputs, scalars);
-            profile.outcome = worker_profile.outcome;
-            profile.rpc_ns = worker_profile.rpc_ns;
-            profile.worker_input_views_ns =
-                worker_profile.worker_input_views_ns;
-            profile.worker_output_views_ns =
-                worker_profile.worker_output_views_ns;
-            profile.worker_dispatch_ns = worker_profile.worker_dispatch_ns;
-            profile.worker_kernel_ns = worker_profile.worker_kernel_ns;
-        });
-    } catch (...) {
-        impl_->finish_invocation(invocation_id);
-        throw;
-    }
-    impl_->finish_invocation(invocation_id);
-    return profile;
+InvocationProfile
+Session::invoke_profiled(std::uint64_t, std::uint32_t,
+                         const TensorDescriptors &, const TensorDescriptors &,
+                         const std::vector<ScalarArgument> &) {
+    throw std::runtime_error("Operations are available only through rings");
 }
 
 OutputPlanningResult
-Session::plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
-                      const TensorDescriptors &inputs,
-                      const std::vector<ScalarArgument> &scalars) {
-    if (impl_->expected_ring_generation != 0)
-        throw std::logic_error(
-            "Operation RPC is disabled for a ring-capable session");
-    OutputPlanningResult result;
-    impl_->submit([&](Impl::Worker &worker) {
-        result =
-            worker.plan_outputs(invocation_id, operation_id, inputs, scalars);
-    });
-    return result;
+Session::plan_outputs(std::uint64_t, std::uint32_t, const TensorDescriptors &,
+                      const std::vector<ScalarArgument> &) {
+    throw std::runtime_error("Output planning is available only through rings");
 }
 
-void Session::ping(std::uint64_t nonce) {
-    impl_->submit([nonce](Impl::Worker &worker) { worker.ping(nonce); });
+void Session::ping(std::uint64_t) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->lifecycle_round_trip(WMFS_CONTROL_PING, WMFS_CONTROL_PONG);
 }
 
+std::vector<std::uint8_t> Session::metadata() { return {}; }
+std::vector<std::uint8_t> Session::environment() { return {}; }
 void Session::close() { impl_->close(); }
-
-std::uint64_t Session::transfer_count() const {
-    std::lock_guard lock(impl_->mapping_mutex);
-    return impl_->transfers;
-}
-
+std::uint64_t Session::transfer_count() const { return impl_->transfers; }
 std::uint64_t Session::mapping_batch_count() const {
-    std::lock_guard lock(impl_->mapping_mutex);
     return impl_->mapping_batches;
 }
-
-std::uint64_t Session::retirement_count() const {
-    std::lock_guard lock(impl_->mapping_mutex);
-    return impl_->retirements;
-}
-
+std::uint64_t Session::retirement_count() const { return impl_->retirements; }
 std::uint64_t Session::retirement_batch_count() const {
-    std::lock_guard lock(impl_->mapping_mutex);
     return impl_->retirement_batches;
 }
 

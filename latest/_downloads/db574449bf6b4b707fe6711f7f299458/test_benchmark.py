@@ -35,14 +35,14 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
 
 
 @pytest.mark.parametrize("name", ("baseline", "arena"))
-def test_checked_reports_use_schema_10_without_fabricated_samples(name: str) -> None:
+def test_checked_reports_use_schema_11_without_fabricated_samples(name: str) -> None:
     benchmark_directory = Path(__file__).parents[2] / "benchmarks"
     report = json.loads((benchmark_directory / f"{name}.json").read_text())
     historical = json.loads(
         (benchmark_directory / report["historical_report"]).read_text()
     )
 
-    assert report["schema_version"] == 10
+    assert report["schema_version"] == 11
     assert report["backends"] == ["local", "bundled", "isolated"]
     assert report["operations"] == []
     assert historical["schema_version"] == 5
@@ -107,7 +107,7 @@ def test_benchmark_requires_bundled_reference_support(
                 iterations=1,
                 warmups=0,
                 startup_iterations=1,
-                rpc_iterations=1,
+                control_iterations=1,
                 backpressure_iterations=2,
                 diagnostic_iterations=1,
                 high_frequency_iterations=1,
@@ -130,7 +130,7 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
             iterations=1,
             warmups=0,
             startup_iterations=1,
-            rpc_iterations=1,
+            control_iterations=1,
             backpressure_iterations=4,
             diagnostic_iterations=1,
             high_frequency_iterations=2,
@@ -140,13 +140,21 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 10
+    assert report["schema_version"] == 11
     assert report["configuration"]["plugin_directory"] == str(
         PLUGIN_DIRECTORY.resolve()
     )
-    assert report["worker_startup_ms"]["count"] == 1
-    assert report["rpc_round_trip_ms"]["count"] == 1
-    assert report["rpc_startup_control_round_trip_ms"]["count"] == 1
+    assert report["startup_control_round_trip_ms"]["count"] == 1
+    assert all(
+        summary["count"] == 1
+        for backend in report["initialization"].values()
+        for summary in backend.values()
+    )
+    assert all(
+        summary["count"] == 1 for summary in report["logging_initialization"].values()
+    )
+    assert report["output_paths"]["known_preallocated_call_ms"]["count"] == 1
+    assert report["output_paths"]["dynamic_planned_call_ms"]["count"] == 1
     assert report["ring_control"]["round_trip_ms"]["count"] == 1
     assert report["ring_capacity_pressure"]["round_trip_ms"]["count"] == 4
     assert report["ring_capacity_pressure"]["backpressure_wait_ms"]["p95_ms"] > 0
@@ -184,10 +192,12 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         "cached_ensure_mapped_ms",
         "first_use_fd_transfer_mmap_ms",
         "input_shared_preparation_ms",
+        "isolated_direct_call_ms",
+        "isolated_profiled_call_ms",
         "isolated_uncached_call_ms",
         "native_call_ms",
+        "native_handoff_ms",
         "native_queue_wait_ms",
-        "native_rpc_ms",
         "ring_backpressure_wait_ms",
         "ring_command_wakeup_ms",
         "ring_completion_wakeup_ms",
@@ -242,5 +252,5 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert "ring_round_trip_ms" in provenance["ring_control"]["metrics"]
     assert "not inferred by subtracting" in provenance["frontend_python"]["boundary"]
     assert "scalar bind" in render_table(report)
-    assert "Cap'n Proto startup/control ping" in render_table(report)
+    assert "fixed startup/control ping" in render_table(report)
     validate_report(report)

@@ -1,9 +1,9 @@
+#include "wmfs/protocol/control.h"
+#include "wmfs/protocol/ring.h"
 #include "wmfs/reference/mapped_buffers.hpp"
 #include "wmfs/unique_fd.hpp"
 
 #include <ATen/ops/from_blob.h>
-#include <capnp/message.h>
-#include <capnp/serialize.h>
 
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -43,7 +43,7 @@ struct ViewKey {
     std::uint64_t allocation_id;
     std::uint64_t offset;
     std::uint64_t byte_length;
-    DType dtype;
+    std::uint32_t dtype;
     std::vector<std::int64_t> shape;
     std::vector<std::int64_t> strides;
 
@@ -70,15 +70,15 @@ struct Mapping {
     std::list<std::pair<ViewKey, at::Tensor>> views;
 };
 
-std::pair<at::ScalarType, std::uint64_t> dtype_info(DType dtype) {
+std::pair<at::ScalarType, std::uint64_t> dtype_info(std::uint32_t dtype) {
     switch (dtype) {
-    case DType::FLOAT32:
+    case WMFS_RING_DTYPE_FLOAT32:
         return {at::kFloat, 4};
-    case DType::FLOAT64:
+    case WMFS_RING_DTYPE_FLOAT64:
         return {at::kDouble, 8};
-    case DType::INT64:
+    case WMFS_RING_DTYPE_INT64:
         return {at::kLong, 8};
-    case DType::UINT8:
+    case WMFS_RING_DTYPE_UINT8:
         return {at::kByte, 1};
     }
     fail("Unsupported tensor dtype");
@@ -98,23 +98,35 @@ std::uint64_t checked_multiply(std::uint64_t left, std::uint64_t right) {
     return left * right;
 }
 
-void send_acknowledgement(int socket_fd, std::uint64_t transfer_id,
-                          const char *error) {
-    capnp::MallocMessageBuilder message;
-    auto acknowledgement = message.initRoot<BufferTransferAck>();
-    acknowledgement.setTransferId(transfer_id);
-    if (error == nullptr) {
-        acknowledgement.setAccepted();
-    } else {
-        acknowledgement.setError(error);
-    }
-    auto words = capnp::messageToFlatArray(message);
-    auto bytes = words.asBytes();
-    auto sent = ::send(socket_fd, bytes.begin(), bytes.size(), MSG_NOSIGNAL);
+void send_acknowledgement(int socket_fd, std::uint64_t request_id,
+                          std::uint64_t transfer_id,
+                          std::uint64_t session_generation, const char *error) {
+    std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE +
+                                 WMFS_CONTROL_FD_ACK_FIXED_SIZE +
+                                 WMFS_CONTROL_MAX_ERROR_BYTES>
+        payload{};
+    const auto error_size =
+        error == nullptr ? 0
+                         : std::min<std::size_t>(std::strlen(error),
+                                                 WMFS_CONTROL_MAX_ERROR_BYTES);
+    wmfs_control_fd_ack_v1 acknowledgement{};
+    acknowledgement.transfer_id = transfer_id;
+    acknowledgement.session_generation = session_generation;
+    acknowledgement.status = error == nullptr
+                                 ? WMFS_CONTROL_STATUS_OK
+                                 : WMFS_CONTROL_STATUS_INVALID_ARGUMENT;
+    acknowledgement.error_length = error_size;
+    wmfs_control_mutable_bytes_v1 output{payload.data(), payload.size(), 0};
+    wmfs_control_bytes_v1 error_bytes{
+        reinterpret_cast<const std::uint8_t *>(error), error_size};
+    if (wmfs_control_encode_fd_ack_v1(request_id, &acknowledgement, error_bytes,
+                                      &output) != 0)
+        fail("Cannot encode buffer acknowledgement");
+    auto sent = ::send(socket_fd, payload.data(), output.size, MSG_NOSIGNAL);
     if (sent < 0) {
         fail_errno("send buffer acknowledgement");
     }
-    if (static_cast<std::size_t>(sent) != bytes.size()) {
+    if (static_cast<std::size_t>(sent) != output.size) {
         fail("Buffer acknowledgement was truncated");
     }
 }
@@ -221,20 +233,20 @@ void MappedBufferCache::retire(std::uint64_t buffer_id,
     retired->views.clear();
 }
 
-TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
+TensorLease MappedBufferCache::tensor(const TensorDescriptor &descriptor,
                                       std::uint64_t invocation_id,
                                       bool require_writable) {
     std::lock_guard lock(impl_->mutex);
-    auto item = impl_->buffers.find(descriptor.getBufferId());
+    auto item = impl_->buffers.find(descriptor.buffer_id);
     if (item == impl_->buffers.end()) {
         fail("Tensor references an unmapped buffer");
     }
     auto mapping = item->second;
     const auto &spec = mapping->spec;
-    if (spec.generation != descriptor.getGeneration()) {
+    if (spec.generation != descriptor.generation) {
         fail("Tensor references a stale buffer generation");
     }
-    if (!spec.arena && spec.allocation_id != descriptor.getAllocationId()) {
+    if (!spec.arena && spec.allocation_id != descriptor.allocation_id) {
         fail("Tensor references a stale logical allocation");
     }
     if (require_writable && !spec.writable) {
@@ -245,9 +257,9 @@ TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
         fail("Tensor output is outside this invocation");
     }
 
-    auto [scalar_type, item_size] = dtype_info(descriptor.getDtype());
-    auto shape_reader = descriptor.getShape();
-    auto stride_reader = descriptor.getStrides();
+    auto [scalar_type, item_size] = dtype_info(descriptor.dtype);
+    const auto &shape_reader = descriptor.shape;
+    const auto &stride_reader = descriptor.strides;
     if (shape_reader.size() == 0 ||
         shape_reader.size() != stride_reader.size() ||
         shape_reader.size() > 16) {
@@ -255,10 +267,10 @@ TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
     }
 
     ViewKey key{
-        descriptor.getAllocationId(),
-        descriptor.getOffset(),
-        descriptor.getByteLength(),
-        descriptor.getDtype(),
+        descriptor.allocation_id,
+        descriptor.offset,
+        descriptor.byte_length,
+        descriptor.dtype,
         {},
         {},
     };
@@ -287,8 +299,8 @@ TensorLease MappedBufferCache::tensor(TensorDescriptor::Reader descriptor,
         return TensorLease(std::move(tensor));
     }
 
-    auto offset = descriptor.getOffset();
-    auto byte_length = descriptor.getByteLength();
+    auto offset = descriptor.offset;
+    auto byte_length = descriptor.byte_length;
     if (offset % item_size != 0) {
         fail("Tensor offset is not dtype-aligned");
     }
@@ -356,10 +368,12 @@ void MappedBufferCache::close() {
     }
 }
 
-void receive_buffer_transfers(int control_fd, MappedBufferCache &cache) {
-    alignas(capnp::word) std::array<std::byte, MAX_CONTROL_MESSAGE_BYTES>
-        payload{};
-    std::array<std::byte, CMSG_SPACE(sizeof(int) * 256)> ancillary{};
+void receive_buffer_transfers(int control_fd, std::uint64_t session_generation,
+                              MappedBufferCache &cache) {
+    std::array<std::uint8_t, WMFS_CONTROL_MAX_PACKET_BYTES> payload{};
+    std::array<std::byte, CMSG_SPACE(sizeof(int) * WMFS_CONTROL_MAX_FD_ENTRIES)>
+        ancillary{};
+    std::array<wmfs_control_fd_entry_v1, WMFS_CONTROL_MAX_FD_ENTRIES> entries{};
 
     while (true) {
         iovec vector{payload.data(), payload.size()};
@@ -384,51 +398,52 @@ void receive_buffer_transfers(int control_fd, MappedBufferCache &cache) {
         }
 
         std::uint64_t transfer_id = 0;
+        std::uint64_t request_id = 0;
         auto descriptors = extract_descriptors(message);
         try {
             if ((message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
                 fail("FD transfer message was truncated");
             }
-            if (received % static_cast<ssize_t>(sizeof(capnp::word)) != 0) {
-                fail("Buffer transfer is not word-aligned");
-            }
-            auto words = kj::arrayPtr(
-                reinterpret_cast<const capnp::word *>(payload.data()),
-                static_cast<std::size_t>(received) / sizeof(capnp::word));
-            capnp::FlatArrayMessageReader reader(words);
-            auto transfer = reader.getRoot<BufferTransfer>();
-            transfer_id = transfer.getTransferId();
-            auto entries = transfer.getEntries();
-            std::size_t map_count = 0;
-            for (auto entry : entries)
-                map_count += entry.which() == BufferTransferEntry::MAP;
-            if (descriptors.size() != map_count)
+            wmfs_control_fd_batch_view_v1 transfer{};
+            const wmfs_control_bytes_v1 packet{
+                payload.data(), static_cast<std::size_t>(received)};
+            if (wmfs_control_decode_fd_batch_v1(
+                    packet, &transfer, entries.data(), entries.size()) != 0)
+                fail("Invalid fixed-protocol FD batch");
+            request_id = transfer.request_id;
+            transfer_id = transfer.batch.transfer_id;
+            if (transfer.batch.session_generation != session_generation)
+                fail("FD batch has the wrong session generation");
+            if (descriptors.size() != transfer.batch.fd_count)
                 fail(
                     "Buffer batch descriptor count does not match map entries");
             std::size_t descriptor_index = 0;
-            for (auto entry : entries) {
-                if (entry.which() == BufferTransferEntry::MAP) {
+            for (std::size_t index = 0; index < transfer.batch.entry_count;
+                 ++index) {
+                const auto &entry = entries[index];
+                if (entry.kind == WMFS_CONTROL_FD_ENTRY_MAP) {
                     MappingSpec spec{
-                        entry.getBufferId(),     entry.getGeneration(),
-                        entry.getAllocationId(), entry.getByteLength(),
-                        entry.getInvocationId(), entry.getWritable(),
-                        entry.getArena(),
+                        entry.buffer_id,
+                        static_cast<std::uint32_t>(entry.generation),
+                        entry.allocation_id,
+                        entry.byte_length,
+                        entry.invocation_id,
+                        (entry.flags & WMFS_CONTROL_FD_FLAG_WRITABLE) != 0,
+                        (entry.flags & WMFS_CONTROL_FD_FLAG_ARENA) != 0,
                     };
                     cache.map(spec, descriptors[descriptor_index++].release());
                 } else {
-                    cache.retire(entry.getBufferId(), entry.getGeneration(),
-                                 entry.getAllocationId());
+                    cache.retire(entry.buffer_id,
+                                 static_cast<std::uint32_t>(entry.generation),
+                                 entry.allocation_id);
                 }
             }
-            send_acknowledgement(control_fd, transfer_id, nullptr);
+            send_acknowledgement(control_fd, request_id, transfer_id,
+                                 session_generation, nullptr);
         } catch (const std::exception &error) {
             cache.close();
-            send_acknowledgement(control_fd, transfer_id, error.what());
-            throw;
-        } catch (const kj::Exception &error) {
-            cache.close();
-            auto description = error.getDescription();
-            send_acknowledgement(control_fd, transfer_id, description.cStr());
+            send_acknowledgement(control_fd, request_id, transfer_id,
+                                 session_generation, error.what());
             throw;
         }
     }

@@ -1,9 +1,10 @@
 # WMFS Documentation
 
 WMFS executes ordinary Python tensor calls locally, through an in-process
-bundled plugin, or in an isolated worker process. The isolated path uses Cap'n
-Proto only for startup/control, command/completion rings for operations, and
-shared `memfd` mappings for tensor payloads.
+bundled plugin, or in an isolated worker process. The isolated path uses a fixed
+startup/lifecycle protocol over private `SOCK_SEQPACKET` sockets,
+command/completion rings for operations, and shared `memfd` mappings for tensor
+payloads.
 
 ```{toctree}
 ---

@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Data Flow And Reading Guide &#8212; WMFS 5ccd995c85da</title>
+    <title>Data Flow And Reading Guide &#8212; WMFS 7d052d2faf98</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=00907de2"></script>
+    <script src="_static/documentation_options.js?v=0e4f9371"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -165,6 +165,7 @@ tensors. Python and native control paths consume the same plan.</p>
         <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Isolated out does not support autograd inputs&quot;</span><span class="p">)</span>
     <span class="n">scalar_start</span> <span class="o">=</span> <span class="n">perf_counter_ns</span><span class="p">()</span> <span class="k">if</span> <span class="n">collect_metrics</span> <span class="k">else</span> <span class="mi">0</span>
     <span class="n">scalars</span> <span class="o">=</span> <span class="n">bind_scalars</span><span class="p">(</span><span class="n">operation</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">_validate_tensor_dtypes</span><span class="p">(</span><span class="n">operation</span><span class="p">,</span> <span class="n">tensors</span><span class="p">)</span>
     <span class="n">scalar_binding_ns</span> <span class="o">=</span> <span class="n">perf_counter_ns</span><span class="p">()</span> <span class="o">-</span> <span class="n">scalar_start</span> <span class="k">if</span> <span class="n">collect_metrics</span> <span class="k">else</span> <span class="mi">0</span>
     <span class="k">return</span> <span class="n">BoundInvocation</span><span class="p">(</span>
         <span class="n">operation</span><span class="o">=</span><span class="n">operation</span><span class="p">,</span>
@@ -218,8 +219,8 @@ pooling, and reclamation instrumentation.</p></li>
 <p>The selected session batches all required mappings over the FD-control socket,
 then publishes a fixed-width command containing capabilities, tensor metadata,
 operation ID, and scalar values. Tensor payload bytes never enter a ring or
-Cap’n Proto message. Cap’n Proto handles startup metadata/environment and the
-versioned ring handshake only.</p>
+control frame. The fixed control ABI handles startup identity/environment,
+liveness, shutdown, and transactional FD batches.</p>
 <p>Important implementations:</p>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/native_worker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">NativeWorkerSession</span></code>:
@@ -231,10 +232,9 @@ submission/completion dispatch and benchmark timing boundaries.</p></li>
 Python orchestration around the same ring protocol.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/fd_broker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">FdSender.ensure_mapped_many</span></code>:
 Python batched FD sender.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/protocol/schemas/wmfs/runtime.capnp</span></code>: startup/control
-metadata protocol.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/protocol/schemas/wmfs/tensor.capnp</span></code>: tensor and
-batched buffer-transfer descriptors.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/protocol/control.py</span></code>: startup, lifecycle, and batched
+buffer-transfer protocol.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">inc/wmfs/protocol/control.h</span></code>: language-neutral fixed control ABI.</p></li>
 </ul>
 </section>
 <section id="worker-views-and-kernel-dispatch">
@@ -250,7 +250,7 @@ kernels.</p>
 profiling, completion, and dispatch.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">src/reference_mapped_buffers.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">MappedBufferCache::tensor</span></code>: descriptor
 validation and zero-copy ATen views.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">plugins/reference/generated/reference_dispatch.inc</span></code>: generated operation ID
+<li><p><code class="docutils literal notranslate"><span class="pre">plugins/reference/generated/src/reference_plugin_stub.cpp</span></code>: generated operation ID
 and scalar adaptation.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">src/reference_kernels.cpp</span></code>: transport-independent numerical kernels.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">inc/wmfs/reference/kernels.hpp</span></code>: documented native kernel API.</p></li>
@@ -284,6 +284,11 @@ rings.</p></li>
 <li><p>Comparing isolated against bundled in <code class="docutils literal notranslate"><span class="pre">wmfs-benchmark</span></code> most directly measures
 process-isolation overhead for the same native kernels.</p></li>
 </ul>
+<p>All modes consume the same generated operation catalog and lifecycle contract.
+Local and bundled initialization receive the same logical canonical
+configuration and logger service but create no worker, rings, shared allocator,
+FD channel, or mappings. Disabled logging selects a null logger during
+initialization, so calls perform no socket, queue, serialization, or clock work.</p>
 </section>
 </section>
 

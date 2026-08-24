@@ -2,27 +2,31 @@
 #include "wmfs/reference/mapped_buffers.hpp"
 #include "wmfs/ring.hpp"
 #include "wmfs/unique_fd.hpp"
+#include <wmfs/protocol/control.h>
+#include <wmfs/protocol/log.h>
+#include <wmfs/reference_plugin.hpp>
 
 #include <ATen/ops/count_nonzero.h>
 #include <c10/core/InferenceMode.h>
-#include <capnp/message.h>
-#include <capnp/rpc-twoparty.h>
 #include <gnu/libc-version.h>
-#include <kj/async-io.h>
 #include <torch/version.h>
 
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -30,28 +34,318 @@
 #include <utility>
 #include <vector>
 
-#include "wmfs-reference/reference.capnp.h"
-
 namespace wmfs::reference {
 namespace {
 
 #define WMFS_STRINGIFY_INNER(value) #value
 #define WMFS_STRINGIFY(value) WMFS_STRINGIFY_INNER(value)
 
-struct Arguments {
-    int rpc_fd = -1;
-    int control_fd = -1;
-    int command_ring_fd = -1;
-    int command_data_fd = -1;
-    int command_space_fd = -1;
-    int completion_ring_fd = -1;
-    int completion_data_fd = -1;
-    int completion_space_fd = -1;
-    std::uint64_t ring_generation = 0;
-    std::string interface_name;
-    bool has_schema = false;
-    bool has_import = false;
+struct StartupResources {
+    UniqueFd bootstrap;
+    UniqueFd fd_control;
+    std::array<UniqueFd, 3> commands;
+    std::array<UniqueFd, 3> completions;
+    std::uint64_t generation{};
+    const wmfs_plugin_api_v1 *api{};
+    bool initialized{};
+    struct LogSink;
+    std::unique_ptr<LogSink> log;
 };
+
+struct StartupResources::LogSink {
+    struct Item {
+        std::uint32_t level;
+        std::vector<std::uint8_t> bytes;
+    };
+    UniqueFd fd;
+    std::uint32_t mode{};
+    std::uint32_t level{20};
+    std::size_t record_bytes{16384};
+    std::uint64_t generation{};
+    std::uint64_t sequence{};
+    std::size_t capacity{256};
+    std::uint64_t dropped{};
+    std::mutex mutex;
+    std::condition_variable condition;
+    std::deque<Item> queue;
+    bool closing{};
+    std::thread sender;
+
+    ~LogSink() { close(); }
+    void start() {
+        sender = std::thread([this] { run(); });
+    }
+    void enqueue(std::uint32_t level, std::vector<std::uint8_t> bytes) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (closing)
+            return;
+        if (queue.size() == capacity) {
+            auto lowest =
+                std::min_element(queue.begin(), queue.end(),
+                                 [](const Item &left, const Item &right) {
+                                     return left.level < right.level;
+                                 });
+            if (lowest != queue.end() && lowest->level <= level) {
+                queue.erase(lowest);
+                queue.push_back({level, std::move(bytes)});
+            }
+            ++dropped;
+        } else
+            queue.push_back({level, std::move(bytes)});
+        condition.notify_one();
+    }
+    void close() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            closing = true;
+            condition.notify_all();
+        }
+        if (sender.joinable())
+            sender.join();
+    }
+    void run() {
+        for (;;) {
+            Item item;
+            std::uint64_t dropped_before{};
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                condition.wait(lock,
+                               [this] { return closing || !queue.empty(); });
+                if (queue.empty())
+                    return;
+                item = std::move(queue.front());
+                queue.pop_front();
+                dropped_before = dropped;
+                dropped = 0;
+            }
+            if (mode == WMFS_CONTROL_LOG_CENTRALIZED) {
+                if (dropped_before &&
+                    item.bytes.size() >= WMFS_LOG_HEADER_SIZE) {
+                    auto synthetic = item.bytes;
+                    synthetic[20] |= WMFS_LOG_RECORD_SYNTHETIC;
+                    synthetic[24] = WMFS_LOG_WARNING;
+                    for (unsigned index = 0; index < 8; ++index)
+                        synthetic[92 + index] = static_cast<std::uint8_t>(
+                            dropped_before >> (index * 8));
+                    (void)::send(fd.get(), synthetic.data(), synthetic.size(),
+                                 MSG_DONTWAIT | MSG_NOSIGNAL);
+                }
+                (void)::send(fd.get(), item.bytes.data(), item.bytes.size(),
+                             MSG_DONTWAIT | MSG_NOSIGNAL);
+                continue;
+            }
+            if (dropped_before) {
+                const auto warning =
+                    std::string("{\"level\":30,\"message\":\"dropped ") +
+                    std::to_string(dropped_before) +
+                    " plugin log records\",\"category\":\"wmfs.logging\","
+                    "\"fields\":{},\"droppedBefore\":" +
+                    std::to_string(dropped_before) + "}\n";
+                const auto ignored =
+                    ::write(fd.get(), warning.data(), warning.size());
+                (void)ignored;
+            }
+            std::size_t offset = 0;
+            while (offset < item.bytes.size()) {
+                const auto written =
+                    ::write(fd.get(), item.bytes.data() + offset,
+                            item.bytes.size() - offset);
+                if (written > 0)
+                    offset += static_cast<std::size_t>(written);
+                else if (written < 0 && errno == EINTR)
+                    continue;
+                else
+                    break;
+            }
+        }
+    }
+};
+
+std::uint64_t steady_nanoseconds();
+thread_local std::uint64_t log_submission_id{};
+thread_local std::uint64_t log_invocation_id{};
+thread_local std::uint64_t log_operation_id{};
+
+void store32(std::uint8_t *p, std::uint32_t value) {
+    for (unsigned index = 0; index < 4; ++index)
+        p[index] = static_cast<std::uint8_t>(value >> (index * 8));
+}
+void store64(std::uint8_t *p, std::uint64_t value) {
+    for (unsigned index = 0; index < 8; ++index)
+        p[index] = static_cast<std::uint8_t>(value >> (index * 8));
+}
+
+std::size_t utf8_prefix(const char *data, std::size_t size, std::size_t limit) {
+    if (size <= limit)
+        return size;
+    size = limit;
+    while (size && (static_cast<unsigned char>(data[size]) & 0xc0) == 0x80)
+        --size;
+    return size;
+}
+
+std::string json_escape(const char *data, std::size_t size) {
+    std::string result;
+    for (std::size_t index = 0; index < size; ++index) {
+        const unsigned char value = static_cast<unsigned char>(data[index]);
+        if (value == '"' || value == '\\') {
+            result.push_back('\\');
+            result.push_back(static_cast<char>(value));
+        } else if (value >= 0x20)
+            result.push_back(static_cast<char>(value));
+    }
+    return result;
+}
+
+std::string json_fields(const wmfs_log_field_v1 *fields,
+                        std::uint32_t field_count) {
+    std::string result{"{"};
+    bool first = true;
+    for (std::uint32_t index = 0; fields && index < field_count; ++index) {
+        const auto &field = fields[index];
+        if (field.struct_size < sizeof(wmfs_log_field_v1) || !field.name.data ||
+            !field.name.size || field.kind < WMFS_LOG_FIELD_BOOLEAN ||
+            field.kind > WMFS_LOG_FIELD_TEXT)
+            continue;
+        result += first ? "\"" : ",\"";
+        first = false;
+        result += json_escape(field.name.data, field.name.size) + "\":";
+        if (field.kind == WMFS_LOG_FIELD_BOOLEAN)
+            result += field.bits ? "true" : "false";
+        else if (field.kind == WMFS_LOG_FIELD_INT64)
+            result += std::to_string(static_cast<std::int64_t>(field.bits));
+        else if (field.kind == WMFS_LOG_FIELD_UINT64)
+            result += std::to_string(field.bits);
+        else if (field.kind == WMFS_LOG_FIELD_FLOAT64) {
+            double value{};
+            std::memcpy(&value, &field.bits, sizeof(value));
+            result += std::to_string(value);
+        } else
+            result += "\"" +
+                      json_escape(field.text.data ? field.text.data : "",
+                                  field.text.data ? field.text.size : 0) +
+                      "\"";
+    }
+    return result + "}";
+}
+
+std::uint8_t log_enabled(void *context, std::uint32_t level) {
+    const auto *sink = static_cast<StartupResources::LogSink *>(context);
+    return sink && level >= sink->level && level >= 10 && level <= 50 &&
+           level % 10 == 0;
+}
+
+void log_write(void *context, std::uint32_t level, wmfs_text_view_v1 message,
+               wmfs_text_view_v1 category, const wmfs_log_field_v1 *fields,
+               std::uint32_t field_count) {
+    auto *sink = static_cast<StartupResources::LogSink *>(context);
+    if (!log_enabled(context, level) || (!message.data && message.size) ||
+        (!category.data && category.size))
+        return;
+    try {
+        std::uint64_t sequence;
+        {
+            std::lock_guard<std::mutex> lock(sink->mutex);
+            sequence = ++sink->sequence;
+        }
+        if (sink->mode == WMFS_CONTROL_LOG_WORKER_FILE) {
+            const auto document =
+                std::string("{\"timeNs\":") +
+                std::to_string(steady_nanoseconds()) +
+                ",\"sequence\":" + std::to_string(sequence) +
+                ",\"level\":" + std::to_string(level) + ",\"message\":\"" +
+                json_escape(message.data, message.size) + "\",\"category\":\"" +
+                json_escape(category.data, category.size) +
+                "\",\"fields\":" + json_fields(fields, field_count) +
+                ",\"sessionId\":" + std::to_string(sink->generation) +
+                ",\"submissionId\":" + std::to_string(log_submission_id) +
+                ",\"invocationId\":" + std::to_string(log_invocation_id) +
+                ",\"operationId\":" + std::to_string(log_operation_id) +
+                ",\"droppedBefore\":0}\n";
+            sink->enqueue(level, std::vector<std::uint8_t>(document.begin(),
+                                                           document.end()));
+            return;
+        }
+        const auto category_size = utf8_prefix(category.data, category.size,
+                                               WMFS_LOG_MAX_CATEGORY_BYTES);
+        const auto available =
+            sink->record_bytes > WMFS_LOG_HEADER_SIZE + category_size
+                ? sink->record_bytes - WMFS_LOG_HEADER_SIZE - category_size
+                : 0;
+        const auto message_size = utf8_prefix(
+            message.data, message.size,
+            std::min<std::size_t>(available, WMFS_LOG_MAX_MESSAGE_BYTES));
+        std::vector<std::uint8_t> packet(WMFS_LOG_HEADER_SIZE + category_size +
+                                         message_size);
+        store64(packet.data(), WMFS_LOG_MAGIC);
+        packet[8] = WMFS_LOG_ABI_MAJOR;
+        packet[10] = WMFS_LOG_ABI_MINOR;
+        store32(packet.data() + 12, WMFS_LOG_HEADER_SIZE);
+        store32(packet.data() + 16, packet.size());
+        store32(packet.data() + 20,
+                category_size != category.size || message_size != message.size
+                    ? WMFS_LOG_RECORD_TRUNCATED
+                    : 0);
+        store32(packet.data() + 24, level);
+        std::uint32_t encoded_fields = 0;
+        store32(packet.data() + 32, category_size);
+        store32(packet.data() + 36, message_size);
+        store64(packet.data() + 44, sequence);
+        store64(packet.data() + 52, steady_nanoseconds());
+        store64(packet.data() + 60, sink->generation);
+        store64(packet.data() + 68, log_submission_id);
+        store64(packet.data() + 76, log_invocation_id);
+        store64(packet.data() + 84, log_operation_id);
+        std::memcpy(packet.data() + WMFS_LOG_HEADER_SIZE, category.data,
+                    category_size);
+        std::memcpy(packet.data() + WMFS_LOG_HEADER_SIZE + category_size,
+                    message.data, message_size);
+        for (std::uint32_t index = 0;
+             fields && index < field_count && index < WMFS_LOG_MAX_FIELDS;
+             ++index) {
+            const auto &field = fields[index];
+            if (!field.name.data || !field.name.size ||
+                field.name.size > WMFS_LOG_MAX_NAME_BYTES ||
+                field.kind < WMFS_LOG_FIELD_BOOLEAN ||
+                field.kind > WMFS_LOG_FIELD_TEXT)
+                continue;
+            const auto text_size =
+                field.kind == WMFS_LOG_FIELD_TEXT && field.text.data
+                    ? utf8_prefix(field.text.data, field.text.size,
+                                  sink->record_bytes)
+                    : 0;
+            const auto required =
+                WMFS_LOG_FIELD_SIZE + field.name.size + text_size;
+            if (required > sink->record_bytes - packet.size()) {
+                packet[20] |= WMFS_LOG_RECORD_TRUNCATED;
+                break;
+            }
+            const auto offset = packet.size();
+            packet.resize(offset + required);
+            packet[offset] = static_cast<std::uint8_t>(field.kind);
+            store32(packet.data() + offset + 4, field.name.size);
+            store32(packet.data() + offset + 8, text_size);
+            store64(packet.data() + offset + 12,
+                    field.kind == WMFS_LOG_FIELD_TEXT ? 0 : field.bits);
+            std::memcpy(packet.data() + offset + WMFS_LOG_FIELD_SIZE,
+                        field.name.data, field.name.size);
+            if (text_size)
+                std::memcpy(packet.data() + offset + WMFS_LOG_FIELD_SIZE +
+                                field.name.size,
+                            field.text.data, text_size);
+            ++encoded_fields;
+        }
+        store32(packet.data() + 16, packet.size());
+        store32(packet.data() + 28, encoded_fields);
+        sink->enqueue(level, std::move(packet));
+    } catch (...) {
+    }
+}
+
+void require(bool condition, const char *message) {
+    if (!condition)
+        throw std::invalid_argument(message);
+}
 
 std::uint64_t nanoseconds_since(std::chrono::steady_clock::time_point start) {
     return static_cast<std::uint64_t>(
@@ -67,395 +361,420 @@ std::uint64_t steady_nanoseconds() {
             .count());
 }
 
-Arguments parse_arguments(int argc, char **argv) {
-    Arguments result;
-    for (int index = 1; index < argc; ++index) {
-        std::string_view argument(argv[index]);
-        if (argument == "--help") {
-            std::cout
-                << "Usage: wmfs-reference-worker --rpc-fd FD --fd-socket-fd FD "
-                   "--schema PATH --interface ReferencePlugin --schema-import "
-                   "PATH\n";
-            std::exit(0);
+std::string executable_path() {
+    std::array<char, 4096> buffer{};
+    const auto length =
+        ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    return length < 0
+               ? std::string("/proc/self/exe")
+               : std::string(buffer.data(), static_cast<std::size_t>(length));
+}
+
+std::string sha256(std::string_view value) {
+    static constexpr std::uint32_t constants[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+        0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+        0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+        0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    std::array<std::uint32_t, 8> hash{0x6a09e667, 0xbb67ae85, 0x3c6ef372,
+                                      0xa54ff53a, 0x510e527f, 0x9b05688c,
+                                      0x1f83d9ab, 0x5be0cd19};
+    std::vector<std::uint8_t> bytes(value.begin(), value.end());
+    const std::uint64_t bit_length = bytes.size() * UINT64_C(8);
+    bytes.push_back(0x80);
+    while (bytes.size() % 64 != 56)
+        bytes.push_back(0);
+    for (int shift = 56; shift >= 0; shift -= 8)
+        bytes.push_back(static_cast<std::uint8_t>(bit_length >> shift));
+
+    const auto rotate = [](std::uint32_t input, std::uint32_t bits) {
+        return (input >> bits) | (input << (32 - bits));
+    };
+    for (std::size_t offset = 0; offset < bytes.size(); offset += 64) {
+        std::array<std::uint32_t, 64> words{};
+        for (std::size_t index = 0; index < 16; ++index) {
+            const auto at = offset + index * 4;
+            words[index] = (std::uint32_t(bytes[at]) << 24) |
+                           (std::uint32_t(bytes[at + 1]) << 16) |
+                           (std::uint32_t(bytes[at + 2]) << 8) | bytes[at + 3];
         }
-        if (index + 1 >= argc) {
-            throw std::invalid_argument("Missing value for " +
-                                        std::string(argument));
+        for (std::size_t index = 16; index < words.size(); ++index) {
+            const auto first = rotate(words[index - 15], 7) ^
+                               rotate(words[index - 15], 18) ^
+                               (words[index - 15] >> 3);
+            const auto second = rotate(words[index - 2], 17) ^
+                                rotate(words[index - 2], 19) ^
+                                (words[index - 2] >> 10);
+            words[index] =
+                words[index - 16] + first + words[index - 7] + second;
         }
-        std::string_view value(argv[++index]);
-        if (argument == "--rpc-fd") {
-            result.rpc_fd = std::stoi(std::string(value));
-        } else if (argument == "--fd-socket-fd") {
-            result.control_fd = std::stoi(std::string(value));
-        } else if (argument == "--command-ring-fd") {
-            result.command_ring_fd = std::stoi(std::string(value));
-        } else if (argument == "--command-data-fd") {
-            result.command_data_fd = std::stoi(std::string(value));
-        } else if (argument == "--command-space-fd") {
-            result.command_space_fd = std::stoi(std::string(value));
-        } else if (argument == "--completion-ring-fd") {
-            result.completion_ring_fd = std::stoi(std::string(value));
-        } else if (argument == "--completion-data-fd") {
-            result.completion_data_fd = std::stoi(std::string(value));
-        } else if (argument == "--completion-space-fd") {
-            result.completion_space_fd = std::stoi(std::string(value));
-        } else if (argument == "--ring-generation") {
-            result.ring_generation = std::stoull(std::string(value));
-        } else if (argument == "--schema") {
-            result.has_schema = true;
-        } else if (argument == "--interface") {
-            result.interface_name = value;
-        } else if (argument == "--schema-import") {
-            result.has_import = true;
-        } else {
-            throw std::invalid_argument("Unknown argument: " +
-                                        std::string(argument));
+        auto a = hash[0];
+        auto b = hash[1];
+        auto c = hash[2];
+        auto d = hash[3];
+        auto e = hash[4];
+        auto f = hash[5];
+        auto g = hash[6];
+        auto h = hash[7];
+        for (std::size_t index = 0; index < words.size(); ++index) {
+            const auto upper = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+            const auto choice = (e & f) ^ (~e & g);
+            const auto temporary1 =
+                h + upper + choice + constants[index] + words[index];
+            const auto lower = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+            const auto majority = (a & b) ^ (a & c) ^ (b & c);
+            const auto temporary2 = lower + majority;
+            h = g;
+            g = f;
+            f = e;
+            e = d + temporary1;
+            d = c;
+            c = b;
+            b = a;
+            a = temporary1 + temporary2;
         }
+        const std::uint32_t state[] = {a, b, c, d, e, f, g, h};
+        for (std::size_t index = 0; index < hash.size(); ++index)
+            hash[index] += state[index];
     }
-    if (result.rpc_fd < 0 || result.control_fd < 0 || !result.has_schema ||
-        !result.has_import || result.interface_name != "ReferencePlugin" ||
-        result.command_ring_fd < 0 || result.command_data_fd < 0 ||
-        result.command_space_fd < 0 || result.completion_ring_fd < 0 ||
-        result.completion_data_fd < 0 || result.completion_space_fd < 0 ||
-        result.ring_generation == 0) {
-        throw std::invalid_argument("Missing or invalid worker arguments");
+    static constexpr char hexadecimal[] = "0123456789abcdef";
+    std::string result(64, '0');
+    for (std::size_t index = 0; index < hash.size(); ++index)
+        for (std::size_t byte = 0; byte < 4; ++byte) {
+            const auto value_byte = static_cast<std::uint8_t>(
+                hash[index] >> static_cast<unsigned>((3 - byte) * 8));
+            result[(index * 4 + byte) * 2] = hexadecimal[value_byte >> 4];
+            result[(index * 4 + byte) * 2 + 1] = hexadecimal[value_byte & 15];
+        }
+    return result;
+}
+
+int parse_bootstrap(int argc, char **argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--help") {
+        std::cout << "Usage: wmfs-reference-worker --bootstrap-fd FD\n";
+        std::exit(0);
     }
-    if (result.rpc_fd == result.control_fd) {
-        throw std::invalid_argument("RPC and buffer sockets must be distinct");
+    if (argc != 3 || std::string_view(argv[1]) != "--bootstrap-fd")
+        throw std::invalid_argument("Expected only --bootstrap-fd FD");
+    return std::stoi(argv[2]);
+}
+
+std::vector<UniqueFd> received_fds(msghdr &message) {
+    std::vector<UniqueFd> result;
+    auto *control = CMSG_FIRSTHDR(&message);
+    if (control == nullptr)
+        return result;
+    require(CMSG_NXTHDR(&message, control) == nullptr,
+            "Multiple ancillary messages are unsupported");
+    require(control->cmsg_level == SOL_SOCKET &&
+                control->cmsg_type == SCM_RIGHTS &&
+                control->cmsg_len >= CMSG_LEN(0),
+            "Invalid ancillary descriptor data");
+    const auto size = control->cmsg_len - CMSG_LEN(0);
+    require(size % sizeof(int) == 0, "Malformed descriptor array");
+    auto *fds = reinterpret_cast<int *>(CMSG_DATA(control));
+    for (std::size_t index = 0; index < size / sizeof(int); ++index)
+        result.emplace_back(fds[index]);
+    return result;
+}
+
+std::pair<std::vector<std::uint8_t>, std::vector<UniqueFd>>
+receive_packet(int fd, std::size_t max_fds) {
+    std::vector<std::uint8_t> packet(WMFS_CONTROL_MAX_PACKET_BYTES);
+    std::vector<std::byte> ancillary(CMSG_SPACE(sizeof(int) * max_fds));
+    iovec vector{packet.data(), packet.size()};
+    msghdr message{};
+    message.msg_iov = &vector;
+    message.msg_iovlen = 1;
+    message.msg_control = ancillary.data();
+    message.msg_controllen = ancillary.size();
+    ssize_t received;
+    do {
+        received = ::recvmsg(fd, &message, MSG_CMSG_CLOEXEC);
+    } while (received < 0 && errno == EINTR);
+    if (received == 0)
+        throw std::runtime_error("Control socket closed");
+    if (received < 0)
+        throw std::runtime_error("Cannot receive control packet");
+    auto descriptors = received_fds(message);
+    require((message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) == 0,
+            "Control packet was truncated");
+    packet.resize(static_cast<std::size_t>(received));
+    return {std::move(packet), std::move(descriptors)};
+}
+
+void send_packet(int fd, const std::uint8_t *data, std::size_t size) {
+    const auto sent = ::send(fd, data, size, MSG_NOSIGNAL);
+    require(sent >= 0 && static_cast<std::size_t>(sent) == size,
+            "Control packet was not sent atomically");
+}
+
+StartupResources accept_startup(int bootstrap_fd) {
+    StartupResources result;
+    result.bootstrap = UniqueFd(bootstrap_fd);
+    auto received = receive_packet(bootstrap_fd, 8);
+    std::array<wmfs_control_descriptor_role_record_v1,
+               WMFS_CONTROL_MAX_DESCRIPTOR_ROLES>
+        roles{};
+    wmfs_control_startup_view_v1 request{};
+    const wmfs_control_bytes_v1 bytes{received.first.data(),
+                                      received.first.size()};
+    require(wmfs_control_decode_startup_v1(bytes, WMFS_CONTROL_STARTUP_REQUEST,
+                                           &request, roles.data(),
+                                           roles.size()) == 0,
+            "Invalid STARTUP_REQUEST");
+    const std::array<std::uint16_t, 7> base_roles{
+        WMFS_CONTROL_DESCRIPTOR_COMMAND_RING,
+        WMFS_CONTROL_DESCRIPTOR_COMMAND_DATA_EVENT,
+        WMFS_CONTROL_DESCRIPTOR_COMMAND_SPACE_EVENT,
+        WMFS_CONTROL_DESCRIPTOR_COMPLETION_RING,
+        WMFS_CONTROL_DESCRIPTOR_COMPLETION_DATA_EVENT,
+        WMFS_CONTROL_DESCRIPTOR_COMPLETION_SPACE_EVENT,
+        WMFS_CONTROL_DESCRIPTOR_FD_CONTROL};
+    const bool logging = request.startup.log_mode != WMFS_CONTROL_LOG_DISABLED;
+    const std::size_t expected_count = base_roles.size() + (logging ? 1 : 0);
+    require(received.second.size() == expected_count,
+            "STARTUP_REQUEST descriptor count differs");
+    require(request.startup.descriptor_count == expected_count,
+            "STARTUP_REQUEST descriptor role count differs");
+    for (std::size_t index = 0; index < base_roles.size(); ++index)
+        require(roles[index].role == base_roles[index],
+                "STARTUP_REQUEST descriptor role order differs");
+    if (logging)
+        require(roles[7].role == WMFS_CONTROL_DESCRIPTOR_LOG,
+                "STARTUP_REQUEST log descriptor role differs");
+    require(request.startup.session_generation != 0 &&
+                request.startup.metadata_fingerprint ==
+                    WMFS_REFERENCE_METADATA_FINGERPRINT &&
+                request.startup.capabilities ==
+                    WMFS_REFERENCE_STARTUP_CAPABILITIES &&
+                request.startup.operation_count ==
+                    WMFS_REFERENCE_OPERATION_COUNT &&
+                request.startup.protocol_version ==
+                    WMFS_REFERENCE_PROTOCOL_VERSION &&
+                request.startup.configuration_schema_version ==
+                    WMFS_REFERENCE_CONFIGURATION_SCHEMA_VERSION &&
+                request.startup.log_mode <= WMFS_CONTROL_LOG_WORKER_FILE &&
+                request.startup.status == WMFS_CONTROL_STATUS_OK &&
+                std::memcmp(request.startup.interface_fingerprint,
+                            interface_fingerprint_sha256, 32) == 0 &&
+                std::memcmp(request.startup.configuration_fingerprint,
+                            configuration_fingerprint_sha256, 32) == 0,
+            "STARTUP_REQUEST identity differs from generated declarations");
+
+    const std::string configuration(
+        reinterpret_cast<const char *>(request.config.data),
+        request.config.size);
+    const auto *api = wmfs_reference_plugin_get_api(WMFS_PLUGIN_ABI_VERSION);
+    require(api != nullptr, "Generated plugin API is unavailable");
+    const bool has_lifecycle =
+        api->struct_size >=
+        offsetof(wmfs_plugin_api_v1, shutdown) + sizeof(api->shutdown);
+    if (logging) {
+        result.log.reset(new StartupResources::LogSink());
+        result.log->fd = std::move(received.second[7]);
+        result.log->mode = request.startup.log_mode;
+        result.log->generation = request.startup.session_generation;
+        if (const char *value = std::getenv("WMFS_LOG_LEVEL"))
+            result.log->level = static_cast<std::uint32_t>(std::stoul(value));
+        if (const char *value = std::getenv("WMFS_LOG_RECORD_BYTES"))
+            result.log->record_bytes = std::stoul(value);
+        if (const char *value = std::getenv("WMFS_LOG_QUEUE_CAPACITY"))
+            result.log->capacity = std::stoul(value);
+        result.log->start();
+    }
+    if (has_lifecycle && (api->features & WMFS_PLUGIN_FEATURE_INITIALIZE)) {
+        require(api->initialize != nullptr,
+                "Generated plugin initialize callback is missing");
+        char error_data[1024]{};
+        wmfs_error_buffer_v1 error{sizeof(error), sizeof(error_data),
+                                   error_data, 0, 0};
+        wmfs_initialize_args_v1 args{};
+        args.struct_size = sizeof(args);
+        args.features = api->features;
+        args.configuration = {configuration.data(), configuration.size()};
+        args.logger.struct_size = sizeof(args.logger);
+        if (result.log) {
+            args.logger.context = result.log.get();
+            args.logger.enabled = &log_enabled;
+            args.logger.log = &log_write;
+        }
+        args.error = &error;
+        if (api->initialize(&args) != WMFS_STATUS_OK) {
+            const std::size_t error_size =
+                std::min<std::size_t>(error.size, error.capacity);
+            const std::string message =
+                error_size ? std::string(error.data, error_size)
+                           : "plugin rejected initialization";
+            std::vector<std::uint8_t> rejected(WMFS_CONTROL_MAX_PACKET_BYTES);
+            wmfs_control_mutable_bytes_v1 output{rejected.data(),
+                                                 rejected.size(), 0};
+            const wmfs_control_error_v1 control_error{
+                WMFS_CONTROL_STATUS_CONFIGURATION_REJECTED,
+                static_cast<std::uint32_t>(message.size())};
+            const wmfs_control_bytes_v1 message_bytes{
+                reinterpret_cast<const std::uint8_t *>(message.data()),
+                message.size()};
+            require(wmfs_control_encode_error_v1(request.request_id,
+                                                 &control_error, message_bytes,
+                                                 &output) == 0,
+                    "Cannot encode startup rejection");
+            send_packet(bootstrap_fd, rejected.data(), output.size);
+            throw std::runtime_error("Plugin rejected initialization");
+        }
+        result.initialized = true;
+    }
+    const std::string environment =
+        std::string("{\"configuration\":") + configuration +
+        ",\"configurationDigest\":\"" + sha256(configuration) +
+        "\",\"hookAccepted\":true" + ",\"executable\":\"" + executable_path() +
+        "\",\"glibcVersion\":\"" + gnu_get_libc_version() +
+        "\",\"pythonVersion\":\"none\",\"torchVersion\":\"" +
+        WMFS_STRINGIFY(TORCH_VERSION_MAJOR) "." WMFS_STRINGIFY(
+            TORCH_VERSION_MINOR) "." WMFS_STRINGIFY(TORCH_VERSION_PATCH) "\"}";
+    auto response = request.startup;
+    response.descriptor_count = 0;
+    response.config_length = environment.size();
+    std::vector<std::uint8_t> encoded(WMFS_CONTROL_MAX_PACKET_BYTES);
+    wmfs_control_mutable_bytes_v1 output{encoded.data(), encoded.size(), 0};
+    const wmfs_control_bytes_v1 environment_bytes{
+        reinterpret_cast<const std::uint8_t *>(environment.data()),
+        environment.size()};
+    require(wmfs_control_encode_startup_v1(
+                WMFS_CONTROL_STARTUP_RESPONSE, request.request_id, &response,
+                nullptr, environment_bytes, &output) == 0,
+            "Cannot encode STARTUP_RESPONSE");
+    send_packet(bootstrap_fd, encoded.data(), output.size);
+
+    result.generation = request.startup.session_generation;
+    result.api = api;
+    for (std::size_t index = 0; index < 3; ++index)
+        result.commands[index] = std::move(received.second[index]);
+    for (std::size_t index = 0; index < 3; ++index)
+        result.completions[index] = std::move(received.second[index + 3]);
+    result.fd_control = std::move(received.second[6]);
+    return result;
+}
+
+std::uint32_t abi_dtype(at::ScalarType dtype) {
+    switch (dtype) {
+    case at::kFloat:
+        return WMFS_DTYPE_FLOAT32;
+    case at::kDouble:
+        return WMFS_DTYPE_FLOAT64;
+    case at::kLong:
+        return WMFS_DTYPE_INT64;
+    case at::kByte:
+        return WMFS_DTYPE_UINT8;
+    default:
+        throw std::invalid_argument("Unsupported tensor dtype");
+    }
+}
+
+wmfs_tensor_v1 abi_tensor(at::Tensor &tensor) {
+    wmfs_tensor_v1 result{};
+    result.struct_size = sizeof(result);
+    result.dtype = abi_dtype(tensor.scalar_type());
+    result.rank = static_cast<std::uint32_t>(tensor.dim());
+    result.byte_length = tensor.nbytes();
+    result.data = tensor.data_ptr();
+    for (std::uint32_t index = 0; index < result.rank; ++index) {
+        result.shape[index] = tensor.size(index);
+        result.strides[index] = tensor.stride(index);
     }
     return result;
 }
 
-void validate_socket(int fd, int expected_type = 0) {
-    int type = 0;
-    socklen_t length = sizeof(type);
-    if (::getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) < 0) {
-        throw std::invalid_argument("Worker descriptor is not an open socket");
+std::vector<wmfs_scalar_v1> scalars(const wmfs_ring_record_v1 &command) {
+    std::vector<wmfs_scalar_v1> result;
+    for (std::uint16_t index = 0; index < command.scalar_count; ++index) {
+        const auto &source = command.scalars[index];
+        wmfs_scalar_v1 value{};
+        value.struct_size = sizeof(value);
+        value.parameter_index = source.parameter_index;
+        value.bits = source.bits;
+        value.kind =
+            source.kind == WMFS_RING_SCALAR_BOOLEAN   ? WMFS_SCALAR_BOOLEAN
+            : source.kind == WMFS_RING_SCALAR_FLOAT64 ? WMFS_SCALAR_FLOAT64
+                                                      : WMFS_SCALAR_INT64;
+        result.push_back(value);
     }
-    if (expected_type != 0 && type != expected_type) {
-        throw std::invalid_argument("Buffer descriptor is not SOCK_SEQPACKET");
-    }
+    return result;
 }
 
-std::string executable_path() {
-    std::array<char, 4096> buffer{};
-    auto length =
-        ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
-    if (length < 0) {
-        return "/proc/self/exe";
-    }
-    return std::string(buffer.data(), static_cast<std::size_t>(length));
+void dispatch(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
+              std::vector<TensorLease> &outputs,
+              const std::vector<wmfs_scalar_v1> &scalar_values) {
+    std::vector<wmfs_tensor_v1> input_values;
+    std::vector<wmfs_tensor_v1> output_values;
+    for (auto &input : inputs)
+        input_values.push_back(abi_tensor(input.tensor()));
+    for (auto &output : outputs)
+        output_values.push_back(abi_tensor(output.tensor()));
+    wmfs_invocation_v1 invocation{};
+    invocation.struct_size = sizeof(invocation);
+    invocation.operation_id = operation_id;
+    invocation.input_count = input_values.size();
+    invocation.output_count = output_values.size();
+    invocation.scalar_count = scalar_values.size();
+    invocation.inputs = input_values.data();
+    invocation.outputs = output_values.data();
+    invocation.scalars = scalar_values.data();
+    const auto *api = wmfs_reference_plugin_get_api(WMFS_PLUGIN_ABI_VERSION);
+    require(api != nullptr && api->dispatch(&invocation) == WMFS_STATUS_OK,
+            "Generated plugin dispatch rejected invocation");
 }
 
-void require(bool condition, const char *message) {
-    if (!condition) {
-        throw std::invalid_argument(message);
-    }
-}
-
-#include "reference_dispatch.inc"
-
-class ReferenceServer final : public ReferencePlugin::Server {
-  public:
-    ReferenceServer(MappedBufferCache &buffers, std::uint32_t ring_capacity,
-                    std::uint64_t ring_generation)
-        : buffers_(buffers), ring_capacity_(ring_capacity),
-          ring_generation_(ring_generation) {}
-
-  protected:
-    kj::Promise<void> getMetadata(GetMetadataContext context) override {
-        if (PLUGIN_METADATA.get().getFingerprint() !=
-            WMFS_METADATA_FINGERPRINT) {
-            throw std::logic_error(
-                "Reference schema and generated dispatch fingerprints differ");
-        }
-        context.getResults().setMetadata(PLUGIN_METADATA.get());
-        return kj::READY_NOW;
-    }
-
-    kj::Promise<void>
-    getProtocolVersion(GetProtocolVersionContext context) override {
-        context.getResults().setVersion(PROTOCOL_VERSION);
-        return kj::READY_NOW;
-    }
-
-    kj::Promise<void> ping(PingContext context) override {
-        context.getResults().setNonce(context.getParams().getNonce());
-        return kj::READY_NOW;
-    }
-
-    kj::Promise<void> getEnvironment(GetEnvironmentContext context) override {
-        auto environment = context.getResults().initEnvironment();
-        environment.setPythonVersion("none");
-        environment.setTorchVersion(
-            WMFS_STRINGIFY(TORCH_VERSION_MAJOR) "." WMFS_STRINGIFY(
-                TORCH_VERSION_MINOR) "." WMFS_STRINGIFY(TORCH_VERSION_PATCH));
-        environment.setGlibcVersion(gnu_get_libc_version());
-        environment.setExecutable(executable_path());
-        return kj::READY_NOW;
-    }
-
-    kj::Promise<void>
-    getRingHandshake(GetRingHandshakeContext context) override {
-        auto ring = context.getResults().initRing();
-        ring.setAbiMajor(WMFS_RING_ABI_MAJOR);
-        ring.setAbiMinor(WMFS_RING_ABI_MINOR);
-        ring.setHeaderSize(WMFS_RING_HEADER_SIZE);
-        ring.setRecordSize(WMFS_RING_RECORD_SIZE);
-        ring.setCapacity(ring_capacity_);
-        ring.setGeneration(ring_generation_);
-        ring.setCapabilities(3);
-        return kj::READY_NOW;
-    }
-
-    kj::Promise<void> invokeKnown(InvokeKnownContext context) override {
-        return translate_errors([&] {
-            auto outcome = context.getResults().initOutcome();
-            try {
-                run_known(context.getParams().getInvocation(), false);
-                outcome.setSuccess();
-            } catch (const OperationFailure &error) {
-                auto result = outcome.initOperationError();
-                result.setType(error.type);
-                result.setMessage(error.what());
-            }
-        });
-    }
-
-    kj::Promise<void>
-    invokeKnownProfiled(InvokeKnownProfiledContext context) override {
-        return translate_errors([&] {
-            auto outcome = context.getResults().initOutcome();
-            try {
-                auto measured =
-                    run_known(context.getParams().getInvocation(), true);
-                outcome.setSuccess();
-                auto metrics = context.getResults().initMetrics();
-                metrics.setInputViewsNs(measured.input_views_ns);
-                metrics.setOutputViewsNs(measured.output_views_ns);
-                metrics.setDispatchNs(measured.dispatch_ns);
-                metrics.setKernelNs(measured.kernel_ns);
-            } catch (const OperationFailure &error) {
-                auto result = outcome.initOperationError();
-                result.setType(error.type);
-                result.setMessage(error.what());
-            }
-        });
-    }
-
-    kj::Promise<void> planOutputs(PlanOutputsContext context) override {
-        return translate_errors([&] {
-            auto invocation = context.getParams().getInvocation();
-            require(invocation.getOperationId() == 6,
-                    "Operation has no dynamic output planner");
-            require(invocation.getInputs().size() == 1,
-                    "Output planning has an invalid input count");
-            auto invocation_id = invocation.getInvocationId();
-            auto input =
-                buffers_.tensor(invocation.getInputs()[0], invocation_id);
-            auto outcome = context.getResults().initOutcome();
-            std::int64_t count;
-            try {
-                count = at::count_nonzero(input.tensor()).item<std::int64_t>();
-                if (count == 0)
-                    throw std::invalid_argument(
-                        "nonzero does not yet support an empty result");
-            } catch (const OperationFailure &error) {
-                auto result = outcome.initOperationError();
-                result.setType(error.type);
-                result.setMessage(error.what());
-                return;
-            } catch (const c10::Error &error) {
-                auto result = outcome.initOperationError();
-                result.setType("RuntimeError");
-                result.setMessage(error.what_without_backtrace());
-                return;
-            }
-            outcome.setSuccess();
-            auto outputs = context.getResults().initOutputs(1);
-            outputs[0].setOutput(0);
-            auto shape = outputs[0].initShape(2);
-            shape.set(0, static_cast<std::uint64_t>(count));
-            shape.set(1, static_cast<std::uint64_t>(input.tensor().dim()));
-            outputs[0].setDtype(DType::INT64);
-        });
-    }
-
-  private:
-    struct OperationFailure : std::runtime_error {
-        std::string type;
-
-        OperationFailure(std::string type, std::string message)
-            : std::runtime_error(std::move(message)), type(std::move(type)) {}
-    };
-
-    struct InvocationMeasurements {
-        std::uint64_t input_views_ns{};
-        std::uint64_t output_views_ns{};
-        std::uint64_t dispatch_ns{};
-        std::uint64_t kernel_ns{};
-    };
-
-    InvocationMeasurements run_known(KnownInvocation::Reader invocation,
-                                     bool profiled) {
-        auto invocation_id = invocation.getInvocationId();
-        struct InvocationCleanup {
-            MappedBufferCache &buffers;
-            std::uint64_t invocation_id;
-            ~InvocationCleanup() { buffers.finish_invocation(invocation_id); }
-        } cleanup{buffers_, invocation_id};
-
-        c10::InferenceMode inference_mode;
-        auto started = profiled ? std::chrono::steady_clock::now()
-                                : std::chrono::steady_clock::time_point{};
-        auto view_started = profiled ? std::chrono::steady_clock::now()
-                                     : std::chrono::steady_clock::time_point{};
-        std::vector<TensorLease> inputs;
-        inputs.reserve(invocation.getInputs().size());
-        for (auto descriptor : invocation.getInputs()) {
-            inputs.push_back(buffers_.tensor(descriptor, invocation_id));
-        }
-        auto input_views_ns = profiled ? nanoseconds_since(view_started) : 0;
-
-        if (profiled) {
-            view_started = std::chrono::steady_clock::now();
-        }
-        std::vector<TensorLease> outputs;
-        outputs.reserve(invocation.getOutputs().size());
-        for (auto descriptor : invocation.getOutputs()) {
-            outputs.push_back(buffers_.tensor(descriptor, invocation_id, true));
-        }
-        auto output_views_ns = profiled ? nanoseconds_since(view_started) : 0;
-
-        auto kernel_started = profiled
-                                  ? std::chrono::steady_clock::now()
-                                  : std::chrono::steady_clock::time_point{};
-        try {
-            execute_known(invocation.getOperationId(), inputs, outputs,
-                          invocation.getScalars());
-        } catch (const c10::Error &error) {
-            throw OperationFailure("RuntimeError",
-                                   error.what_without_backtrace());
-        } catch (const std::invalid_argument &error) {
-            throw OperationFailure("ValueError", error.what());
-        } catch (const std::exception &error) {
-            throw OperationFailure("RuntimeError", error.what());
-        }
-        auto kernel_ns = profiled ? nanoseconds_since(kernel_started) : 0;
-        auto elapsed_ns = profiled ? nanoseconds_since(started) : 0;
-        auto measured_ns = input_views_ns + output_views_ns + kernel_ns;
-        return {
-            input_views_ns,
-            output_views_ns,
-            elapsed_ns > measured_ns ? elapsed_ns - measured_ns : 0,
-            kernel_ns,
-        };
-    }
-
-    template <typename Function>
-    static kj::Promise<void> translate_errors(Function &&function) {
-        try {
-            std::forward<Function>(function)();
-            return kj::READY_NOW;
-        } catch (const c10::Error &error) {
-            return kj::Promise<void>(
-                KJ_EXCEPTION(FAILED, error.what_without_backtrace()));
-        } catch (const std::exception &error) {
-            return kj::Promise<void>(KJ_EXCEPTION(FAILED, error.what()));
-        }
-    }
-
-    MappedBufferCache &buffers_;
-    std::uint32_t ring_capacity_;
-    std::uint64_t ring_generation_;
-};
-
-DType dtype_to_capnp(std::uint32_t dtype) {
-    switch (dtype) {
-    case WMFS_RING_DTYPE_FLOAT32:
-        return DType::FLOAT32;
-    case WMFS_RING_DTYPE_FLOAT64:
-        return DType::FLOAT64;
-    case WMFS_RING_DTYPE_INT64:
-        return DType::INT64;
-    case WMFS_RING_DTYPE_UINT8:
-        return DType::UINT8;
-    default:
-        throw std::invalid_argument("Unsupported ring tensor dtype");
-    }
+std::vector<wmfs_output_plan_v1>
+plan(std::uint32_t operation_id, std::vector<TensorLease> &inputs,
+     const std::vector<wmfs_scalar_v1> &scalar_values) {
+    std::vector<wmfs_tensor_v1> input_values;
+    for (auto &input : inputs)
+        input_values.push_back(abi_tensor(input.tensor()));
+    wmfs_invocation_v1 invocation{};
+    invocation.struct_size = sizeof(invocation);
+    invocation.operation_id = operation_id;
+    invocation.input_count = input_values.size();
+    invocation.scalar_count = scalar_values.size();
+    invocation.inputs = input_values.data();
+    invocation.scalars = scalar_values.data();
+    std::vector<wmfs_output_plan_v1> result(WMFS_PLUGIN_MAX_OUTPUTS);
+    std::uint32_t count = 0;
+    const auto *api = wmfs_reference_plugin_get_api(WMFS_PLUGIN_ABI_VERSION);
+    require(api != nullptr && api->plan_outputs != nullptr &&
+                api->plan_outputs(&invocation, result.data(), result.size(),
+                                  &count) == WMFS_STATUS_OK &&
+                count <= result.size(),
+            "Generated output planner rejected invocation");
+    result.resize(count);
+    return result;
 }
 
 TensorLease ring_tensor(MappedBufferCache &buffers,
                         const wmfs_ring_tensor_descriptor_v1 &source,
                         std::uint64_t invocation_id, bool writable) {
-    capnp::MallocMessageBuilder message;
-    auto descriptor = message.initRoot<TensorDescriptor>();
-    descriptor.setBufferId(source.buffer_id);
-    descriptor.setGeneration(
-        static_cast<std::uint32_t>(source.buffer_generation));
-    descriptor.setAllocationId(source.allocation_id);
-    descriptor.setOffset(source.byte_offset);
-    descriptor.setByteLength(source.byte_length);
-    descriptor.setDtype(dtype_to_capnp(source.dtype));
-    auto shape = descriptor.initShape(source.rank);
-    auto strides = descriptor.initStrides(source.rank);
+    TensorDescriptor descriptor{
+        source.buffer_id,
+        static_cast<std::uint32_t>(source.buffer_generation),
+        source.allocation_id,
+        source.byte_offset,
+        source.byte_length,
+        source.dtype,
+        {},
+        {}};
     for (std::uint16_t index = 0; index < source.rank; ++index) {
         require(source.shape[index] > 0, "Ring tensor shape is invalid");
-        shape.set(index, static_cast<std::uint64_t>(source.shape[index]));
-        strides.set(index, source.strides[index]);
+        descriptor.shape.push_back(source.shape[index]);
+        descriptor.strides.push_back(source.strides[index]);
     }
-    return buffers.tensor(descriptor.asReader(), invocation_id, writable);
-}
-
-void execute_ring(const wmfs_ring_record_v1 &command,
-                  std::vector<TensorLease> &inputs,
-                  std::vector<TensorLease> &outputs) {
-    switch (command.operation_id) {
-    case 1:
-        require(inputs.size() == 2 && outputs.size() == 1 &&
-                    command.scalar_count == 0,
-                "Invalid matmul invocation");
-        matmul_out(inputs[0].tensor(), inputs[1].tensor(), outputs[0].tensor());
-        break;
-    case 2:
-        require(inputs.size() == 1 && outputs.size() == 3 &&
-                    command.scalar_count == 1 &&
-                    command.scalars[0].kind == WMFS_RING_SCALAR_BOOLEAN &&
-                    command.scalars[0].parameter_index == 0,
-                "Invalid svd invocation");
-        svd_out(inputs[0].tensor(), command.scalars[0].bits != 0,
-                outputs[0].tensor(), outputs[1].tensor(), outputs[2].tensor());
-        break;
-    case 3: {
-        require(inputs.size() == 1 && outputs.size() == 1 &&
-                    command.scalar_count == 1 &&
-                    command.scalars[0].kind == WMFS_RING_SCALAR_FLOAT64,
-                "Invalid add_scalar invocation");
-        double value;
-        std::memcpy(&value, &command.scalars[0].bits, sizeof(value));
-        add_scalar_out(inputs[0].tensor(), value, outputs[0].tensor());
-        break;
-    }
-    case 4:
-        require(inputs.size() == 3 && outputs.size() == 2,
-                "Invalid matmul_vjp invocation");
-        matmul_vjp_out(inputs[0].tensor(), inputs[1].tensor(),
-                       inputs[2].tensor(), outputs[0].tensor(),
-                       outputs[1].tensor());
-        break;
-    case 5:
-        require(inputs.size() == 1 && outputs.size() == 1,
-                "Invalid add_scalar_vjp invocation");
-        add_scalar_vjp_out(inputs[0].tensor(), outputs[0].tensor());
-        break;
-    case 6:
-        require(inputs.size() == 1 && outputs.size() == 1,
-                "Invalid nonzero invocation");
-        nonzero_out(inputs[0].tensor(), outputs[0].tensor());
-        break;
-    default:
-        throw std::invalid_argument("Unknown operation ID");
-    }
+    return buffers.tensor(descriptor, invocation_id, writable);
 }
 
 void set_error(wmfs_ring_record_v1 &completion, std::uint32_t status,
@@ -464,25 +783,96 @@ void set_error(wmfs_ring_record_v1 &completion, std::uint32_t status,
     const auto type_size = std::min(type.size(), sizeof(completion.error.type));
     const auto message_size =
         std::min(message.size(), sizeof(completion.error.message));
-    completion.error.type_length = static_cast<std::uint32_t>(type_size);
-    completion.error.message_length = static_cast<std::uint32_t>(message_size);
-    completion.error.flags =
-        (type_size != type.size() ? WMFS_RING_ERROR_FLAG_TRUNCATED_TYPE : 0) |
-        (message_size != message.size() ? WMFS_RING_ERROR_FLAG_TRUNCATED_MESSAGE
-                                        : 0);
+    completion.error.type_length = type_size;
+    completion.error.message_length = message_size;
     std::memcpy(completion.error.type, type.data(), type_size);
     std::memcpy(completion.error.message, message.data(), message_size);
 }
 
-void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
-              MappedBufferCache &buffers) {
+template <bool Profiled, bool Logging>
+void execute_ring_command(const wmfs_ring_record_v1 &command,
+                          wmfs_ring_record_v1 &completion,
+                          MappedBufferCache &buffers) {
+    if constexpr (Logging) {
+        log_submission_id = command.submission_id;
+        log_invocation_id = command.invocation_id;
+        log_operation_id = command.operation_id;
+    }
+    c10::InferenceMode inference_mode;
+    std::vector<TensorLease> inputs;
+    std::vector<TensorLease> outputs;
+    std::chrono::steady_clock::time_point started{};
+    if constexpr (Profiled)
+        started = std::chrono::steady_clock::now();
+    for (std::uint16_t index = 0; index < command.tensor_count; ++index) {
+        const auto &item = command.tensors[index];
+        std::chrono::steady_clock::time_point view_started{};
+        if constexpr (Profiled)
+            view_started = std::chrono::steady_clock::now();
+        if (item.kind == WMFS_RING_TENSOR_INPUT) {
+            inputs.push_back(
+                ring_tensor(buffers, item, command.invocation_id,
+                            item.flags & WMFS_RING_TENSOR_FLAG_WRITABLE));
+            if constexpr (Profiled)
+                completion.profile.worker_input_views_ns +=
+                    nanoseconds_since(view_started);
+        } else if (item.kind == WMFS_RING_TENSOR_OUTPUT) {
+            outputs.push_back(
+                ring_tensor(buffers, item, command.invocation_id, true));
+            if constexpr (Profiled)
+                completion.profile.worker_output_views_ns +=
+                    nanoseconds_since(view_started);
+        } else {
+            throw std::invalid_argument("Invalid ring tensor kind");
+        }
+    }
+    auto scalar_values = scalars(command);
+    if (command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS) {
+        auto planned = plan(command.operation_id, inputs, scalar_values);
+        completion.planned_output_count = planned.size();
+        for (std::size_t index = 0; index < planned.size(); ++index) {
+            completion.planned_outputs[index].dtype = planned[index].dtype;
+            completion.planned_outputs[index].rank = planned[index].rank;
+            completion.planned_outputs[index].output_index =
+                planned[index].output_index;
+            for (std::uint32_t axis = 0; axis < planned[index].rank; ++axis)
+                completion.planned_outputs[index].shape[axis] =
+                    planned[index].shape[axis];
+        }
+    } else if (command.kind == WMFS_RING_COMMAND_INVOKE) {
+        std::chrono::steady_clock::time_point kernel{};
+        if constexpr (Profiled)
+            kernel = std::chrono::steady_clock::now();
+        dispatch(command.operation_id, inputs, outputs, scalar_values);
+        if constexpr (Profiled) {
+            completion.profile.worker_kernel_ns = nanoseconds_since(kernel);
+            const auto elapsed = nanoseconds_since(started);
+            completion.profile.worker_dispatch_ns =
+                elapsed > completion.profile.worker_kernel_ns
+                    ? elapsed - completion.profile.worker_kernel_ns
+                    : 0;
+        }
+    } else if (command.kind == WMFS_RING_COMMAND_PING) {
+        std::chrono::steady_clock::time_point kernel{};
+        if constexpr (Profiled)
+            kernel = std::chrono::steady_clock::now();
+        if (command.operation_id)
+            std::this_thread::sleep_for(
+                std::chrono::nanoseconds(command.operation_id));
+        if constexpr (Profiled)
+            completion.profile.worker_kernel_ns = nanoseconds_since(kernel);
+    } else {
+        throw std::invalid_argument("Unsupported ring command");
+    }
+}
+
+void run_ring(RingConsumer commands, RingProducer completions,
+              MappedBufferCache &buffers, bool logging_enabled) {
     for (;;) {
         wmfs_ring_record_v1 command{};
-        if (commands.pop(command) != wmfs::RingWaitResult::success)
+        if (commands.pop(command) != RingWaitResult::success)
             return;
-        const auto profiled =
-            (command.flags & WMFS_RING_RECORD_FLAG_PROFILE) != 0;
-        const auto worker_dequeued_ns = profiled ? steady_nanoseconds() : 0;
+        const bool profiled = command.flags & WMFS_RING_RECORD_FLAG_PROFILE;
         wmfs_ring_record_v1 completion{};
         completion.kind = command.kind == WMFS_RING_COMMAND_INVOKE
                               ? WMFS_RING_COMPLETION_INVOKE
@@ -497,68 +887,20 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
         completion.status = WMFS_RING_STATUS_OK;
         completion.profile.command_published_ns =
             command.profile.command_published_ns;
-        completion.profile.worker_dequeued_ns = worker_dequeued_ns;
+        completion.profile.worker_dequeued_ns =
+            profiled ? steady_nanoseconds() : 0;
         completion.profile.worker_started_ns =
             profiled ? steady_nanoseconds() : 0;
         try {
-            c10::InferenceMode inference_mode;
-            std::vector<TensorLease> inputs;
-            std::vector<TensorLease> outputs;
-            const auto started = std::chrono::steady_clock::now();
-            for (std::uint16_t index = 0; index < command.tensor_count;
-                 ++index) {
-                const auto &descriptor = command.tensors[index];
-                const auto view_started = std::chrono::steady_clock::now();
-                if (descriptor.kind == WMFS_RING_TENSOR_INPUT) {
-                    inputs.push_back(
-                        ring_tensor(buffers, descriptor, command.invocation_id,
-                                    (descriptor.flags &
-                                     WMFS_RING_TENSOR_FLAG_WRITABLE) != 0));
-                    completion.profile.worker_input_views_ns +=
-                        nanoseconds_since(view_started);
-                } else if (descriptor.kind == WMFS_RING_TENSOR_OUTPUT) {
-                    outputs.push_back(ring_tensor(buffers, descriptor,
-                                                  command.invocation_id, true));
-                    completion.profile.worker_output_views_ns +=
-                        nanoseconds_since(view_started);
-                } else {
-                    throw std::invalid_argument("Invalid ring tensor kind");
-                }
-            }
-            if (command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS) {
-                require(command.operation_id == 6 && inputs.size() == 1,
-                        "Operation has no dynamic output planner");
-                const auto count =
-                    at::count_nonzero(inputs[0].tensor()).item<std::int64_t>();
-                if (count == 0)
-                    throw std::invalid_argument(
-                        "nonzero does not yet support an empty result");
-                completion.planned_output_count = 1;
-                completion.planned_outputs[0].dtype = WMFS_RING_DTYPE_INT64;
-                completion.planned_outputs[0].rank = 2;
-                completion.planned_outputs[0].output_index = 0;
-                completion.planned_outputs[0].shape[0] = count;
-                completion.planned_outputs[0].shape[1] =
-                    inputs[0].tensor().dim();
-            } else if (command.kind == WMFS_RING_COMMAND_INVOKE) {
-                const auto kernel = std::chrono::steady_clock::now();
-                execute_ring(command, inputs, outputs);
-                completion.profile.worker_kernel_ns = nanoseconds_since(kernel);
-                const auto elapsed = nanoseconds_since(started);
-                completion.profile.worker_dispatch_ns =
-                    elapsed > completion.profile.worker_kernel_ns
-                        ? elapsed - completion.profile.worker_kernel_ns
-                        : 0;
-            } else if (command.kind == WMFS_RING_COMMAND_PING) {
-                const auto kernel = std::chrono::steady_clock::now();
-                if (command.operation_id != 0)
-                    std::this_thread::sleep_for(
-                        std::chrono::nanoseconds(command.operation_id));
-                completion.profile.worker_kernel_ns =
-                    profiled ? nanoseconds_since(kernel) : 0;
-            } else {
-                throw std::invalid_argument("Unsupported ring command");
-            }
+            if (profiled && logging_enabled)
+                execute_ring_command<true, true>(command, completion, buffers);
+            else if (profiled)
+                execute_ring_command<true, false>(command, completion, buffers);
+            else if (logging_enabled)
+                execute_ring_command<false, true>(command, completion, buffers);
+            else
+                execute_ring_command<false, false>(command, completion,
+                                                   buffers);
         } catch (const c10::Error &error) {
             set_error(completion, WMFS_RING_STATUS_OPERATION_ERROR,
                       "RuntimeError", error.what_without_backtrace());
@@ -572,79 +914,97 @@ void run_ring(wmfs::RingConsumer commands, wmfs::RingProducer completions,
         buffers.finish_invocation(command.invocation_id);
         completion.profile.completion_published_ns =
             profiled ? steady_nanoseconds() : 0;
-        if (completions.push(completion) != wmfs::RingWaitResult::success)
+        if (completions.push(completion) != RingWaitResult::success)
             return;
+    }
+}
+
+std::uint64_t serve_lifecycle(int fd) {
+    for (;;) {
+        auto received = receive_packet(fd, 1);
+        require(received.second.empty(),
+                "Lifecycle frame carried file descriptors");
+        const wmfs_control_bytes_v1 packet{received.first.data(),
+                                           received.first.size()};
+        std::uint64_t request_id = 0;
+        if (wmfs_control_decode_empty_v1(packet, WMFS_CONTROL_PING,
+                                         &request_id) == 0) {
+            std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE> response{};
+            wmfs_control_mutable_bytes_v1 output{response.data(),
+                                                 response.size(), 0};
+            require(wmfs_control_encode_empty_v1(WMFS_CONTROL_PONG, request_id,
+                                                 &output) == 0,
+                    "Cannot encode lifecycle response");
+            send_packet(fd, response.data(), output.size);
+        } else if (wmfs_control_decode_empty_v1(packet, WMFS_CONTROL_SHUTDOWN,
+                                                &request_id) == 0) {
+            return request_id;
+        } else {
+            throw std::runtime_error("Invalid lifecycle frame");
+        }
     }
 }
 
 } // namespace
 
 int run_worker(int argc, char **argv) {
-    auto arguments = parse_arguments(argc, argv);
-    validate_socket(arguments.rpc_fd);
-    validate_socket(arguments.control_fd, SOCK_SEQPACKET);
-
-    auto commands = wmfs::RingConsumer::borrow(
-        wmfs::UniqueFd(arguments.command_ring_fd),
-        wmfs::UniqueFd(arguments.command_data_fd),
-        wmfs::UniqueFd(arguments.command_space_fd), arguments.ring_generation);
-    auto command_interrupt = wmfs::RingProducer::borrow(
+    auto resources = accept_startup(parse_bootstrap(argc, argv));
+    auto commands = RingConsumer::borrow(
+        std::move(resources.commands[0]), std::move(resources.commands[1]),
+        std::move(resources.commands[2]), resources.generation);
+    auto command_interrupt = RingProducer::borrow(
         commands.duplicate_ring_fd(), commands.duplicate_data_event_fd(),
-        commands.duplicate_space_event_fd(), arguments.ring_generation);
-    const auto ring_capacity = [&] {
-        struct stat status{};
-        if (::fstat(commands.ring_fd(), &status) < 0)
-            throw std::runtime_error("Cannot inspect command ring");
-        return static_cast<std::uint32_t>(
-            (status.st_size - WMFS_RING_HEADER_SIZE) / WMFS_RING_RECORD_SIZE);
-    }();
-    auto completions = wmfs::RingProducer::borrow(
-        wmfs::UniqueFd(arguments.completion_ring_fd),
-        wmfs::UniqueFd(arguments.completion_data_fd),
-        wmfs::UniqueFd(arguments.completion_space_fd),
-        arguments.ring_generation);
-
+        commands.duplicate_space_event_fd(), resources.generation);
+    auto completions = RingProducer::borrow(std::move(resources.completions[0]),
+                                            std::move(resources.completions[1]),
+                                            std::move(resources.completions[2]),
+                                            resources.generation);
     MappedBufferCache buffers;
     std::exception_ptr receiver_error;
     std::thread receiver([&] {
         try {
-            receive_buffer_transfers(arguments.control_fd, buffers);
+            receive_buffer_transfers(resources.fd_control.get(),
+                                     resources.generation, buffers);
         } catch (...) {
             receiver_error = std::current_exception();
-            ::shutdown(arguments.rpc_fd, SHUT_RDWR);
+            ::shutdown(resources.bootstrap.get(), SHUT_RDWR);
         }
     });
     std::thread ring_worker([&] {
         try {
-            run_ring(std::move(commands), std::move(completions), buffers);
+            run_ring(std::move(commands), std::move(completions), buffers,
+                     resources.log != nullptr);
         } catch (...) {
-            ::shutdown(arguments.rpc_fd, SHUT_RDWR);
+            ::shutdown(resources.bootstrap.get(), SHUT_RDWR);
         }
     });
-
     try {
-        auto io = kj::setupAsyncIo();
-        auto stream = io.lowLevelProvider->wrapSocketFd(
-            kj::AutoCloseFd(arguments.rpc_fd));
-        ReferencePlugin::Client bootstrap(kj::heap<ReferenceServer>(
-            buffers, ring_capacity, arguments.ring_generation));
-        capnp::TwoPartyServer server(bootstrap);
-        server.accept(*stream).wait(io.waitScope);
-    } catch (...) {
-        ::shutdown(arguments.control_fd, SHUT_RDWR);
+        const auto shutdown_request =
+            serve_lifecycle(resources.bootstrap.get());
+        ::shutdown(resources.fd_control.get(), SHUT_RDWR);
         command_interrupt.close();
         receiver.join();
         ring_worker.join();
+        if (resources.initialized && resources.api && resources.api->shutdown)
+            resources.api->shutdown();
+        std::array<std::uint8_t, WMFS_CONTROL_FRAME_HEADER_SIZE> response{};
+        wmfs_control_mutable_bytes_v1 output{response.data(), response.size(),
+                                             0};
+        require(wmfs_control_encode_empty_v1(WMFS_CONTROL_SHUTDOWN_ACK,
+                                             shutdown_request, &output) == 0,
+                "Cannot encode shutdown acknowledgement");
+        send_packet(resources.bootstrap.get(), response.data(), output.size);
+    } catch (...) {
+        ::shutdown(resources.fd_control.get(), SHUT_RDWR);
+        command_interrupt.close();
+        if (receiver.joinable())
+            receiver.join();
+        if (ring_worker.joinable())
+            ring_worker.join();
         throw;
     }
-
-    ::shutdown(arguments.control_fd, SHUT_RDWR);
-    command_interrupt.close();
-    receiver.join();
-    ring_worker.join();
-    if (receiver_error) {
+    if (receiver_error)
         std::rethrow_exception(receiver_error);
-    }
     return 0;
 }
 
@@ -653,11 +1013,8 @@ int run_worker(int argc, char **argv) {
 int main(int argc, char **argv) {
     try {
         return wmfs::reference::run_worker(argc, argv);
-    } catch (const kj::Exception &error) {
-        std::cerr << "wmfs-reference-worker: " << error.getDescription().cStr()
-                  << '\n';
     } catch (const std::exception &error) {
         std::cerr << "wmfs-reference-worker: " << error.what() << '\n';
+        return 1;
     }
-    return 1;
 }
