@@ -75,6 +75,9 @@ from wmfs.transport.ring import (
     scalar_arguments,
     tensor_from_descriptor,
 )
+from wmfs.transport.ring import (
+    PlannedOutput as RingPlannedOutput,
+)
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
@@ -228,6 +231,53 @@ class RingSubmissionMetrics:
     result_materialization_ns: int
 
 
+class _NativeRingClient:
+    def __init__(self, session: object, generation: int, capacity: int) -> None:
+        self._session = session
+        self.generation = generation
+        self.handshake = (
+            ABI_MAJOR,
+            ABI_MINOR,
+            HEADER_SIZE,
+            RECORD_SIZE,
+            capacity,
+            generation,
+            CAPABILITIES,
+        )
+
+    def submit(self, record: Record, timeout: float) -> Record:
+        completion, _metrics = self._session.submit_ring(record, timeout, False)
+        return self._completion(completion)
+
+    def submit_profiled(
+        self, record: Record, timeout: float
+    ) -> tuple[Record, RingSubmissionMetrics]:
+        completion, metrics = self._session.submit_ring(record, timeout, True)
+        return self._completion(completion), RingSubmissionMetrics(**metrics)
+
+    @staticmethod
+    def _completion(value: dict[str, object]) -> Record:
+        return Record(
+            kind=int(value["kind"]),
+            generation=int(value["generation"]),
+            submission_id=int(value["submission_id"]),
+            invocation_id=int(value["invocation_id"]),
+            operation_id=int(value["operation_id"]),
+            status=int(value["status"]),
+            flags=int(value["flags"]),
+            outputs=tuple(
+                RingPlannedOutput(int(output), tuple(shape), str(dtype))
+                for output, shape, dtype in value["outputs"]  # type: ignore[union-attr]
+            ),
+            profile=tuple(int(item) for item in value["profile"]),  # type: ignore[union-attr]
+            error_type=str(value["error_type"]),
+            error_message=str(value["error_message"]),
+        )
+
+    def close(self) -> None:
+        pass
+
+
 @dataclass
 class _PendingRingSubmission:
     waiter: queue.Queue[Record | BaseException] = field(
@@ -271,7 +321,7 @@ class WorkerSession:
         self._plugin: object | None = None
         self._operations: dict[str, OperationMetadata] = {}
         self._fd_sender: FdSender | _NativeSessionAdapter | None = None
-        self._ring_client: _RingClient | None = None
+        self._ring_client: _RingClient | _NativeRingClient | None = None
         self._startup_error: BaseException | None = None
         self._shutdown_error: BaseException | None = None
         self._shutdown: asyncio.Event | None = None
@@ -955,7 +1005,7 @@ async def _worker_connection(
     deadlines: TransportDeadlines,
     *,
     native: bool = False,
-) -> AsyncIterator[tuple[object, object, _RingClient]]:
+) -> AsyncIterator[tuple[object, object, _RingClient | _NativeRingClient]]:
     if manifest.format_version == 1:
         raise RuntimeError(
             "Manifest v1 uses legacy control and cannot run isolated; regenerate it as v2"
@@ -980,9 +1030,11 @@ async def _worker_connection(
     generation = secrets.randbits(64) or 1
     command_owner = RingOwner(capacity, generation)
     completion_owner = RingOwner(capacity, generation)
-    ring_client = _RingClient(
-        command_owner.endpoint(True), completion_owner.endpoint(False)
-    )
+    ring_client: _RingClient | _NativeRingClient | None = None
+    if not native:
+        ring_client = _RingClient(
+            command_owner.endpoint(True), completion_owner.endpoint(False)
+        )
     try:
         process = _start_worker(
             manifest,
@@ -1000,7 +1052,8 @@ async def _worker_connection(
             collector.close()
         command_owner.close()
         completion_owner.close()
-        ring_client.close()
+        if ring_client is not None:
+            ring_client.close()
         raise
     finally:
         bootstrap_child.close()
@@ -1130,7 +1183,8 @@ async def _worker_connection(
             import importlib
 
             native_module = importlib.import_module("wmfs._native")
-            native_session = native_module.Session(
+            native_ring = hasattr(native_module.Session, "submit_ring")
+            arguments = (
                 bootstrap_parent.detach(),
                 fd_parent.detach(),
                 manifest.metadata.fingerprint,
@@ -1138,13 +1192,25 @@ async def _worker_connection(
                 deadlines.request,
                 deadlines.fd_transfer,
                 generation,
-                ring_client.handshake[4],
+                capacity,
             )
+            if native_ring:
+                native_session = native_module.Session(
+                    *arguments,
+                    *(os.dup(fd) for fd in (*command_owner.fds, *completion_owner.fds)),
+                )
+                ring_client = _NativeRingClient(native_session, generation, capacity)
+            else:
+                native_session = native_module.Session(*arguments)
+                ring_client = _RingClient(
+                    command_owner.endpoint(True), completion_owner.endpoint(False)
+                )
             client = _NativeSessionAdapter(native_session, environment)
             fd_sender = client
         else:
             client = _ControlClient(bootstrap_parent, environment)
             fd_sender = FdSender(fd_parent, generation, deadlines.fd_transfer)
+        assert ring_client is not None
         yield client, fd_sender, ring_client
     finally:
         cleanup_error: BaseException | None = None
@@ -1170,7 +1236,8 @@ async def _worker_connection(
             fd_sender.worker_exited()
         command_owner.close()
         completion_owner.close()
-        ring_client.close()
+        if ring_client is not None:
+            ring_client.close()
         if log_child is not None:
             log_child.close()
         if log_file_fd is not None:

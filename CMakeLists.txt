@@ -206,7 +206,7 @@ if(WMFS_BUILD_PYTHON_RUNTIME)
   )
   target_link_libraries(
     wmfs-native-runtime
-    PRIVATE wmfs::control
+    PRIVATE wmfs::control wmfs::ring Threads::Threads
   )
 
   install(

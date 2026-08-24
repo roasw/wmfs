@@ -4,7 +4,9 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
@@ -16,6 +18,7 @@ using wmfs::native::InvocationOutcome;
 using wmfs::native::InvocationProfile;
 using wmfs::native::Mapping;
 using wmfs::native::OutputPlanningResult;
+using wmfs::native::RingSubmissionResult;
 using wmfs::native::ScalarArgument;
 using wmfs::native::ScalarKind;
 using wmfs::native::Session;
@@ -54,6 +57,58 @@ const char *dtype_name(TensorDType dtype) {
         return "uint8";
     }
     throw std::invalid_argument("Unsupported tensor dtype");
+}
+
+std::uint32_t ring_dtype_from_object(nb::handle value) {
+    const auto name = nb::cast<std::string>(value);
+    if (name == "bool")
+        return WMFS_RING_DTYPE_BOOL;
+    if (name == "int8")
+        return WMFS_RING_DTYPE_INT8;
+    if (name == "uint8")
+        return WMFS_RING_DTYPE_UINT8;
+    if (name == "int16")
+        return WMFS_RING_DTYPE_INT16;
+    if (name == "int32")
+        return WMFS_RING_DTYPE_INT32;
+    if (name == "int64")
+        return WMFS_RING_DTYPE_INT64;
+    if (name == "float16")
+        return WMFS_RING_DTYPE_FLOAT16;
+    if (name == "float32")
+        return WMFS_RING_DTYPE_FLOAT32;
+    if (name == "float64")
+        return WMFS_RING_DTYPE_FLOAT64;
+    if (name == "bfloat16")
+        return WMFS_RING_DTYPE_BFLOAT16;
+    throw std::invalid_argument("Unsupported ring dtype: " + name);
+}
+
+const char *ring_dtype_name(std::uint32_t dtype) {
+    switch (dtype) {
+    case WMFS_RING_DTYPE_BOOL:
+        return "bool";
+    case WMFS_RING_DTYPE_INT8:
+        return "int8";
+    case WMFS_RING_DTYPE_UINT8:
+        return "uint8";
+    case WMFS_RING_DTYPE_INT16:
+        return "int16";
+    case WMFS_RING_DTYPE_INT32:
+        return "int32";
+    case WMFS_RING_DTYPE_INT64:
+        return "int64";
+    case WMFS_RING_DTYPE_FLOAT16:
+        return "float16";
+    case WMFS_RING_DTYPE_FLOAT32:
+        return "float32";
+    case WMFS_RING_DTYPE_FLOAT64:
+        return "float64";
+    case WMFS_RING_DTYPE_BFLOAT16:
+        return "bfloat16";
+    default:
+        throw std::invalid_argument("Unsupported ring dtype ID");
+    }
 }
 
 TensorDescriptor descriptor_from_object(nb::handle value) {
@@ -114,6 +169,159 @@ std::vector<ScalarArgument> scalars_from_list(const nb::list &values) {
         result.push_back(scalar_from_tuple(nb::cast<nb::tuple>(value)));
     }
     return result;
+}
+
+wmfs_ring_record_v1 ring_record_from_object(nb::handle value) {
+    wmfs_ring_record_v1 record{};
+    record.kind = nb::cast<std::uint32_t>(value.attr("kind"));
+    record.flags = nb::cast<std::uint32_t>(value.attr("flags"));
+    record.session_generation =
+        nb::cast<std::uint64_t>(value.attr("generation"));
+    record.invocation_id = nb::cast<std::uint64_t>(value.attr("invocation_id"));
+    record.operation_id = nb::cast<std::uint32_t>(value.attr("operation_id"));
+    record.status = nb::cast<std::uint32_t>(value.attr("status"));
+
+    const auto tensors = nb::cast<nb::tuple>(value.attr("tensors"));
+    const auto scalars = nb::cast<nb::tuple>(value.attr("scalars"));
+    const auto outputs = nb::cast<nb::tuple>(value.attr("outputs"));
+    if (tensors.size() > 16 || scalars.size() > 16 || outputs.size() > 16)
+        throw std::invalid_argument("Ring descriptor count exceeds ABI bound");
+    record.tensor_count = static_cast<std::uint16_t>(tensors.size());
+    record.scalar_count = static_cast<std::uint16_t>(scalars.size());
+    record.planned_output_count = static_cast<std::uint16_t>(outputs.size());
+
+    for (std::size_t index = 0; index < tensors.size(); ++index) {
+        auto item = tensors[index];
+        auto &tensor = record.tensors[index];
+        tensor.buffer_id = nb::cast<std::uint64_t>(item.attr("buffer_id"));
+        tensor.buffer_generation =
+            nb::cast<std::uint64_t>(item.attr("generation"));
+        tensor.allocation_id =
+            nb::cast<std::uint64_t>(item.attr("allocation_id"));
+        tensor.byte_offset = nb::cast<std::uint64_t>(item.attr("offset"));
+        tensor.byte_length = nb::cast<std::uint64_t>(item.attr("byte_length"));
+        tensor.dtype = ring_dtype_from_object(item.attr("dtype"));
+        tensor.kind = nb::cast<std::uint16_t>(item.attr("kind"));
+        tensor.parameter_index =
+            nb::cast<std::uint16_t>(item.attr("parameter"));
+        tensor.flags = nb::cast<bool>(item.attr("writable"))
+                           ? WMFS_RING_TENSOR_FLAG_WRITABLE
+                           : 0;
+        const auto shape =
+            nb::cast<std::vector<std::int64_t>>(item.attr("shape"));
+        const auto strides =
+            nb::cast<std::vector<std::int64_t>>(item.attr("strides"));
+        if (shape.empty() || shape.size() > 16 ||
+            shape.size() != strides.size())
+            throw std::invalid_argument("Ring tensor rank is invalid");
+        tensor.rank = static_cast<std::uint16_t>(shape.size());
+        std::copy(shape.begin(), shape.end(), tensor.shape);
+        std::copy(strides.begin(), strides.end(), tensor.strides);
+    }
+
+    for (std::size_t index = 0; index < scalars.size(); ++index) {
+        auto item = scalars[index];
+        auto &scalar = record.scalars[index];
+        scalar.parameter_index =
+            nb::cast<std::uint16_t>(item.attr("parameter"));
+        const auto kind = nb::cast<std::string>(item.attr("kind"));
+        auto scalar_value = item.attr("value");
+        if (kind == "boolean") {
+            scalar.kind = WMFS_RING_SCALAR_BOOLEAN;
+            scalar.bits = nb::cast<bool>(scalar_value);
+        } else if (kind == "float64") {
+            scalar.kind = WMFS_RING_SCALAR_FLOAT64;
+            const auto number = nb::cast<double>(scalar_value);
+            std::memcpy(&scalar.bits, &number, sizeof(number));
+        } else if (kind == "int64") {
+            scalar.kind = WMFS_RING_SCALAR_INT64;
+            const auto number = nb::cast<std::int64_t>(scalar_value);
+            std::memcpy(&scalar.bits, &number, sizeof(number));
+        } else if (kind == "text") {
+            scalar.kind = WMFS_RING_SCALAR_TEXT;
+            const auto text = nb::cast<std::string>(scalar_value);
+            if (text.size() > sizeof(scalar.text))
+                throw std::invalid_argument(
+                    "Scalar text exceeds ring ABI bound");
+            scalar.text_length = static_cast<std::uint32_t>(text.size());
+            std::memcpy(scalar.text, text.data(), text.size());
+        } else {
+            throw std::invalid_argument("Unknown ring scalar kind: " + kind);
+        }
+    }
+
+    for (std::size_t index = 0; index < outputs.size(); ++index) {
+        auto item = outputs[index];
+        auto &output = record.planned_outputs[index];
+        output.dtype = ring_dtype_from_object(item.attr("dtype"));
+        output.output_index = nb::cast<std::uint16_t>(item.attr("output"));
+        const auto shape =
+            nb::cast<std::vector<std::int64_t>>(item.attr("shape"));
+        if (shape.empty() || shape.size() > 16)
+            throw std::invalid_argument("Planned output rank is invalid");
+        output.rank = static_cast<std::uint16_t>(shape.size());
+        std::copy(shape.begin(), shape.end(), output.shape);
+    }
+    return record;
+}
+
+nb::dict ring_completion_dict(const wmfs_ring_record_v1 &record) {
+    nb::dict result;
+    result["kind"] = record.kind;
+    result["flags"] = record.flags;
+    result["generation"] = record.session_generation;
+    result["submission_id"] = record.submission_id;
+    result["invocation_id"] = record.invocation_id;
+    result["operation_id"] = record.operation_id;
+    result["status"] = record.status;
+    nb::list outputs;
+    for (std::size_t index = 0; index < record.planned_output_count; ++index) {
+        const auto &output = record.planned_outputs[index];
+        nb::list shape;
+        for (std::size_t axis = 0; axis < output.rank; ++axis)
+            shape.append(output.shape[axis]);
+        outputs.append(nb::make_tuple(output.output_index, nb::tuple(shape),
+                                      ring_dtype_name(output.dtype)));
+    }
+    result["outputs"] = outputs;
+    result["profile"] = nb::make_tuple(
+        record.profile.command_published_ns, record.profile.worker_dequeued_ns,
+        record.profile.worker_started_ns, record.profile.worker_input_views_ns,
+        record.profile.worker_output_views_ns,
+        record.profile.worker_dispatch_ns, record.profile.worker_kernel_ns,
+        record.profile.completion_published_ns);
+    result["error_type"] =
+        std::string(record.error.type, record.error.type_length);
+    result["error_message"] =
+        std::string(record.error.message, record.error.message_length);
+    return result;
+}
+
+nb::dict ring_metrics_dict(const RingSubmissionResult &result) {
+    const auto &metrics = result.metrics;
+    nb::dict values;
+    values["round_trip_ns"] = metrics.round_trip_ns;
+    values["submission_queue_ns"] = metrics.submission_queue_ns;
+    values["enqueue_ns"] = metrics.enqueue_ns;
+    values["backpressure_wait_ns"] = metrics.backpressure_wait_ns;
+    values["command_wakeup_ns"] = metrics.command_wakeup_ns;
+    values["worker_queue_ns"] = metrics.worker_queue_ns;
+    values["worker_kernel_ns"] = metrics.worker_kernel_ns;
+    values["completion_wakeup_ns"] = metrics.completion_wakeup_ns;
+    values["result_materialization_ns"] = metrics.result_materialization_ns;
+    return values;
+}
+
+nb::tuple submit_ring(Session &session, nb::object record, double timeout,
+                      bool profiled) {
+    auto command = ring_record_from_object(record);
+    RingSubmissionResult result;
+    {
+        nb::gil_scoped_release release;
+        result = session.submit_ring(command, timeout, profiled);
+    }
+    return nb::make_tuple(ring_completion_dict(result.completion),
+                          ring_metrics_dict(result));
 }
 
 Mapping mapping_from_buffer(nb::handle buffer, std::uint64_t invocation_id,
@@ -283,11 +491,16 @@ NB_MODULE(_native, module) {
                "descriptor"_a);
     nb::class_<Session>(module, "Session")
         .def(nb::init<int, int, std::uint64_t, double, double, double,
-                      std::uint64_t, std::uint32_t>(),
+                      std::uint64_t, std::uint32_t, int, int, int, int, int,
+                      int>(),
              "rpc_fd"_a, "control_fd"_a, "expected_fingerprint"_a,
              "startup_timeout_seconds"_a, "request_timeout_seconds"_a,
              "fd_transfer_timeout_seconds"_a, "ring_generation"_a = 0,
-             "ring_capacity"_a = 0, nb::call_guard<nb::gil_scoped_release>())
+             "ring_capacity"_a = 0, "command_ring_fd"_a = -1,
+             "command_data_fd"_a = -1, "command_space_fd"_a = -1,
+             "completion_ring_fd"_a = -1, "completion_data_fd"_a = -1,
+             "completion_space_fd"_a = -1,
+             nb::call_guard<nb::gil_scoped_release>())
         .def("ensure_mapped", &ensure_mapped, "buffer"_a, "invocation_id"_a,
              "writable"_a = false)
         .def("ensure_mapped_many", &ensure_mapped_many, "buffers"_a,
@@ -302,6 +515,8 @@ NB_MODULE(_native, module) {
              "operation_id"_a, "inputs"_a, "outputs"_a, "scalars"_a)
         .def("plan_outputs", &plan_outputs, "invocation_id"_a, "operation_id"_a,
              "inputs"_a, "scalars"_a)
+        .def("submit_ring", &submit_ring, "record"_a, "timeout"_a,
+             "profiled"_a = false)
         .def("ping", &Session::ping, "nonce"_a,
              nb::call_guard<nb::gil_scoped_release>())
         .def_prop_ro("metadata", &metadata)

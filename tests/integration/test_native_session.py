@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 
+from wmfs import _native
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.transport.native_worker import NativeWorkerSession, native_available
@@ -9,8 +10,9 @@ from wmfs.transport.native_worker import NativeWorkerSession, native_available
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
-def test_native_extension_builds_without_owning_operation_transport() -> None:
+def test_native_extension_builds_with_ring_dispatcher() -> None:
     assert native_available()
+    assert hasattr(_native.Session, "submit_ring")
 
 
 def test_native_session_uses_fixed_lifecycle_and_ring_operations() -> None:

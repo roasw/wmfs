@@ -121,9 +121,11 @@ liveness, shutdown, and transactional FD batches.
 Important implementations:
 
 - `packages/wmfs/wmfs/transport/native_worker.py`, `NativeWorkerSession`:
-  Python orchestration around the nanobind native control path.
-- `packages/wmfs/wmfs/transport/worker_process.py`, `_RingClient`: asynchronous
-  submission/completion dispatch and benchmark timing boundaries.
+  Python orchestration around the nanobind native control and ring path.
+- `src/native_session.cpp`: native command publication, completion dispatch,
+  concurrent submission matching, and benchmark timing boundaries.
+- `packages/wmfs/wmfs/transport/worker_process.py`, `_RingClient`: equivalent
+  Python-control submission and completion dispatch.
 - `src/ring.cpp`: native SPSC publication, backpressure, and eventfd waits.
 - `packages/wmfs/wmfs/transport/worker_process.py`, `WorkerSession`: equivalent
   Python orchestration around the same ring protocol.

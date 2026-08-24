@@ -147,7 +147,7 @@ startup.
 - [`WorkerSession._serve`](../packages/wmfs/wmfs/transport/worker_process.py):
   Python control-mode startup and validation.
 - [`NativeWorkerSession.__init__`](../packages/wmfs/wmfs/transport/native_worker.py):
-  native control-mode startup orchestrated from Python.
+  native control and ring-dispatch startup orchestrated from Python.
 - [`control.py`](../packages/wmfs/wmfs/protocol/control.py): fixed startup,
   lifecycle, and FD-control codec.
 

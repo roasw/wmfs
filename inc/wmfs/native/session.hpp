@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wmfs/protocol/ring.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -79,6 +81,25 @@ struct InvocationProfile {
     std::uint64_t worker_kernel_ns{};       ///< Numerical kernel time.
 };
 
+/// @brief Native command/completion ring timing values.
+struct RingSubmissionMetrics {
+    std::uint64_t round_trip_ns{};
+    std::uint64_t submission_queue_ns{};
+    std::uint64_t enqueue_ns{};
+    std::uint64_t backpressure_wait_ns{};
+    std::uint64_t command_wakeup_ns{};
+    std::uint64_t worker_queue_ns{};
+    std::uint64_t worker_kernel_ns{};
+    std::uint64_t completion_wakeup_ns{};
+    std::uint64_t result_materialization_ns{};
+};
+
+/// @brief One completion and its optional native dispatcher profile.
+struct RingSubmissionResult {
+    wmfs_ring_record_v1 completion{};
+    RingSubmissionMetrics metrics{};
+};
+
 /// @brief Synchronous native client for fixed lifecycle and FD-control traffic.
 class Session {
   public:
@@ -86,7 +107,10 @@ class Session {
     Session(int rpc_fd, int control_fd, std::uint64_t expected_fingerprint,
             double startup_timeout_seconds, double request_timeout_seconds,
             double fd_transfer_timeout_seconds,
-            std::uint64_t ring_generation = 0, std::uint32_t ring_capacity = 0);
+            std::uint64_t ring_generation = 0, std::uint32_t ring_capacity = 0,
+            int command_ring_fd = -1, int command_data_fd = -1,
+            int command_space_fd = -1, int completion_ring_fd = -1,
+            int completion_data_fd = -1, int completion_space_fd = -1);
     ~Session();
 
     Session(const Session &) = delete;
@@ -122,6 +146,9 @@ class Session {
     plan_outputs(std::uint64_t invocation_id, std::uint32_t operation_id,
                  const TensorDescriptors &inputs,
                  const std::vector<ScalarArgument> &scalars);
+    /// @brief Submit one command through the native ring dispatcher.
+    RingSubmissionResult submit_ring(wmfs_ring_record_v1 command,
+                                     double timeout_seconds, bool profiled);
     /// @brief Verify fixed-protocol responsiveness.
     void ping(std::uint64_t nonce);
     /// @brief Return serialized plugin metadata obtained during startup.
