@@ -27,7 +27,7 @@ wmfs.runtime.use_backend("isolated")
 result = wmfs.matmul(left, right)
 ```
 
-The distribution owns the application-side protocol model, startup schemas,
+The distribution owns the application-side fixed control model,
 ring producer/completion dispatcher, shared-memory allocator, FD sender, and
 worker process lifecycle. It reads generated plugin manifests but does not
 import plugin implementations.
@@ -115,8 +115,14 @@ are packaged independently so neither environment imports the other package.
 1. Package the generated manifest and worker executable together.
 
 The deployed C++ worker requires neither `wmfs-plugin` nor `wmfs-tool`. It
-communicates with `wmfs` only through the generated startup contract,
-command/completion rings, the FD-control channel, and shared tensor mappings.
+communicates with `wmfs` only through the fixed startup/lifecycle protocol,
+generated manifest identity and plugin entry table, command/completion rings,
+the FD-control and optional logging channels, and shared tensor mappings.
+
+The same generated manifest, C++11 entry table, operation IDs, lifecycle hooks,
+configuration declarations, and Python metadata are execution-mode-neutral.
+Local, bundled, and isolated targets add generic mode adapters around those
+artifacts; they do not regenerate or maintain separate operation catalogs.
 
 ## Dependency Direction
 

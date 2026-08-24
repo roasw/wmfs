@@ -37,6 +37,20 @@ _FIELD = struct.Struct("<HHIIQI")
 
 @dataclass(frozen=True)
 class LoggingOptions:
+    """Select the bounded session-level plugin logging service.
+
+    Disabled logging creates no channel, queue, serializer, or sink thread.
+    Centralized logging emits records through ``wmfs.worker.<plugin>``; worker
+    file logging writes inside the plugin process.
+
+    Args:
+        mode: ``"disabled"``, ``"centralized"``, or ``"worker_file"``.
+        level: Minimum enabled numeric level: 10, 20, 30, 40, or 50.
+        queue_capacity: Maximum queued records for an enabled sink.
+        record_bytes: Maximum encoded structured-record size.
+        file: Required path for worker-file mode and invalid for other modes.
+    """
+
     mode: LoggingMode = "disabled"
     level: int = logging.INFO
     queue_capacity: int = 256

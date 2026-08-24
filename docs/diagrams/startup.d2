@@ -25,7 +25,7 @@ manifest -> registry: "2. validate metadata"
 registry -> session: "3. create candidate backend"
 session -> worker: "4. launch executable"
 
-startup_control: "Cap'n Proto startup/control socket\nmetadata, environment, close, handshake"
+startup_control: "Fixed SOCK_SEQPACKET control ABI\nidentity, config, lifecycle, logging, close"
 startup_control.class: transport
 rings: "Two memfd SPSC rings\ncommand -> / completion <-"
 rings.class: memory
@@ -33,11 +33,14 @@ events: "Four eventfds\navailable + space notifications"
 events.class: transport
 fd_socket: "SOCK_SEQPACKET FD-control channel\nSCM_RIGHTS mappings"
 fd_socket.class: transport
+log_service: "Optional dedicated logging\ncentral socket or worker file; disabled = none"
+log_service.class: transport
 
 session -> startup_control -> worker: "5. versioned validation"
 session -> rings -> worker: "6. ring geometry + generation"
 session -> events -> worker: "7. notification descriptors"
 session -> fd_socket -> worker: "8. mapping channel ready"
+session -> log_service -> worker: "9. selected before initialize" { style.stroke-dash: 5 }
 
 publish: "Atomically publish registry + sessions\nfirst operation starts no process"
 publish.class: runtime

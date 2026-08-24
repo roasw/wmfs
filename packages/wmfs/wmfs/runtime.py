@@ -140,7 +140,12 @@ class Runtime:
             return self._registry.operation(name)
 
     def load_plugins(self, *plugin_directories: Path) -> None:
-        """Load and publish manifests transactionally without starting workers."""
+        """Load manifests transactionally without importing or starting plugins.
+
+        This worker-free path enables configuration introspection and validation.
+        Configure loaded plugins before selecting an in-process backend or
+        discovering isolated workers.
+        """
         manifests = find_manifests(list(plugin_directories))
         registry = OperationRegistry()
         for manifest in manifests:
@@ -171,7 +176,16 @@ class Runtime:
     def list_configurable(
         self, plugin: str | None = None
     ) -> tuple[ConfigurationMetadata, ...] | ConfigurationMetadata:
-        """Return immutable manifest configuration metadata without initialization."""
+        """Return immutable manifest configuration metadata without initialization.
+
+        Args:
+            plugin: Optional loaded plugin name. When omitted, return metadata
+                for every configurable plugin in name order.
+
+        Raises:
+            KeyError: If the named plugin is not loaded.
+            ValueError: If the named plugin has no configuration schema.
+        """
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
             if plugin is not None:
@@ -188,7 +202,11 @@ class Runtime:
     def validate_config(
         self, plugin: str, config: Mapping[str, object] | None
     ) -> bytes:
-        """Validate configuration and return canonical UTF-8 JSON bytes."""
+        """Validate configuration and return canonical UTF-8 JSON bytes.
+
+        Defaults described by metadata are not inserted. ``None`` and an empty
+        mapping both return the canonical bytes ``b"{}"``.
+        """
         with self._condition:
             self._condition.wait_for(lambda: self._state == "open")
             manifest = self._manifest_locked(plugin)
@@ -203,7 +221,18 @@ class Runtime:
         *,
         logging: LoggingOptions | None = None,
     ) -> None:
-        """Store immutable configuration bytes before plugin initialization."""
+        """Configure immutable initialization data and logging for a plugin.
+
+        Args:
+            plugin: Loaded plugin name.
+            config: Configuration mapping, or ``None`` for canonical ``{}``.
+            logging: Session logging selection. Omission preserves the current
+                selection, which defaults to disabled.
+
+        Raises:
+            RuntimeError: If the plugin has already initialized.
+            ValueError: If configuration or logging values are invalid.
+        """
         with self._condition:
             self._ensure_open()
             manifest = self._manifest_locked(plugin)
@@ -327,7 +356,7 @@ class Runtime:
 
         Args:
             startup: Worker startup and handshake timeout in seconds.
-            request: Operation RPC timeout in seconds.
+            request: Operation completion timeout in seconds.
             fd_transfer: Buffer-control acknowledgement timeout in seconds.
             shutdown: Graceful worker shutdown timeout in seconds.
             kill_grace: Timeout after termination before forcing a kill.

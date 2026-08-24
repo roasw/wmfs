@@ -177,3 +177,9 @@ the allocation's subrange without recycling the arena mapping.
   `wmfs._bundled`, bypassing shared memory and rings.
 - Comparing isolated against bundled in `wmfs-benchmark` most directly measures
   process-isolation overhead for the same native kernels.
+
+All modes consume the same generated operation catalog and lifecycle contract.
+Local and bundled initialization receive the same logical canonical
+configuration and logger service but create no worker, rings, shared allocator,
+FD channel, or mappings. Disabled logging selects a null logger during
+initialization, so calls perform no socket, queue, serialization, or clock work.

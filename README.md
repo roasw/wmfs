@@ -238,8 +238,9 @@ wmfs-tool generate --interface interface.toml --output generated --check
 ```
 
 The generated manifest is read before worker launch. Startup validates metadata,
-the ring handshake, and the worker environment once; operation calls use rings,
-not per-operation discovery or RPC:
+the fixed control handshake, ring geometry, lifecycle result, and worker
+environment once; operation calls use rings, not per-operation discovery or
+control messages:
 
 ```python
 from pathlib import Path
@@ -276,8 +277,37 @@ runtime.configure_plugin("reference", {"threads": 4})
 ```
 
 `load_plugins` is transactional and neither imports nor launches plugin code.
-Calling `close()` clears loaded manifests and configured snapshots. Lifecycle
-hooks and configuration transport to workers are not enabled yet.
+It enables worker-free schema introspection and configuration before choosing an
+execution mode. `configure_plugin` accepts `None` as canonical `{}`, validates
+without inserting defaults, and freezes the exact canonical bytes for that
+plugin initialization. Configuration must precede `use_backend("local")`,
+`use_backend("bundled")`, or `discover_plugins`; a replacement isolated worker
+receives the same bytes. Calling `close()` runs enabled shutdown hooks, closes
+logging services, and clears loaded manifests and configured snapshots.
+
+Logging is selected with the same pre-initialization call:
+
+```python
+from pathlib import Path
+
+from wmfs import LoggingOptions
+
+runtime.configure_plugin(
+    "reference",
+    {"threads": 4, "emit_diagnostics": True},
+    logging=LoggingOptions(mode="centralized", level=20),
+)
+# Alternatives: LoggingOptions() or
+# LoggingOptions(mode="worker_file", file=Path("reference.log"))
+```
+
+`disabled` is the default null-logger path and creates no log socket, queue,
+serializer, or sink thread. `centralized` uses a dedicated nonblocking
+`SOCK_SEQPACKET` channel and emits `wmfs.worker.<plugin>` Python log records;
+`worker_file` uses a bounded worker-local queue and file. Logs never share the
+command, completion, or FD-control channels. All three execution modes invoke
+the same logical generated `initialize`/`shutdown` contract once per initialized
+plugin session; configuration and logger services are not operation arguments.
 
 Transport deadlines are immutable for a discovered backend and can be changed
 before discovery. Defaults are 30 seconds for startup, requests, shutdown, and
@@ -394,8 +424,11 @@ runtime.configure_control("native")  # or "python"
 runtime.discover_plugins(Path("plugins"))
 ```
 
-The fixed control ABI owns startup identity/environment, liveness, shutdown,
-and FD acknowledgements. The native session submits operations asynchronously to the
+The fixed control ABI over private `SOCK_SEQPACKET` sockets owns startup
+identity/environment, canonical initialization JSON, lifecycle acceptance,
+liveness, shutdown, descriptor-role validation, and FD acknowledgements.
+`SCM_RIGHTS` transfers the rings, eventfds, FD-control socket, and optional log
+descriptor. The native session submits operations asynchronously to the
 command ring and consumes completion records on a dedicated dispatcher; the
 Python layer waits internally and preserves the synchronous Torch API. FD
 mapping control remains on the `SCM_RIGHTS` channel. Neither the native extension
@@ -411,8 +444,11 @@ conversion, and Python-to-Torch dispatch from the worker hot path. The previous
 Python implementation remains available as the `reference-python-worker` Nix
 package for comparison and fallback testing.
 
-`matmul`, `svd`, and `add_scalar` expose the same public API in local and
-isolated modes. The current prototype supports contiguous CPU tensors and
+`matmul`, `svd`, `add_scalar`, and the dynamic-output `nonzero` operation expose
+the same generated catalog in local, bundled, and isolated modes. One generated
+manifest and plugin entry table serve all modes; backend selection supplies the
+adapter and does not produce mode-specific interfaces. The current prototype
+supports contiguous CPU tensors and
 supports multiple in-flight ring submissions per worker. Repeated calls reuse
 the established rings and cached arena or read-only pooled mappings.
 
@@ -496,8 +532,10 @@ cleanup-inclusive throughput includes per-call result destruction and
 reclamation when outputs are not reused. These are deliberately distinct
 boundaries and neither measurement is batched.
 
-Separate diagnostics report worker startup, ring round trips, the retained
-fixed startup/control ping baseline, shared-memory
+Separate diagnostics report absent/configured initialization for local,
+bundled, and isolated execution; disabled/centralized/worker-file isolated
+initialization; fixed startup-control and ring round trips; known and dynamic
+output paths; direct versus opt-in profiled calls; shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
 cached mapping checks, and runtime-owned output allocation. Input preparation
 includes memfd allocation, the runtime mapping and Torch view, and the ingress
@@ -573,7 +611,8 @@ service metric measures
 metadata-driven runtime allocation and output mapping before command-ring
 publication. Lazy page faults remain part of isolated end-to-end time.
 The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) and
-[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 10 report shape
+[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 11 report shape
 but contain no fabricated samples until the packaged reference benchmark is
-rerun. [`benchmarks/README.md`](benchmarks/README.md) links the retained schema 5
-measurements and summarizes their historical primary results.
+rerun. [`benchmarks/README.md`](benchmarks/README.md) links immutable schema 5
+Cap'n Proto measurements and explains their historical field names. Current
+reports contain no live `rpc_` fields and do not reinterpret old values.

@@ -157,3 +157,82 @@ or an unexpected kind is fatal session corruption. Stop publishing, mark the
 session failed, and tear it down; do not try to resynchronize by skipping a
 record. A supported non-OK completion status is a recoverable operation result
 and does not by itself terminate the session.
+
+## Startup and lifecycle control
+
+The isolated control plane is a fixed, versioned ABI over private Unix
+`SOCK_SEQPACKET` sockets. Generated manifest fields provide plugin identity,
+interface and configuration fingerprints, lifecycle features, and startup
+capabilities. Startup transfers the command/completion ring memfds, four
+eventfds, the FD-control endpoint, and an optional log endpoint with
+`SCM_RIGHTS`. Every descriptor has an explicit role; unexpected roles or counts
+reject startup.
+
+The bounded startup frame carries runtime and plugin versions, session
+generation, canonical configuration bytes, logging selection, and ring
+geometry. The worker validates these values, invokes initialization exactly
+once, and returns acceptance before the runtime publishes the session. Liveness,
+graceful shutdown, and transactional FD-map acknowledgements continue to use
+fixed control records. Numerical operations never use this socket.
+
+Cap'n Proto is not a live dependency or protocol. It appears only in archived
+prototype history and immutable schema 5 benchmark reports, whose old names and
+numeric values remain unchanged for honest comparison.
+
+## Configuration and introspection
+
+`Runtime.load_plugins` validates manifests transactionally without importing
+providers, launching workers, creating rings, or opening log channels. It
+publishes enough metadata for `wmfs.list_configurable()`,
+`wmfs.list_configurable("reference")`, and
+`Runtime.validate_config(plugin, config)`.
+
+`ConfigurationMetadata` is immutable and includes the schema version,
+independent SHA-256 fingerprint, nested typed schema, defaults, bounds, enums,
+descriptions, and validated named examples. `Runtime.configure_plugin` validates
+a mapping and stores canonical UTF-8 JSON with sorted keys, compact separators,
+finite numbers, and a 64 KiB limit. `None` and `{}` both become `b"{}"`; defaults
+remain metadata and are not inserted. Configuration is immutable after plugin
+initialization, and worker replacement replays the exact stored bytes.
+
+Local and bundled backends initialize when selected after manifest loading.
+Isolated workers initialize during eager transactional discovery. Python hooks
+receive the decoded mapping and a logger; C++11 hooks receive borrowed
+fixed-width JSON and logger views from the generated entry table. Initialization
+rejection prevents publication. `Runtime.close()` drains accepted work, invokes
+each enabled shutdown hook once, closes services, and resets the runtime.
+
+The generated manifest, entry table, lifecycle declarations, operation IDs, and
+configuration schema are mode-neutral. Local, bundled, and isolated adapters do
+not maintain separate registries or generated interfaces.
+
+## Logging modes
+
+`LoggingOptions` selects one session-level service:
+
+| Mode          | Behavior                                                                                                                |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `disabled`    | Null logger; no channel, queue, serialization, sink thread, message formatting, or clock read at the worker boundary.   |
+| `centralized` | Dedicated nonblocking `SOCK_SEQPACKET` channel to a runtime collector that emits `wmfs.worker.<plugin>` Python records. |
+| `worker_file` | Bounded worker-local queue writing structured records to the configured file without a runtime log channel.             |
+
+Logging never shares startup, command, completion, or FD-control traffic. The
+structured ABI permits Boolean, signed/unsigned 64-bit integer, finite float64,
+and bounded UTF-8 fields. Records carry plugin/session/operation/submission/
+invocation context. Enabled sinks may drop records under pressure and report the
+count when delivery resumes. Logging calls are non-throwing and cannot change
+operation status.
+
+## Optional bypasses
+
+- Local and bundled calls create no worker, rings, eventfds, shared allocator,
+  mappings, or FD transfers.
+- Disabled logging uses the null function table and creates no logging resource.
+- Ordinary calls do not populate profiling timestamps or metric records.
+- Known outputs bypass dynamic planning and use one invocation command.
+- Cached mappings bypass repeated FD transfer and `mmap`.
+- Absent configuration is canonical `{}` and adds no per-operation work.
+
+Initialization and benchmark microgroups measure the remaining one-time adapter,
+validation, indirect-call, and enabled-service costs rather than describing them
+as literally free.

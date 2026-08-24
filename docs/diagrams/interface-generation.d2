@@ -7,7 +7,7 @@ classes: {
   compute: { shape: circle; style: { fill: "#FFF4CC"; stroke: "#B7791F"; stroke-width: 2 } }
 }
 
-spec: "interface.toml\nversions, IDs, tensors, scalars,\naccess, output expressions, VJPs"
+spec: "interface.toml\nversions, IDs, tensors, scalars, lifecycle,\nconfig, access, output expressions, VJPs"
 spec.class: artifact
 compiler: "wmfs-tool\nparser + validator + generator"
 compiler.class: artifact
@@ -17,30 +17,26 @@ outputs: "Deterministic generated deployment inputs" {
   shape: package
   manifest: "manifest.json\nclosed versioned metadata"
   manifest.class: artifact
-  cabi: "plugin_abi.h + C++11 wrapper/stub\nfuture/plugin-facing C ABI"
+  cabi: "plugin_abi.h + C++11 wrapper/stub\nmode-neutral entry table"
   cabi.class: artifact
   py: "Python metadata/stubs + adapter\nfor Python workers only"
   py.class: artifact
-  dispatch: "reference_dispatch.inc\ncompatibility RPC dispatch"
-  dispatch.class: artifact
 }
 
 compiler -> outputs.manifest
 compiler -> outputs.cabi
 compiler -> outputs.py
-compiler -> outputs.dispatch
 
 runtime: "wmfs runtime\nreads manifest without importing plugin"
 runtime.class: runtime
 python_worker: "Python worker\nuses wmfs-plugin"
 python_worker.class: worker
-cpp_future: "Plugin-facing C++ implementation\nC++11 ABI consumer"
-cpp_future.class: worker
-reference: "Current C++ reference worker\ncompatibility RPC + separate ring dispatch"
+bundled: "Bundled adapter\nin-process generated entry table"
+bundled.class: worker
+reference: "Isolated C++ worker\nfixed control + rings + same entry table"
 reference.class: worker
 
 outputs.manifest -> runtime: "discovery + validation"
 outputs.py -> python_worker: "metadata-driven adapter"
-outputs.cabi -> cpp_future: "stable generated boundary"
-outputs.dispatch -> reference: "compatibility dispatch include"
-outputs.cabi -> reference: "not the current ring dispatch path" { style.stroke-dash: 5; style.opacity: 0.55 }
+outputs.cabi -> bundled: "stable generated boundary"
+outputs.cabi -> reference: "same stable generated boundary"

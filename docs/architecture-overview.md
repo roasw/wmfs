@@ -82,17 +82,18 @@ artifacts.
 ```
 
 `interface.toml` declares operation IDs, parameters, access, output expressions,
-and VJPs. `wmfs-tool` validates it and emits committed deployment artifacts. The
-runtime reads the manifest without running the tool or importing plugin code.
+VJPs, lifecycle hooks, and a typed configuration schema. `wmfs-tool` validates
+it and emits committed deployment artifacts. The runtime reads the manifest
+without running the tool or importing plugin code.
 
 **Key invariants and nuances**
 
 - The interface definition is the only handwritten operation registry.
 - Generated artifacts have explicit format, ABI, protocol, generator, and
   fingerprint fields; old supported artifacts remain deployment inputs.
-- The generated C ABI is future/plugin-facing. The current C++ reference worker
-  uses the generated stable plugin entry table for compatibility RPC methods; its normal
-  ring dispatch remains worker-specific and is not the same boundary.
+- One generated C++11 plugin entry table is linked into both the bundled adapter
+  and isolated worker; the transport loop is generic mode-specific glue around
+  the same operation catalog and kernels.
 
 **Read the implementation**
 
@@ -103,7 +104,7 @@ runtime reads the manifest without running the tool or importing plugin code.
 - [`plugins/reference/generated/manifest.json`](../plugins/reference/generated/manifest.json):
   runtime deployment metadata.
 - [`plugins/reference/generated/src/reference_plugin_stub.cpp`](../plugins/reference/generated/src/reference_plugin_stub.cpp):
-  generated compatibility RPC dispatch.
+  mode-neutral generated plugin entry table and typed dispatch.
 - [`tests/integration/test_generated_v1_compatibility.py`](../tests/integration/test_generated_v1_compatibility.py):
   old generated artifact compatibility.
 
@@ -118,10 +119,13 @@ Discovery validates and starts every candidate worker before publishing a new
 operation catalog.
 ```
 
+Manifest loading, schema introspection, and configuration are worker-free.
 Discovery is eager and transactional: one persistent worker per plugin starts
 during `discover_plugins`, not on the first operation. The fixed control ABI
-carries startup identity and environment, lifecycle control, and exact ring/FD
-descriptor roles. Operation traffic uses the rings after startup.
+carries startup identity and environment, canonical configuration, lifecycle
+acceptance, logging selection, and exact ring/event/FD/log descriptor roles over
+`SOCK_SEQPACKET` with `SCM_RIGHTS`. Operation traffic uses the rings after
+startup.
 
 **Key invariants and nuances**
 
@@ -129,7 +133,10 @@ descriptor roles. Operation traffic uses the rings after startup.
 - Failed discovery closes all sessions created by that attempt and leaves the
   prior registry intact.
 - Startup establishes two SPSC rings, four eventfds, an FD-control socket, a
-  session generation, and bounded deadlines.
+  session generation, an optional independent log service, and bounded
+  deadlines.
+- Disabled logging establishes no log socket or queue; local and bundled modes
+  establish none of the isolated transport resources.
 
 **Read the implementation**
 
@@ -313,16 +320,17 @@ The application runtime remains Python-owned in both control modes. Native mode
 uses the nanobind `wmfs._native.Session` for startup and FD control, but ordinary
 ring submissions still flow through Python's `_RingClient`. A Python worker uses
 the standalone SDK and generated Python adapter. The current C++ reference
-worker owns a worker-specific ring loop and generated dispatch include before
-calling transport-neutral LibTorch kernels.
+worker owns the ring loop and invokes the same generated plugin entry table used
+by the bundled build before calling transport-neutral LibTorch kernels.
 
 **Key invariants and nuances**
 
 - `wmfs-plugin` never imports `wmfs`, and the runtime never imports the SDK.
 - Their independently packaged control codecs, metadata models, ring constants,
   and codecs are parity-tested.
-- The generated plugin-facing C ABI describes the intended stable C++ plugin
-  boundary, but current reference ring dispatch remains worker-specific.
+- Generated plugin-facing C/C++11 declarations are the stable source boundary;
+  only process transport glue differs by execution mode. CI compiles that
+  generated scope, including lifecycle/config/log declarations, with GCC 4.8.5.
 
 **Read the implementation**
 
@@ -342,11 +350,12 @@ calling transport-neutral LibTorch kernels.
 ## Benchmarks and Cross-Boundary Tests
 
 The architecture is measured rather than inferred. `wmfs-benchmark` separates
-worker startup, fixed startup/control ping, ring enqueue and wakeups,
+local/bundled/isolated initialization, fixed startup/control ping, logging-mode
+initialization, ring enqueue and wakeups,
 backpressure, first-use FD transfer and mapping, cached mappings, output
-allocation, worker view construction, kernel time, result materialization, and
-reclamation. It compares local, bundled, and isolated execution using equivalent
-kernels where possible.
+allocation, known/dynamic output paths, direct/profiled calls, worker view
+construction, kernel time, result materialization, and reclamation. It compares
+local, bundled, and isolated execution using equivalent kernels where possible.
 
 **Read the implementation**
 

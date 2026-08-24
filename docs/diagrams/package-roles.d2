@@ -15,7 +15,7 @@ build: "Plugin build / CI" {
   interface.class: artifact
   tool: "wmfs-tool\nbuild-time compiler"
   tool.class: artifact
-  generated: "Committed generated\nartifacts"
+  generated: "Committed mode-neutral generated\nmanifest + entry table + adapters"
   generated.class: artifact
   interface -> tool: "compile"
   tool -> generated: "manifest + C++/Python"

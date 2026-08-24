@@ -40,9 +40,9 @@ python_worker: "Python worker distribution" {
 
 cpp_worker: "C++ reference worker distribution" {
   shape: package
-  executable: "wmfs-reference-worker\nCap'n Proto startup + ring loop"
+  executable: "wmfs-reference-worker\nfixed control + ring loop"
   executable.class: worker
-  dispatch: "Generated worker-specific\nreference_dispatch.inc"
+  dispatch: "Generated mode-neutral\nplugin entry table + typed stub"
   dispatch.class: artifact
   kernel: "Transport-neutral\nLibTorch kernel"
   kernel.class: compute
@@ -60,6 +60,6 @@ parity: "Runtime and SDK carry independent protocol copies\nbyte/model/codec par
 parity.style: { stroke-dash: 5; fill: "#FFFFFF"; stroke: "#4B5563" }
 parity -> wire: "compatibility guard" { style.stroke-dash: 5 }
 
-cabi: "Generated C ABI\nfuture/plugin-facing; not current reference ring dispatch"
+cabi: "Generated C/C++11 plugin entry table\nmode-neutral operations + lifecycle"
 cabi.class: artifact
-cabi -> cpp_worker.dispatch: "distinct boundary" { style.stroke-dash: 5 }
+cabi -> cpp_worker.dispatch: "stable plugin boundary"

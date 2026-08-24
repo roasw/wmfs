@@ -30,6 +30,29 @@ print(a.grad, b.grad)
 wmfs.runtime.close()
 ```
 
+To inspect and configure a plugin without importing or launching it, separate
+manifest loading from initialization:
+
+```python
+from wmfs import LoggingOptions
+
+wmfs.runtime.load_plugins(Path("plugins"))
+schema = wmfs.list_configurable("reference")
+wmfs.runtime.validate_config("reference", {"threads": 4})
+wmfs.runtime.configure_plugin(
+    "reference",
+    {"threads": 4},
+    logging=LoggingOptions(mode="centralized", level=20),
+)
+wmfs.runtime.discover_plugins(Path("plugins"))
+wmfs.runtime.use_backend("isolated")
+```
+
+Configuration is canonicalized once and immutable after initialization. Local
+and bundled initialization occurs when that backend is selected; isolated
+initialization occurs during eager discovery. The default disabled logger
+creates no logging transport or queue. See {doc}`ring-protocol`.
+
 Use `local` for direct PyTorch execution, `bundled` for the in-process reference
 plugin when it was compiled, and `isolated` for process isolation. Plugin
 discovery starts and validates persistent workers eagerly, so the first
