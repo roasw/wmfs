@@ -109,37 +109,18 @@ class _RingClient:
         self._consumer.start()
 
     def submit(self, record: Record, timeout: float) -> Record:
-        result, _metrics = self._submit(record, timeout, False)
-        return result
+        pending = _PendingRingSubmission()
+        self._enqueue(record, pending)
+        return self._wait(pending, timeout)
 
     def submit_profiled(
         self, record: Record, timeout: float
     ) -> tuple[Record, "RingSubmissionMetrics"]:
-        return self._submit(record, timeout, True)
-
-    def _submit(
-        self, record: Record, timeout: float, profiled: bool
-    ) -> tuple[Record, "RingSubmissionMetrics"]:
         submitted_ns = perf_counter_ns()
-        pending = _PendingRingSubmission(submitted_ns=submitted_ns)
-        with self._lock:
-            if self._fatal is not None:
-                raise RingError("ring dispatcher failed") from self._fatal
-            submission = self._next_submission
-            self._next_submission += 1
-            record.submission_id = submission
-            if profiled:
-                record.flags |= FLAG_PROFILE
-            self._pending[submission] = pending
-        self._outbound.put(record)
-        try:
-            result = pending.waiter.get(timeout=timeout)
-        except queue.Empty:
-            self._fail(RingError("ring completion deadline expired"))
-            raise TimeoutError("ring completion deadline expired") from None
-        if isinstance(result, BaseException):
-            raise result
-        pending.produced.wait()
+        pending = _ProfiledRingSubmission(submitted_ns=submitted_ns)
+        record.flags |= FLAG_PROFILE
+        self._enqueue(record, pending)
+        result = self._wait(pending, timeout)
         returned_ns = perf_counter_ns()
         profile = result.profile
         return result, RingSubmissionMetrics(
@@ -160,6 +141,27 @@ class _RingClient:
             ),
         )
 
+    def _enqueue(self, record: Record, pending: "_PendingRingSubmission") -> None:
+        with self._lock:
+            if self._fatal is not None:
+                raise RingError("ring dispatcher failed") from self._fatal
+            submission = self._next_submission
+            self._next_submission += 1
+            record.submission_id = submission
+            self._pending[submission] = pending
+        self._outbound.put(record)
+
+    def _wait(self, pending: "_PendingRingSubmission", timeout: float) -> Record:
+        try:
+            result = pending.waiter.get(timeout=timeout)
+        except queue.Empty:
+            self._fail(RingError("ring completion deadline expired"))
+            raise TimeoutError("ring completion deadline expired") from None
+        if isinstance(result, BaseException):
+            raise result
+        pending.produced.wait()
+        return result
+
     def _produce(self) -> None:
         try:
             while (record := self._outbound.get()) is not None:
@@ -167,9 +169,12 @@ class _RingClient:
                     pending = self._pending.get(record.submission_id)
                 if pending is None:
                     raise RingError("ring command has no pending submission")
-                pending.producer_started_ns = perf_counter_ns()
-                pending.backpressure_wait_ns = self._commands.push(record)
-                pending.command_published_ns = perf_counter_ns()
+                if isinstance(pending, _ProfiledRingSubmission):
+                    pending.producer_started_ns = perf_counter_ns()
+                    pending.backpressure_wait_ns = self._commands.push_profiled(record)
+                    pending.command_published_ns = perf_counter_ns()
+                else:
+                    self._commands.push(record)
                 pending.produced.set()
         except BaseException as error:
             self._fail(error)
@@ -178,12 +183,12 @@ class _RingClient:
         try:
             while True:
                 completion = self._completions.pop()
-                consumed_ns = perf_counter_ns()
                 with self._lock:
                     pending = self._pending.pop(completion.submission_id, None)
                 if pending is None:
                     raise RingError("completion has unknown submission ID")
-                pending.completion_consumed_ns = consumed_ns
+                if isinstance(pending, _ProfiledRingSubmission):
+                    pending.completion_consumed_ns = perf_counter_ns()
                 pending.waiter.put(completion)
         except BaseException as error:
             self._fail(error)
@@ -225,11 +230,15 @@ class RingSubmissionMetrics:
 
 @dataclass
 class _PendingRingSubmission:
-    submitted_ns: int
     waiter: queue.Queue[Record | BaseException] = field(
         default_factory=lambda: queue.Queue(maxsize=1)
     )
     produced: threading.Event = field(default_factory=threading.Event)
+
+
+@dataclass
+class _ProfiledRingSubmission(_PendingRingSubmission):
+    submitted_ns: int = 0
     producer_started_ns: int = 0
     command_published_ns: int = 0
     backpressure_wait_ns: int = 0
@@ -299,8 +308,7 @@ class WorkerSession:
         out: object | None = None,
         **kwargs: object,
     ) -> object:
-        result, _metrics = self._submit_invocation(operation, args, kwargs, out, False)
-        return result
+        return self._submit_invocation_direct(operation, args, kwargs, out)
 
     def invoke_profiled(
         self,
@@ -310,7 +318,7 @@ class WorkerSession:
         out: object | None = None,
         **kwargs: object,
     ) -> tuple[object, InvocationMetrics]:
-        result, metrics = self._submit_invocation(operation, args, kwargs, out, True)
+        result, metrics = self._submit_invocation_profiled(operation, args, kwargs, out)
         return result, metrics
 
     def ping(self) -> None:
@@ -403,26 +411,20 @@ class WorkerSession:
             self._loop.call_soon_threadsafe(self._serve_task.cancel)
         self._thread.join(timeout=self._deadlines.shutdown)
 
-    async def _invoke(
-        self,
-        invocation: BoundInvocation,
-        collect_metrics: bool,
+    async def _invoke_profiled(
+        self, invocation: BoundInvocation
     ) -> tuple[object, InvocationMetrics]:
         if self._plugin is None or self._fd_sender is None or self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
         invocation_id = secrets.randbits(64) or 1
-        input_metrics: list[InputPreparationMetrics] | None = (
-            [] if collect_metrics else None
-        )
-        output_metrics: list[OutputAllocationMetrics] | None = (
-            [] if collect_metrics else None
-        )
+        input_metrics: list[InputPreparationMetrics] = []
+        output_metrics: list[OutputAllocationMetrics] = []
         shared_inputs = [
-            share_input(self._buffers, item.tensor, collect_metrics=collect_metrics)
+            share_input(self._buffers, item.tensor, collect_metrics=True)
             for item in invocation.tensor_inputs
         ]
         inputs = [item[0] for item in shared_inputs]
-        mapping_start = perf_counter_ns() if collect_metrics else 0
+        mapping_start = perf_counter_ns()
         try:
             input_transfers = await asyncio.to_thread(
                 self._fd_sender.ensure_mapped_many,
@@ -439,36 +441,123 @@ class WorkerSession:
             if self._shutdown is not None:
                 self._shutdown.set()
             raise
-        mapping_ns = perf_counter_ns() - mapping_start if collect_metrics else 0
-        if input_metrics is not None:
-            for index, ((managed, copy_ns), transferred) in enumerate(
-                zip(shared_inputs, input_transfers, strict=True)
-            ):
-                input_metrics.append(
-                    InputPreparationMetrics(
-                        byte_length=managed.buffer.byte_length,
-                        shared_copy_ns=copy_ns,
-                        mapping_ns=mapping_ns if index == 0 else 0,
-                        fd_transferred=transferred,
-                    )
+        mapping_ns = perf_counter_ns() - mapping_start
+        for index, ((managed, copy_ns), transferred) in enumerate(
+            zip(shared_inputs, input_transfers, strict=True)
+        ):
+            input_metrics.append(
+                InputPreparationMetrics(
+                    byte_length=managed.buffer.byte_length,
+                    shared_copy_ns=copy_ns,
+                    mapping_ns=mapping_ns if index == 0 else 0,
+                    fd_transferred=transferred,
                 )
-        return await self._invoke_known(
+            )
+        return await self._invoke_known_profiled(
             invocation,
             inputs,
             invocation_id,
             input_metrics,
             output_metrics,
-            collect_metrics,
         )
 
-    async def _invoke_known(
+    async def _invoke_direct(self, invocation: BoundInvocation) -> object:
+        """Invoke without constructing optional profiling records or reading clocks."""
+        if self._plugin is None or self._fd_sender is None or self._ring_client is None:
+            raise RuntimeError("Worker session is not ready")
+        invocation_id = secrets.randbits(64) or 1
+        inputs = [
+            share_input(self._buffers, item.tensor, collect_metrics=False)[0]
+            for item in invocation.tensor_inputs
+        ]
+        try:
+            await asyncio.to_thread(
+                self._fd_sender.ensure_mapped_many,
+                tuple(
+                    (managed.buffer, bound.writable)
+                    for managed, bound in zip(
+                        inputs, invocation.tensor_inputs, strict=True
+                    )
+                ),
+                invocation_id=invocation_id,
+            )
+        except Exception:
+            self._invalidate()
+            raise
+
+        outputs: list[ManagedTensor] = []
+        dispatched = False
+        completed = False
+        try:
+            dynamic = await self._plan_dynamic_outputs(
+                invocation, inputs, invocation_id
+            )
+            try:
+                output_plan = plan_outputs(
+                    self._buffers,
+                    invocation,
+                    tuple(inputs),
+                    collect_metrics=False,
+                    dynamic=dynamic,
+                )
+            except ValueError:
+                if dynamic:
+                    self._invalidate()
+                raise
+            for index in range(len(output_plan.specs)):
+                output, _ = materialize_output(
+                    self._buffers, output_plan, index, collect_metrics=False
+                )
+                outputs.append(output)
+            try:
+                await asyncio.to_thread(
+                    self._fd_sender.ensure_mapped_many,
+                    tuple((managed.buffer, True) for managed in outputs),
+                    invocation_id=invocation_id,
+                )
+            except Exception:
+                self._invalidate()
+                raise
+
+            mark_reused_outputs_dirty(output_plan)
+            dispatched = True
+            response = await asyncio.to_thread(
+                self._ring_client.submit,
+                _invocation_record(
+                    self._ring_client.generation,
+                    invocation_id,
+                    invocation.operation.operation_id,
+                    inputs,
+                    outputs,
+                    invocation,
+                    False,
+                ),
+                self._deadlines.request,
+            )
+            self._fd_sender.finish_invocation(invocation_id)
+            completed = True
+            _raise_ring_error(response)
+            result = invocation_result(outputs)
+            outputs.clear()
+            return result
+        finally:
+            if not dispatched:
+                self._fd_sender.finish_invocation(invocation_id)
+            elif not completed:
+                self._invalidate()
+
+    def _invalidate(self) -> None:
+        self._invalidated = True
+        if self._shutdown is not None:
+            self._shutdown.set()
+
+    async def _invoke_known_profiled(
         self,
         invocation: BoundInvocation,
         inputs: list[ManagedTensor],
         invocation_id: int,
-        input_metrics: list[InputPreparationMetrics] | None,
-        output_metrics: list[OutputAllocationMetrics] | None,
-        collect_metrics: bool,
+        input_metrics: list[InputPreparationMetrics],
+        output_metrics: list[OutputAllocationMetrics],
     ) -> tuple[object, InvocationMetrics]:
         if self._fd_sender is None or self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
@@ -484,7 +573,7 @@ class WorkerSession:
                     self._buffers,
                     invocation,
                     tuple(inputs),
-                    collect_metrics=collect_metrics,
+                    collect_metrics=True,
                     dynamic=dynamic,
                 )
             except ValueError:
@@ -495,16 +584,16 @@ class WorkerSession:
                 raise
             allocation_metrics: list[tuple[int, int]] = []
             for index in range(len(output_plan.specs)):
-                service_start = perf_counter_ns() if collect_metrics else 0
+                service_start = perf_counter_ns()
                 managed, allocation_ns = materialize_output(
                     self._buffers,
                     output_plan,
                     index,
-                    collect_metrics=collect_metrics,
+                    collect_metrics=True,
                 )
                 outputs.append(managed)
                 allocation_metrics.append((allocation_ns, service_start))
-            mapping_start = perf_counter_ns() if collect_metrics else 0
+            mapping_start = perf_counter_ns()
             try:
                 output_transfers = await asyncio.to_thread(
                     self._fd_sender.ensure_mapped_many,
@@ -516,32 +605,23 @@ class WorkerSession:
                 if self._shutdown is not None:
                     self._shutdown.set()
                 raise
-            output_mapping_ns = (
-                perf_counter_ns() - mapping_start if collect_metrics else 0
-            )
-            if output_metrics is not None:
-                for index, (managed, transferred, allocation_metric) in enumerate(
-                    zip(
-                        outputs,
-                        output_transfers,
-                        allocation_metrics,
-                        strict=True,
+            output_mapping_ns = perf_counter_ns() - mapping_start
+            for index, (managed, transferred, allocation_metric) in enumerate(
+                zip(outputs, output_transfers, allocation_metrics, strict=True)
+            ):
+                allocation_ns, service_start = allocation_metric
+                output_metrics.append(
+                    OutputAllocationMetrics(
+                        byte_length=managed.buffer.byte_length,
+                        shared_allocation_ns=allocation_ns,
+                        mapping_ns=output_mapping_ns if index == 0 else 0,
+                        service_ns=perf_counter_ns() - service_start,
+                        fd_transferred=transferred,
                     )
-                ):
-                    allocation_ns, service_start = allocation_metric
-                    output_metrics.append(
-                        OutputAllocationMetrics(
-                            byte_length=managed.buffer.byte_length,
-                            shared_allocation_ns=allocation_ns,
-                            mapping_ns=output_mapping_ns if index == 0 else 0,
-                            service_ns=perf_counter_ns() - service_start,
-                            fd_transferred=transferred,
-                        )
-                    )
+                )
 
             mark_reused_outputs_dirty(output_plan)
             dispatched = True
-            ring_metrics = None
             command = _invocation_record(
                 self._ring_client.generation,
                 invocation_id,
@@ -549,56 +629,37 @@ class WorkerSession:
                 inputs,
                 outputs,
                 invocation,
-                collect_metrics,
+                True,
             )
-            submit = (
-                self._ring_client.submit_profiled
-                if collect_metrics
-                else self._ring_client.submit
+            response, ring_metrics = await asyncio.to_thread(
+                self._ring_client.submit_profiled, command, self._deadlines.request
             )
-            response = await asyncio.to_thread(submit, command, self._deadlines.request)
-            if collect_metrics:
-                response, ring_metrics = response
             self._fd_sender.finish_invocation(invocation_id)
             completed = True
             _raise_ring_error(response)
             result = invocation_result(outputs)
             outputs.clear()
-            worker = response.profile if collect_metrics else (0,) * 8
+            worker = response.profile
             return result, InvocationMetrics(
-                inputs=tuple(input_metrics or ()),
-                outputs=tuple(output_metrics or ()),
+                inputs=tuple(input_metrics),
+                outputs=tuple(output_metrics),
                 scalar_binding_ns=invocation.scalar_binding_ns,
                 output_plan_ns=output_plan.output_plan_ns,
-                ring_round_trip_ns=(ring_metrics.round_trip_ns if ring_metrics else 0),
-                ring_submission_queue_ns=(
-                    ring_metrics.submission_queue_ns if ring_metrics else 0
-                ),
-                ring_enqueue_ns=(ring_metrics.enqueue_ns if ring_metrics else 0),
-                ring_backpressure_wait_ns=(
-                    ring_metrics.backpressure_wait_ns if ring_metrics else 0
-                ),
-                ring_command_wakeup_ns=(
-                    ring_metrics.command_wakeup_ns if ring_metrics else 0
-                ),
-                ring_worker_queue_ns=(
-                    ring_metrics.worker_queue_ns if ring_metrics else 0
-                ),
-                ring_completion_wakeup_ns=(
-                    ring_metrics.completion_wakeup_ns if ring_metrics else 0
-                ),
-                ring_result_materialization_ns=(
-                    ring_metrics.result_materialization_ns if ring_metrics else 0
-                ),
+                ring_round_trip_ns=ring_metrics.round_trip_ns,
+                ring_submission_queue_ns=ring_metrics.submission_queue_ns,
+                ring_enqueue_ns=ring_metrics.enqueue_ns,
+                ring_backpressure_wait_ns=ring_metrics.backpressure_wait_ns,
+                ring_command_wakeup_ns=ring_metrics.command_wakeup_ns,
+                ring_worker_queue_ns=ring_metrics.worker_queue_ns,
+                ring_completion_wakeup_ns=ring_metrics.completion_wakeup_ns,
+                ring_result_materialization_ns=ring_metrics.result_materialization_ns,
                 worker_input_views_ns=(int(worker[3])),
                 worker_output_views_ns=(int(worker[4])),
                 worker_dispatch_ns=(int(worker[5])),
                 worker_kernel_ns=int(worker[6]),
-                mapping_batches=int(
-                    any(item.fd_transferred for item in input_metrics or ())
-                )
+                mapping_batches=int(any(item.fd_transferred for item in input_metrics))
                 + int(any(output_transfers)),
-                mapped_buffers=sum(item.fd_transferred for item in input_metrics or ())
+                mapped_buffers=sum(item.fd_transferred for item in input_metrics)
                 + sum(output_transfers),
             )
         finally:
@@ -653,13 +714,12 @@ class WorkerSession:
             raise RuntimeError("Worker session is not ready")
         await asyncio.to_thread(self._plugin.ping)
 
-    def _submit_invocation(
+    def _submit_invocation_profiled(
         self,
         operation: str,
         args: tuple[object, ...],
         kwargs: dict[str, object],
         out: object | None,
-        collect_metrics: bool,
     ) -> tuple[object, InvocationMetrics]:
         if threading.current_thread() is self._thread:
             raise RuntimeError("Worker session cannot synchronously invoke itself")
@@ -671,11 +731,48 @@ class WorkerSession:
                 args,
                 kwargs,
                 out,
-                collect_metrics=collect_metrics,
+                collect_metrics=True,
             )
         with reserve_invocation_access(self._buffers, invocation):
             future = asyncio.run_coroutine_threadsafe(
-                self._invoke(invocation, collect_metrics), self._loop
+                self._invoke_profiled(invocation), self._loop
+            )
+            try:
+                return future.result()
+            except Exception as error:
+                if self._invalidated:
+                    try:
+                        self.close()
+                    except Exception:
+                        pass
+                    raise WorkerTransportError(
+                        "Worker transport failed during invocation: "
+                        f"{type(error).__name__}: {error}"
+                    ) from error
+                raise
+
+    def _submit_invocation_direct(
+        self,
+        operation: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        out: object | None,
+    ) -> object:
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("Worker session cannot synchronously invoke itself")
+        with self._submit_lock:
+            if self._closed or self._loop is None:
+                raise RuntimeError("Worker session is closed")
+            invocation = bind_invocation(
+                self._operations[operation],
+                args,
+                kwargs,
+                out,
+                collect_metrics=False,
+            )
+        with reserve_invocation_access(self._buffers, invocation):
+            future = asyncio.run_coroutine_threadsafe(
+                self._invoke_direct(invocation), self._loop
             )
             try:
                 return future.result()

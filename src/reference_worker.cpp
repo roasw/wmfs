@@ -789,8 +789,85 @@ void set_error(wmfs_ring_record_v1 &completion, std::uint32_t status,
     std::memcpy(completion.error.message, message.data(), message_size);
 }
 
+template <bool Profiled, bool Logging>
+void execute_ring_command(const wmfs_ring_record_v1 &command,
+                          wmfs_ring_record_v1 &completion,
+                          MappedBufferCache &buffers) {
+    if constexpr (Logging) {
+        log_submission_id = command.submission_id;
+        log_invocation_id = command.invocation_id;
+        log_operation_id = command.operation_id;
+    }
+    c10::InferenceMode inference_mode;
+    std::vector<TensorLease> inputs;
+    std::vector<TensorLease> outputs;
+    std::chrono::steady_clock::time_point started{};
+    if constexpr (Profiled)
+        started = std::chrono::steady_clock::now();
+    for (std::uint16_t index = 0; index < command.tensor_count; ++index) {
+        const auto &item = command.tensors[index];
+        std::chrono::steady_clock::time_point view_started{};
+        if constexpr (Profiled)
+            view_started = std::chrono::steady_clock::now();
+        if (item.kind == WMFS_RING_TENSOR_INPUT) {
+            inputs.push_back(
+                ring_tensor(buffers, item, command.invocation_id,
+                            item.flags & WMFS_RING_TENSOR_FLAG_WRITABLE));
+            if constexpr (Profiled)
+                completion.profile.worker_input_views_ns +=
+                    nanoseconds_since(view_started);
+        } else if (item.kind == WMFS_RING_TENSOR_OUTPUT) {
+            outputs.push_back(
+                ring_tensor(buffers, item, command.invocation_id, true));
+            if constexpr (Profiled)
+                completion.profile.worker_output_views_ns +=
+                    nanoseconds_since(view_started);
+        } else {
+            throw std::invalid_argument("Invalid ring tensor kind");
+        }
+    }
+    auto scalar_values = scalars(command);
+    if (command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS) {
+        auto planned = plan(command.operation_id, inputs, scalar_values);
+        completion.planned_output_count = planned.size();
+        for (std::size_t index = 0; index < planned.size(); ++index) {
+            completion.planned_outputs[index].dtype = planned[index].dtype;
+            completion.planned_outputs[index].rank = planned[index].rank;
+            completion.planned_outputs[index].output_index =
+                planned[index].output_index;
+            for (std::uint32_t axis = 0; axis < planned[index].rank; ++axis)
+                completion.planned_outputs[index].shape[axis] =
+                    planned[index].shape[axis];
+        }
+    } else if (command.kind == WMFS_RING_COMMAND_INVOKE) {
+        std::chrono::steady_clock::time_point kernel{};
+        if constexpr (Profiled)
+            kernel = std::chrono::steady_clock::now();
+        dispatch(command.operation_id, inputs, outputs, scalar_values);
+        if constexpr (Profiled) {
+            completion.profile.worker_kernel_ns = nanoseconds_since(kernel);
+            const auto elapsed = nanoseconds_since(started);
+            completion.profile.worker_dispatch_ns =
+                elapsed > completion.profile.worker_kernel_ns
+                    ? elapsed - completion.profile.worker_kernel_ns
+                    : 0;
+        }
+    } else if (command.kind == WMFS_RING_COMMAND_PING) {
+        std::chrono::steady_clock::time_point kernel{};
+        if constexpr (Profiled)
+            kernel = std::chrono::steady_clock::now();
+        if (command.operation_id)
+            std::this_thread::sleep_for(
+                std::chrono::nanoseconds(command.operation_id));
+        if constexpr (Profiled)
+            completion.profile.worker_kernel_ns = nanoseconds_since(kernel);
+    } else {
+        throw std::invalid_argument("Unsupported ring command");
+    }
+}
+
 void run_ring(RingConsumer commands, RingProducer completions,
-              MappedBufferCache &buffers) {
+              MappedBufferCache &buffers, bool logging_enabled) {
     for (;;) {
         wmfs_ring_record_v1 command{};
         if (commands.pop(command) != RingWaitResult::success)
@@ -815,68 +892,15 @@ void run_ring(RingConsumer commands, RingProducer completions,
         completion.profile.worker_started_ns =
             profiled ? steady_nanoseconds() : 0;
         try {
-            log_submission_id = command.submission_id;
-            log_invocation_id = command.invocation_id;
-            log_operation_id = command.operation_id;
-            c10::InferenceMode inference_mode;
-            std::vector<TensorLease> inputs;
-            std::vector<TensorLease> outputs;
-            const auto started = std::chrono::steady_clock::now();
-            for (std::uint16_t index = 0; index < command.tensor_count;
-                 ++index) {
-                const auto &item = command.tensors[index];
-                const auto view_started = std::chrono::steady_clock::now();
-                if (item.kind == WMFS_RING_TENSOR_INPUT) {
-                    inputs.push_back(ring_tensor(
-                        buffers, item, command.invocation_id,
-                        item.flags & WMFS_RING_TENSOR_FLAG_WRITABLE));
-                    completion.profile.worker_input_views_ns +=
-                        nanoseconds_since(view_started);
-                } else if (item.kind == WMFS_RING_TENSOR_OUTPUT) {
-                    outputs.push_back(ring_tensor(buffers, item,
-                                                  command.invocation_id, true));
-                    completion.profile.worker_output_views_ns +=
-                        nanoseconds_since(view_started);
-                } else {
-                    throw std::invalid_argument("Invalid ring tensor kind");
-                }
-            }
-            auto scalar_values = scalars(command);
-            if (command.kind == WMFS_RING_COMMAND_PLAN_OUTPUTS) {
-                auto planned =
-                    plan(command.operation_id, inputs, scalar_values);
-                completion.planned_output_count = planned.size();
-                for (std::size_t index = 0; index < planned.size(); ++index) {
-                    completion.planned_outputs[index].dtype =
-                        planned[index].dtype;
-                    completion.planned_outputs[index].rank =
-                        planned[index].rank;
-                    completion.planned_outputs[index].output_index =
-                        planned[index].output_index;
-                    for (std::uint32_t axis = 0; axis < planned[index].rank;
-                         ++axis)
-                        completion.planned_outputs[index].shape[axis] =
-                            planned[index].shape[axis];
-                }
-            } else if (command.kind == WMFS_RING_COMMAND_INVOKE) {
-                const auto kernel = std::chrono::steady_clock::now();
-                dispatch(command.operation_id, inputs, outputs, scalar_values);
-                completion.profile.worker_kernel_ns = nanoseconds_since(kernel);
-                const auto elapsed = nanoseconds_since(started);
-                completion.profile.worker_dispatch_ns =
-                    elapsed > completion.profile.worker_kernel_ns
-                        ? elapsed - completion.profile.worker_kernel_ns
-                        : 0;
-            } else if (command.kind == WMFS_RING_COMMAND_PING) {
-                const auto kernel = std::chrono::steady_clock::now();
-                if (command.operation_id)
-                    std::this_thread::sleep_for(
-                        std::chrono::nanoseconds(command.operation_id));
-                completion.profile.worker_kernel_ns =
-                    profiled ? nanoseconds_since(kernel) : 0;
-            } else {
-                throw std::invalid_argument("Unsupported ring command");
-            }
+            if (profiled && logging_enabled)
+                execute_ring_command<true, true>(command, completion, buffers);
+            else if (profiled)
+                execute_ring_command<true, false>(command, completion, buffers);
+            else if (logging_enabled)
+                execute_ring_command<false, true>(command, completion, buffers);
+            else
+                execute_ring_command<false, false>(command, completion,
+                                                   buffers);
         } catch (const c10::Error &error) {
             set_error(completion, WMFS_RING_STATUS_OPERATION_ERROR,
                       "RuntimeError", error.what_without_backtrace());
@@ -948,7 +972,8 @@ int run_worker(int argc, char **argv) {
     });
     std::thread ring_worker([&] {
         try {
-            run_ring(std::move(commands), std::move(completions), buffers);
+            run_ring(std::move(commands), std::move(completions), buffers,
+                     resources.log != nullptr);
         } catch (...) {
             ::shutdown(resources.bootstrap.get(), SHUT_RDWR);
         }

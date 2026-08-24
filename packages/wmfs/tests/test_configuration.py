@@ -189,6 +189,34 @@ def test_configuration_snapshot_and_close_reset() -> None:
     assert candidate._plugin_configurations == {}
 
 
+def test_repeated_local_operations_bypass_configuration_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _runtime_with_reference()
+    candidate.use_backend("local")
+    source = __import__("torch").ones(4)
+
+    monkeypatch.setattr(
+        configuration_module,
+        "_validate_value",
+        lambda *_args, **_kwargs: pytest.fail("operation revalidated configuration"),
+    )
+    monkeypatch.setattr(
+        configuration_module.json,
+        "dumps",
+        lambda *_args, **_kwargs: pytest.fail("operation serialized configuration"),
+    )
+    try:
+        first = candidate.invoke("reference.add_scalar", source, 1.0)
+        second = candidate.invoke("reference.add_scalar", source, 2.0)
+    finally:
+        candidate.close()
+
+    assert candidate._plugin_configurations == {}
+    __import__("torch").testing.assert_close(first, source + 1.0)
+    __import__("torch").testing.assert_close(second, source + 2.0)
+
+
 def test_absent_configuration_bypasses_json_serializer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

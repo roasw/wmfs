@@ -1,6 +1,7 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -76,12 +77,14 @@ def test_fatal_transport_error_restarts_before_next_invocation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions: list[object] = []
+    configurations: list[bytes] = []
 
     class Session:
-        def __init__(self, *_args: object) -> None:
+        def __init__(self, *args: object) -> None:
             self.calls = 0
             self.closed = False
             sessions.append(self)
+            configurations.append(args[0].configuration_bytes)  # type: ignore[attr-defined]
 
         def invoke(self, _operation: str, *_args: object, **_kwargs: object) -> int:
             self.calls += 1
@@ -93,6 +96,9 @@ def test_fatal_transport_error_restarts_before_next_invocation(
             self.closed = True
 
     backend = _backend(monkeypatch, Session)
+    backend._manifests["test"] = replace(
+        backend._manifests["test"], configuration_bytes=b'{"secret":"exact"}'
+    )
     try:
         with pytest.raises(WorkerTransportError, match="disconnected"):
             backend.invoke("operation")
@@ -101,6 +107,7 @@ def test_fatal_transport_error_restarts_before_next_invocation(
         assert len(sessions) == 2
         assert sessions[0].closed
         assert sessions[0].calls == sessions[1].calls == 1
+        assert configurations == [b'{"secret":"exact"}'] * 2
     finally:
         backend.close()
 

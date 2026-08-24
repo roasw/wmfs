@@ -222,6 +222,7 @@ def _serve(
             mapped_buffers,
             compiled,
             planners,
+            logger is not NullLogger,
         ),
         daemon=True,
     )
@@ -439,6 +440,7 @@ def _ring_worker_loop(
     mapped_buffers: MappedBufferCache,
     operations: Mapping[int, _Operation],
     planners: Mapping[int, OutputPlanner],
+    logging_enabled: bool = True,
 ) -> None:
     while True:
         try:
@@ -467,12 +469,20 @@ def _ring_worker_loop(
         completion.profile = tuple(profile)
         try:
             if command.kind == COMMAND_INVOKE:
-                with operation_context(
-                    session=command.generation,
-                    submission=command.submission_id,
-                    invocation=command.invocation_id,
-                    operation=command.operation_id,
-                ):
+                if logging_enabled:
+                    with operation_context(
+                        session=command.generation,
+                        submission=command.submission_id,
+                        invocation=command.invocation_id,
+                        operation=command.operation_id,
+                    ):
+                        measured = _invoke_known(
+                            command.invocation(),
+                            mapped_buffers,
+                            operations,
+                            profiled=bool(command.flags & FLAG_PROFILE),
+                        )
+                else:
                     measured = _invoke_known(
                         command.invocation(),
                         mapped_buffers,
@@ -489,12 +499,20 @@ def _ring_worker_loop(
                         completion.profile[7],
                     )
             elif command.kind == COMMAND_PLAN_OUTPUTS:
-                with operation_context(
-                    session=command.generation,
-                    submission=command.submission_id,
-                    invocation=command.invocation_id,
-                    operation=command.operation_id,
-                ):
+                if logging_enabled:
+                    with operation_context(
+                        session=command.generation,
+                        submission=command.submission_id,
+                        invocation=command.invocation_id,
+                        operation=command.operation_id,
+                    ):
+                        planned = _plan_outputs(
+                            command.invocation(include_outputs=False),
+                            mapped_buffers,
+                            operations,
+                            planners,
+                        )
+                else:
                     planned = _plan_outputs(
                         command.invocation(include_outputs=False),
                         mapped_buffers,
@@ -508,7 +526,9 @@ def _ring_worker_loop(
                     for item in planned
                 )
             elif command.kind == COMMAND_PING:
-                kernel_started = perf_counter_ns()
+                kernel_started = (
+                    perf_counter_ns() if command.flags & FLAG_PROFILE else 0
+                )
                 if command.operation_id:
                     sleep(command.operation_id / 1_000_000_000)
                 if command.flags & FLAG_PROFILE:
@@ -642,8 +662,66 @@ def _invoke_known(
     *,
     profiled: bool,
 ) -> dict[str, int] | None:
+    if not profiled:
+        _invoke_known_direct(invocation, mapped_buffers, operations)
+        return None
+    return _invoke_known_profiled(invocation, mapped_buffers, operations)
+
+
+def _invoke_known_direct(
+    invocation: object,
+    mapped_buffers: MappedBufferCache,
+    operations: Mapping[int, _Operation],
+) -> None:
     invocation_id = int(invocation.invocationId)
-    started = perf_counter_ns() if profiled else 0
+    try:
+        operation_id = int(invocation.operationId)
+        try:
+            operation = operations[operation_id]
+        except KeyError:
+            raise ValueError(f"Unknown operation ID {operation_id}") from None
+        if len(invocation.inputs) != len(operation.input_accesses):
+            raise ValueError("Invocation has an invalid input count")
+        if len(invocation.outputs) != len(operation.metadata.tensor_outputs):
+            raise ValueError("Invocation has an invalid output count")
+        inputs = tuple(
+            mapped_buffers.tensor(
+                descriptor,
+                invocation_id=invocation_id,
+                require_writable=access == "readWrite",
+            )
+            for descriptor, access in zip(
+                invocation.inputs, operation.input_accesses, strict=True
+            )
+        )
+        outputs = tuple(
+            mapped_buffers.tensor(
+                descriptor, invocation_id=invocation_id, require_writable=True
+            )
+            for descriptor in invocation.outputs
+        )
+        context = InvocationContext(
+            operation.metadata,
+            invocation_id,
+            inputs,
+            outputs,
+            _decode_scalars(invocation.scalars, operation.scalar_kinds),
+        )
+        try:
+            operation.handler(context)
+        except Exception as error:
+            raise _OperationFailure(error) from error
+    finally:
+        mapped_buffers.finish_invocation(invocation_id)
+
+
+def _invoke_known_profiled(
+    invocation: object,
+    mapped_buffers: MappedBufferCache,
+    operations: Mapping[int, _Operation],
+) -> dict[str, int]:
+    invocation_id = int(invocation.invocationId)
+    started = perf_counter_ns()
     input_views_ns = 0
     output_views_ns = 0
     kernel_ns = 0
@@ -658,7 +736,7 @@ def _invoke_known(
         if len(invocation.outputs) != len(operation.metadata.tensor_outputs):
             raise ValueError("Invocation has an invalid output count")
 
-        view_started = perf_counter_ns() if profiled else 0
+        view_started = perf_counter_ns()
         inputs = tuple(
             mapped_buffers.tensor(
                 descriptor,
@@ -669,9 +747,8 @@ def _invoke_known(
                 invocation.inputs, operation.input_accesses, strict=True
             )
         )
-        if profiled:
-            input_views_ns = perf_counter_ns() - view_started
-            view_started = perf_counter_ns()
+        input_views_ns = perf_counter_ns() - view_started
+        view_started = perf_counter_ns()
         outputs = tuple(
             mapped_buffers.tensor(
                 descriptor,
@@ -680,8 +757,7 @@ def _invoke_known(
             )
             for descriptor in invocation.outputs
         )
-        if profiled:
-            output_views_ns = perf_counter_ns() - view_started
+        output_views_ns = perf_counter_ns() - view_started
         scalars = _decode_scalars(invocation.scalars, operation.scalar_kinds)
         context = InvocationContext(
             operation.metadata,
@@ -690,17 +766,15 @@ def _invoke_known(
             outputs,
             scalars,
         )
-        kernel_started = perf_counter_ns() if profiled else 0
+        kernel_started = perf_counter_ns()
         try:
             operation.handler(context)
         except Exception as error:
             raise _OperationFailure(error) from error
-        kernel_ns = perf_counter_ns() - kernel_started if profiled else 0
-        elapsed_ns = perf_counter_ns() - started if profiled else 0
+        kernel_ns = perf_counter_ns() - kernel_started
+        elapsed_ns = perf_counter_ns() - started
     finally:
         mapped_buffers.finish_invocation(invocation_id)
-    if not profiled:
-        return None
     return {
         "inputViewsNs": input_views_ns,
         "outputViewsNs": output_views_ns,

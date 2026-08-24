@@ -4,6 +4,7 @@ import socket
 import subprocess
 import time
 from dataclasses import dataclass
+from importlib import import_module
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Literal
@@ -212,16 +213,42 @@ def test_in_process_initialization_and_calls_create_no_isolated_resources(
 
     candidate = Runtime()
     candidate.load_plugins(PLUGIN_DIRECTORY)
+    provider = (
+        import_module("wmfs_reference.kernels")
+        if name == "local"
+        else import_module("wmfs._bundled")
+    )
+    initialize_calls = 0
+    original_initialize = provider.initialize
+
+    def initialize(*args: object, **kwargs: object) -> object:
+        nonlocal initialize_calls
+        initialize_calls += 1
+        return original_initialize(*args, **kwargs)
+
+    monkeypatch.setattr(provider, "initialize", initialize)
     started = time.perf_counter_ns()
     candidate.use_backend(name)
     initialization_ns = time.perf_counter_ns() - started
+    candidate.use_backend(name)
     source = torch.arange(8.0).reshape(2, 4)[:, ::2]
     result = candidate.invoke("add_scalar", source, 1.0)
+    large = torch.ones(1024, 1024)
+    repeated = tuple(
+        candidate.invoke("add_scalar", value, 1.0)
+        for value in (torch.ones(1), large, source)
+    )
     candidate.close()
 
     torch.testing.assert_close(result, source + 1.0)
     assert not source.is_contiguous()
+    assert all(type(value) is torch.Tensor for value in (result, *repeated))
+    assert all(
+        getattr(value.untyped_storage(), "_wmfs_allocation", None) is None
+        for value in (result, *repeated)
+    )
     assert initialization_ns < 5_000_000_000
+    assert initialize_calls == 1
     assert calls == []
 
 

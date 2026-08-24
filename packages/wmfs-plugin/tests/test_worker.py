@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import wmfs_plugin.worker as worker_module
 from wmfs_plugin import InvocationContext
 from wmfs_plugin.metadata import OperationMetadata, ScalarParameter, TensorParameter
 from wmfs_plugin.worker import (
@@ -131,3 +132,37 @@ def test_invocation_cleanup_runs_when_handler_raises() -> None:
 
     assert raised.value.error_type == "RuntimeError"
     assert cache.finished == [42]
+
+
+def test_unprofiled_worker_invocation_does_not_read_timing_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Cache:
+        def tensor(self, descriptor: object, **_kwargs: object) -> object:
+            return descriptor
+
+        def finish_invocation(self, _invocation_id: int) -> None:
+            pass
+
+    invocation = SimpleNamespace(
+        invocationId=42,
+        operationId=1,
+        inputs=("input",),
+        outputs=("output",),
+        scalars=(_ScalarArgument(0, "float64", 2.0),),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "perf_counter_ns",
+        lambda: pytest.fail("unprofiled worker read the profiling clock"),
+    )
+
+    assert (
+        _invoke_known(
+            invocation,
+            Cache(),  # type: ignore[arg-type]
+            _compile_operations((_metadata(),), {"operation": _handler}),
+            profiled=False,
+        )
+        is None
+    )

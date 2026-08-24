@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+import wmfs_plugin.ring as ring_module
 from wmfs_plugin.ring import (
     COMMAND_INVOKE,
     COMPLETION_PLAN_OUTPUTS,
@@ -146,3 +147,23 @@ def test_close_interrupts_blocked_wait() -> None:
     consumer.close()
     assert not thread.is_alive()
     assert isinstance(result[0], RingError)
+
+
+def test_direct_push_does_not_read_optional_profile_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = RingOwner(1, 7)
+    producer = owner.endpoint(True)
+    consumer = owner.endpoint(False)
+    monkeypatch.setattr(
+        ring_module,
+        "perf_counter_ns",
+        lambda: pytest.fail("direct ring push read the profiling clock"),
+    )
+    try:
+        producer.push(Record(COMMAND_INVOKE, 7, 1, 1))
+        assert consumer.pop().profile == (0,) * 8
+    finally:
+        owner.close()
+        producer.close()
+        consumer.close()

@@ -9,7 +9,7 @@ import struct
 import threading
 from ctypes import CDLL, POINTER, c_uint32, c_uint64
 from ctypes.util import find_library
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from time import monotonic, perf_counter_ns
 from types import SimpleNamespace
 from typing import Iterable
@@ -189,7 +189,7 @@ class Record:
     tensors: tuple[Tensor, ...] = ()
     scalars: tuple[Scalar, ...] = ()
     outputs: tuple[PlannedOutput, ...] = ()
-    profile: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
+    profile: tuple[int, ...] = (0,) * 8
     error_type: str = ""
     error_message: str = ""
 
@@ -554,7 +554,28 @@ class RingEndpoint:
             raise RingError("impossible ring counters")
         return producer, consumer
 
-    def push(self, record: Record, timeout: float | None = None) -> int:
+    def push(self, record: Record, timeout: float | None = None) -> None:
+        """Publish without optional profiling clocks.
+
+        ``monotonic`` calls in this path are only for the mandatory transport
+        deadline and occur when a finite timeout is supplied.
+        """
+        if not self.producer:
+            raise RuntimeError("Cannot push through ring consumer")
+        payload = encode(record)
+        deadline = None if timeout is None else monotonic() + timeout
+        with self._lock:
+            while True:
+                producer, consumer = self._counters()
+                if producer - consumer < self.capacity:
+                    offset = HEADER_SIZE + producer % self.capacity * RECORD_SIZE
+                    self._mapping[offset : offset + RECORD_SIZE] = payload
+                    _store_u64(self._mapping, 64, producer + 1)
+                    os.eventfd_write(self.data_fd, 1)
+                    return
+                self._wait(self.space_fd, deadline)
+
+    def push_profiled(self, record: Record, timeout: float | None = None) -> int:
         if not self.producer:
             raise RuntimeError("Cannot push through ring consumer")
         payload = bytearray(encode(record))
@@ -564,11 +585,10 @@ class RingEndpoint:
             while True:
                 producer, consumer = self._counters()
                 if producer - consumer < self.capacity:
-                    if record.flags & FLAG_PROFILE:
-                        profile = list(record.profile)
-                        profile[0] = perf_counter_ns()
-                        record.profile = tuple(profile)
-                        _PROFILE.pack_into(payload, _PROFILE_OFFSET, *record.profile)
+                    profile = list(record.profile)
+                    profile[0] = perf_counter_ns()
+                    record.profile = tuple(profile)
+                    _PROFILE.pack_into(payload, _PROFILE_OFFSET, *record.profile)
                     offset = HEADER_SIZE + producer % self.capacity * RECORD_SIZE
                     self._mapping[offset : offset + RECORD_SIZE] = payload
                     _store_u64(self._mapping, 64, producer + 1)

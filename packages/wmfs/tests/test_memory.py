@@ -250,7 +250,7 @@ def test_reclamation_stats_time_delayed_recipient(
             now += 25
 
     monkeypatch.setattr(buffer_module, "perf_counter_ns", lambda: now)
-    with BufferManager() as manager:
+    with BufferManager(profile=True) as manager:
         managed = manager.empty((8,))
         managed.buffer.register_recipient(Recipient())
         del managed

@@ -303,8 +303,12 @@ def test_log_socket_and_file_failures_do_not_change_operation_result(
 
 
 @pytest.mark.parametrize("control_mode", ["python", "native"])
+@pytest.mark.parametrize("worker_kind", ["cpp", "python"])
 def test_disabled_logging_has_no_descriptor_collector_file_or_host_thread(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, control_mode: str
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    control_mode: str,
+    worker_kind: str,
 ) -> None:
     socketpairs = 0
     descriptor_counts: list[int] = []
@@ -341,7 +345,7 @@ def test_disabled_logging_has_no_descriptor_collector_file_or_host_thread(
         for thread in threading.enumerate()
         if thread.name.startswith("wmfs-log-")
     }
-    manifest = _manifest(tmp_path, "cpp", LoggingOptions())
+    manifest = _manifest(tmp_path, worker_kind, LoggingOptions())
     with BufferManager() as buffers:
         session = _session_type(control_mode)(manifest, buffers, manifest.metadata)
         try:

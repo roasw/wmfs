@@ -9,8 +9,51 @@ import torch
 from wmfs.registry import OperationMetadata, OperationRegistry, PluginMetadata
 from wmfs.runtime import Runtime
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
+from wmfs.transport.ring import COMMAND_INVOKE, COMPLETION_INVOKE, Record, RingOwner
+from wmfs.transport.worker_process import _RingClient
 
 runtime_module = import_module("wmfs.runtime")
+worker_process_module = import_module("wmfs.transport.worker_process")
+
+
+def test_direct_ring_client_does_not_read_optional_profile_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = RingOwner(2, 7)
+    completions = RingOwner(2, 7)
+    command_consumer = commands.endpoint(False)
+    completion_producer = completions.endpoint(True)
+    client = _RingClient(commands.endpoint(True), completions.endpoint(False))
+
+    def serve() -> None:
+        command = command_consumer.pop()
+        completion_producer.push(
+            Record(
+                COMPLETION_INVOKE,
+                command.generation,
+                command.submission_id,
+                command.invocation_id,
+                command.operation_id,
+            )
+        )
+
+    worker = threading.Thread(target=serve, daemon=True)
+    worker.start()
+    monkeypatch.setattr(
+        worker_process_module,
+        "perf_counter_ns",
+        lambda: pytest.fail("direct ring client read the profiling clock"),
+    )
+    try:
+        response = client.submit(Record(COMMAND_INVOKE, 7, 0, 11, 13), 2.0)
+        assert response.profile == (0,) * 8
+    finally:
+        client.close()
+        commands.close()
+        completions.close()
+        command_consumer.close()
+        completion_producer.close()
+        worker.join(timeout=1)
 
 
 def test_close_waits_for_accepted_call_and_rejects_calls_while_closing() -> None:

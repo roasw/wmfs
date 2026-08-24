@@ -263,6 +263,7 @@ class BufferManager:
         arena_bytes: int | None = None,
         max_cached_buffers: int = _DEFAULT_MAX_CACHED_BUFFERS,
         max_cached_bytes: int = _DEFAULT_MAX_CACHED_BYTES,
+        profile: bool = False,
     ) -> None:
         if mode not in {"pooled", "arena"}:
             raise ValueError("Buffer mode must be 'pooled' or 'arena'")
@@ -283,6 +284,7 @@ class BufferManager:
         self._arena_bytes = effective_arena_bytes
         self._max_cached_buffers = max_cached_buffers
         self._max_cached_bytes = max_cached_bytes
+        self._profile = profile
         self._active: dict[int, _Allocation] = {}
         self._free: dict[int, list[_MemoryRegion]] = {}
         self._cached_bytes = 0
@@ -470,7 +472,7 @@ class BufferManager:
         self._collect(source="explicit")
 
     def _collect(self, *, source: str) -> None:
-        started = perf_counter_ns()
+        started = perf_counter_ns() if self._profile else 0
         drained = 0
         reclaimed = 0
         try:
@@ -497,7 +499,8 @@ class BufferManager:
             with self._lock:
                 self._stats.collection_calls += 1
                 self._stats.collection_noops += reclaimed == 0
-                self._stats.collection_ns += perf_counter_ns() - started
+                if self._profile:
+                    self._stats.collection_ns += perf_counter_ns() - started
                 self._stats.allocations_drained += drained
                 self._stats.buffers_reclaimed += reclaimed
                 if source == "allocation":
@@ -588,13 +591,14 @@ class BufferManager:
         notification_batches = 0
         retirement_ns = 0
         for recipient, recipient_buffers in by_recipient.items():
-            started = perf_counter_ns()
+            started = perf_counter_ns() if self._profile else 0
             try:
                 recipient.retire_buffers(tuple(recipient_buffers))
             except Exception:
                 failed_regions.update(buffer._region for buffer in recipient_buffers)
             finally:
-                retirement_ns += perf_counter_ns() - started
+                if self._profile:
+                    retirement_ns += perf_counter_ns() - started
                 notifications += len(recipient_buffers)
                 notification_batches += 1
         with self._lock:
@@ -604,11 +608,12 @@ class BufferManager:
         for buffer in buffers:
             region = buffer._region
             if region in failed_regions:
-                started = perf_counter_ns()
+                started = perf_counter_ns() if self._profile else 0
                 region.close()
                 with self._lock:
                     self._stats.buffers_quarantined += 1
-                    self._stats.buffer_quarantine_ns += perf_counter_ns() - started
+                    if self._profile:
+                        self._stats.buffer_quarantine_ns += perf_counter_ns() - started
                 continue
             self._reset_or_release_region(region)
 
@@ -619,9 +624,9 @@ class BufferManager:
             region.close()
             return
         try:
-            started = perf_counter_ns()
+            started = perf_counter_ns() if self._profile else 0
             region.reset()
-            reset_ns = perf_counter_ns() - started
+            reset_ns = perf_counter_ns() - started if self._profile else 0
         except Exception:
             region.close()
             raise
@@ -634,17 +639,19 @@ class BufferManager:
                 >= self._max_cached_buffers
                 or self._cached_bytes + region.byte_length > self._max_cached_bytes
             ):
-                started = perf_counter_ns()
+                started = perf_counter_ns() if self._profile else 0
                 region.close()
                 if not self._closed:
                     self._stats.buffers_evicted += 1
-                    self._stats.buffer_eviction_ns += perf_counter_ns() - started
+                    if self._profile:
+                        self._stats.buffer_eviction_ns += perf_counter_ns() - started
                 return
-            started = perf_counter_ns()
+            started = perf_counter_ns() if self._profile else 0
             self._free.setdefault(region.byte_length, []).append(region)
             self._cached_bytes += region.byte_length
             self._stats.buffers_cached += 1
-            self._stats.buffer_cache_ns += perf_counter_ns() - started
+            if self._profile:
+                self._stats.buffer_cache_ns += perf_counter_ns() - started
 
     def _allocate_arena(self, byte_length: int, allocation_id: int) -> SharedBuffer:
         created = False

@@ -5,6 +5,7 @@ from typing import Callable
 
 import pytest
 
+from wmfs._null_logger import NULL_LOGGER
 from wmfs.logging import (
     LOG_HEADER_SIZE,
     LogContext,
@@ -63,3 +64,17 @@ def test_log_codec_rejects_malformed_packets(
 
 def test_log_header_has_fixed_size() -> None:
     assert len(encode_log_record(LogRecord(logging.INFO, ""))) == LOG_HEADER_SIZE
+
+
+def test_runtime_null_logger_bind_is_singleton_and_has_no_sink_state() -> None:
+    assert NULL_LOGGER.__slots__ == ()
+    assert NULL_LOGGER.bind(plugin="reference", operation=3) is NULL_LOGGER
+    assert not NULL_LOGGER.enabled(logging.CRITICAL)
+    assert not hasattr(NULL_LOGGER, "__dict__")
+
+    class Expensive:
+        def __str__(self) -> str:
+            raise AssertionError("disabled logger formatted a value")
+
+    value = Expensive()
+    NULL_LOGGER.log(logging.INFO, value, fields={"value": value})

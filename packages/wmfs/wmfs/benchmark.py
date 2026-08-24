@@ -219,7 +219,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     local.initialize(manifests, registry)
     bundled = _bundled_backend(config, manifests, registry)
     with BufferManager(
-        mode=config.memory_mode, arena_bytes=config.arena_bytes
+        mode=config.memory_mode, arena_bytes=config.arena_bytes, profile=True
     ) as discovery_buffers:
         metadata = manifest.metadata
         discovery_session = _new_session(manifest, discovery_buffers, metadata, config)
@@ -634,7 +634,7 @@ def _benchmark_startup(
     samples = []
     for _ in range(config.startup_iterations):
         with BufferManager(
-            mode=config.memory_mode, arena_bytes=config.arena_bytes
+            mode=config.memory_mode, arena_bytes=config.arena_bytes, profile=True
         ) as buffers:
             start = perf_counter_ns()
             session = _new_session(manifest, buffers, metadata, config)
@@ -922,6 +922,7 @@ def _benchmark_diagnostics(
             arena_bytes=config.arena_bytes,
             max_cached_buffers=0,
             max_cached_bytes=0,
+            profile=True,
         ) as cold_buffers:
             start = perf_counter_ns()
             allocations = [
@@ -1097,6 +1098,7 @@ def _benchmark_session(
     with BufferManager(
         mode=memory_mode or config.memory_mode,
         arena_bytes=config.arena_bytes,
+        profile=True,
     ) as buffers:
         session = _new_session(manifest, buffers, metadata, config)
         try:
