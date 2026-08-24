@@ -1,3 +1,2 @@
 include README.md
 recursive-include generated *
-recursive-include schemas *.capnp
