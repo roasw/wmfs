@@ -735,9 +735,9 @@ Avoid counting worker startup in steady-state benchmarks. Report startup separat
 Use multiple iterations and report median plus a spread metric such as p95 or standard deviation.
 
 Save retained benchmark reports with explicit comparison names that identify
-the measured revision or role, such as `benchmark-old.json`,
-`benchmark-0.1.0.json`, and `benchmark-master.json`. Do not overwrite or reuse
-an ambiguous baseline name when results from multiple revisions are being
+the measured revision or role, such as `benchmark-0.1.0.json`,
+`benchmark-master.json`, and `benchmark-master-arena.json`. Do not overwrite or
+reuse an ambiguous baseline name when results from multiple revisions are being
 compared.
 
 ## Process Isolation Demonstration
@@ -888,15 +888,15 @@ Run the plugin worker in a deliberately different glibc/toolchain environment.
 Benchmark local versus isolated execution.
 
 Implemented by `wmfs-benchmark`, with a reproducible reference report in
-`benchmarks/baseline.json`. The benchmark covers small, medium, and large cases;
-reports median, p95, and standard deviation; and separates initialization,
-fixed startup control,
+`benchmarks/benchmark-master.json`. The benchmark covers small, medium, and
+large cases; reports median, p95, and standard deviation; and separates
+initialization, fixed startup control,
 shared-memory transport, cached mappings, and output allocation costs.
 
 The ring architecture adds a baseline that separates enqueue, wakeup, worker
-queueing, kernel, completion, and result materialization. Immutable schema 5
-reports retain the old Cap'n Proto RPC names and values as archived historical
-comparison data; current reports must not relabel those samples.
+queueing, kernel, completion, and result materialization. Historical reports
+must retain their original field names and measurement boundaries; current
+reports must not relabel old samples.
 
 The central success criterion is:
 

@@ -593,13 +593,13 @@ pass/fail performance test.
 Write a machine-readable report with:
 
 ```console
-just benchmark-json benchmark.json
+just benchmark-json benchmarks/benchmark-master.json
 ```
 
 Compare the trusted single-FD arena with:
 
 ```console
-just benchmark-json arena.json arena
+just benchmark-json benchmarks/benchmark-master-arena.json arena
 ```
 
 Sizes, iteration counts, dtype, Torch thread count, control mode, and
@@ -610,9 +610,8 @@ must explicitly inject a substitute backend or skip. The output allocation
 service metric measures
 metadata-driven runtime allocation and output mapping before command-ring
 publication. Lazy page faults remain part of isolated end-to-end time.
-The checked-in [`benchmarks/baseline.json`](benchmarks/baseline.json) and
-[`benchmarks/arena.json`](benchmarks/arena.json) have the schema 11 report shape
-but contain no fabricated samples until the packaged reference benchmark is
-rerun. [`benchmarks/README.md`](benchmarks/README.md) links immutable schema 5
-Cap'n Proto measurements and explains their historical field names. Current
-reports contain no live `rpc_` fields and do not reinterpret old values.
+The checked-in [`benchmark-0.1.0.json`](benchmarks/benchmark-0.1.0.json) and
+[`benchmark-master.json`](benchmarks/benchmark-master.json) reports are measured
+packaged Release results. [`benchmarks/README.md`](benchmarks/README.md) explains
+their measurement boundaries and summarizes the RPC-to-ring comparison. Retain
+additional reports under explicit `benchmark-<revision-or-role>.json` names.
