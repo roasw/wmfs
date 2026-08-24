@@ -15,17 +15,18 @@ and C++ worker were built in Release mode by their Nix packages. The worker
 contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
 glibc 2.42.
 Torch was limited to one CPU thread. Each operation was warmed up twice, then
-measured ten times. The checked report envelopes use schema 10 and explicitly
+measured ten times. The checked report envelopes use schema 11 and explicitly
 contain no current operation samples because bundled measurements have not been
 generated on the reference host. Their `historical_report` links point to the
 earlier schema 5 numeric reports retained as `baseline.schema5.json` and
 `arena.schema5.json`, rather than relabeling or fabricating results. Those
 legacy boundaries included result destruction and safe-pool
-retirement/reset in isolated end-to-end samples. New schema 10 reports contain
+retirement/reset in isolated end-to-end samples. New schema 11 reports contain
 local, bundled, and isolated samples keyed by backend. All primary samples stop
 at backend return and post-return cleanup is measured separately.
 Known outputs are preallocated from schema metadata and each operation uses the
-command/completion rings. A fixed protocol owns startup/control. The table reports
+command/completion rings. A fixed `SOCK_SEQPACKET` protocol owns startup/control
+and transfers descriptor roles with `SCM_RIGHTS`. The table reports
 medians; the JSON reports also contain p95, standard deviation, allocation
 statistics, and transport diagnostics. Pooled reclamation diagnostics use
 internal cumulative metric deltas and report the reclaimed-buffer population,
@@ -74,8 +75,13 @@ dispatch. Compared with the optimized Python worker report, arena small
 `add_scalar` fell from 0.431 ms to 0.198 ms and high-frequency latency fell from
 0.342 ms to 0.186 ms. Detailed JSON diagnostics separate scalar binding,
 output-plan evaluation, ring submission/enqueue, wakeup, worker queue, worker
-views, dispatch, kernel, completion, and materialization. Schema 10 also records
-an independent ring ping and a capacity-1 concurrent pressure probe. The
+views, dispatch, kernel, completion, and materialization. Schema 11 also records
+an independent ring ping and a capacity-1 concurrent pressure probe. It
+separately measures absent and configured initialization for local, bundled,
+and isolated backends; isolated disabled, centralized, and worker-file logging
+startup; direct and opt-in profiled calls; and known preallocated versus dynamic
+planned outputs. These are reproducible microgroups, not values inferred by
+subtraction. The
 pressure probe holds each ping in the worker for a recorded 1 ms so the producer
 reliably reaches capacity and reports the actual eventfd backpressure wait, while
 retaining fixed-protocol ping as the startup/control comparison. Diagnostics are
@@ -93,7 +99,7 @@ outputs are the measurable remaining eager-path optimization, improving the
 high-frequency cheap-operation median by roughly 19-22% in this report.
 
 These historical values characterize one WSL2 host and are not performance
-thresholds. Regenerate both schema 10 reports on the target system when
+thresholds. Regenerate both schema 11 reports on the target system when
 evaluating the security and performance tradeoff. Compare local, bundled, and
 isolated under identical settings; bundled versus isolated is the focused
 isolation comparison because it holds the reference C++ kernel constant. Only

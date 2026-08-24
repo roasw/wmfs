@@ -6,10 +6,11 @@ import os
 import platform
 import statistics
 import sys
+import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter_ns
@@ -19,6 +20,8 @@ import torch
 
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.local import LocalBackend
+from wmfs.configuration import validate_and_canonicalize
+from wmfs.logging import LoggingOptions
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationRegistry, PluginMetadata
@@ -42,7 +45,7 @@ _COMPARISON_CONTRACT = {
     ),
     "bundled": (
         "In-process bundled plugin operation using the same transport-neutral C++ "
-        "kernel as the reference worker, without RPC or shared-memory transport."
+        "kernel as the reference worker, without rings or shared-memory transport."
     ),
     "isolated": (
         "Python frontend binding and planning, runtime-owned shared outputs, native "
@@ -71,6 +74,7 @@ _DIAGNOSTIC_PROVENANCE = {
             "ring_completion_wakeup_ms",
             "ring_result_materialization_ms",
             "native_call_ms",
+            "native_handoff_ms",
             "worker_dispatch_ms",
         ],
         "boundary": (
@@ -80,7 +84,7 @@ _DIAGNOSTIC_PROVENANCE = {
         ),
     },
     "startup_control": {
-        "metrics": ["rpc_startup_control_round_trip_ms"],
+        "metrics": ["startup_control_round_trip_ms"],
         "boundary": "Fixed control ping measures startup/liveness control separately.",
     },
     "mapping_transport": {
@@ -127,6 +131,13 @@ _DIAGNOSTIC_PROVENANCE = {
         "metrics": ["worker_kernel_ms"],
         "boundary": "Worker-side transport-neutral numerical kernel execution.",
     },
+    "profiling_cost": {
+        "metrics": ["isolated_direct_call_ms", "isolated_profiled_call_ms"],
+        "boundary": (
+            "Paired direct and opt-in profiled invocations use the same cached "
+            "inputs; both stop at backend return and are reported independently."
+        ),
+    },
 }
 
 
@@ -143,7 +154,7 @@ class BenchmarkConfig:
     iterations: int = 10
     warmups: int = 2
     startup_iterations: int = 3
-    rpc_iterations: int = 50
+    control_iterations: int = 50
     backpressure_iterations: int = 32
     diagnostic_iterations: int = 5
     threads: int = 1
@@ -159,7 +170,7 @@ class BenchmarkConfig:
         counts = (
             self.iterations,
             self.startup_iterations,
-            self.rpc_iterations,
+            self.control_iterations,
             self.backpressure_iterations,
             self.diagnostic_iterations,
             self.threads,
@@ -215,23 +226,27 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     manifest = manifests[0]
     registry = OperationRegistry()
     registry.register(manifest.metadata)
+    metadata = manifest.metadata
+    initialization = _benchmark_initialization(manifest, metadata, config)
     local = LocalBackend()
     local.initialize(manifests, registry)
     bundled = _bundled_backend(config, manifests, registry)
     with BufferManager(
         mode=config.memory_mode, arena_bytes=config.arena_bytes, profile=True
     ) as discovery_buffers:
-        metadata = manifest.metadata
         discovery_session = _new_session(manifest, discovery_buffers, metadata, config)
         try:
             worker = discovery_session.environment()
         finally:
             discovery_session.close()
 
-    startup = _benchmark_startup(manifest, metadata, config)
-    rpc = _benchmark_rpc(manifest, metadata, config)
+    logging_initialization = _benchmark_logging_initialization(
+        manifest, metadata, config
+    )
+    startup_control = _benchmark_startup_control(manifest, metadata, config)
     ring = _benchmark_ring(manifest, metadata, config)
     ring_pressure = _benchmark_ring_pressure(manifest, metadata, config)
+    output_paths = _benchmark_output_paths(manifest, metadata, config)
 
     generator = torch.Generator().manual_seed(config.seed)
     cases = []
@@ -272,7 +287,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     report = {
-        "schema_version": 10,
+        "schema_version": 11,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -301,7 +316,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "iterations": config.iterations,
             "warmups": config.warmups,
             "startup_iterations": config.startup_iterations,
-            "rpc_iterations": config.rpc_iterations,
+            "control_iterations": config.control_iterations,
             "backpressure_iterations": config.backpressure_iterations,
             "diagnostic_iterations": config.diagnostic_iterations,
             "threads": config.threads,
@@ -313,9 +328,9 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "arena_bytes": config.arena_bytes,
             "sizes": config.sizes,
         },
-        "worker_startup_ms": summarize(startup),
-        "rpc_startup_control_round_trip_ms": summarize(rpc),
-        "rpc_round_trip_ms": summarize(rpc),
+        "initialization": initialization,
+        "logging_initialization": logging_initialization,
+        "startup_control_round_trip_ms": summarize(startup_control),
         "ring_control": _summarize_ring_metrics(ring),
         "ring_capacity_pressure": _summarize_ring_metrics(ring_pressure),
         "ring_capacity_pressure_worker_hold_ns": _PRESSURE_WORKER_HOLD_NS,
@@ -344,6 +359,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
         },
         "comparison_contract": _COMPARISON_CONTRACT,
         "diagnostic_provenance": _DIAGNOSTIC_PROVENANCE,
+        "output_paths": output_paths,
         "high_frequency_add_scalar": high_frequency,
         "high_frequency_add_scalar_out": high_frequency_out,
         "operations": cases,
@@ -354,17 +370,19 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
 
 def validate_report(report: dict[str, Any]) -> None:
     """Validate the current benchmark report's required measurement groups."""
-    if report.get("schema_version") != 10:
-        raise ValueError("Benchmark report is not schema version 10")
+    if report.get("schema_version") != 11:
+        raise ValueError("Benchmark report is not schema version 11")
     if report.get("measurement_status") and not report.get("operations"):
         if not report.get("historical_report"):
             raise ValueError("Unmeasured report must identify its historical baseline")
         return
     required = {
-        "worker_startup_ms",
-        "rpc_startup_control_round_trip_ms",
+        "initialization",
+        "logging_initialization",
+        "startup_control_round_trip_ms",
         "ring_control",
         "ring_capacity_pressure",
+        "output_paths",
         "operations",
     }
     missing = required - report.keys()
@@ -390,6 +408,23 @@ def validate_report(report: dict[str, Any]) -> None:
                 for field in ("median_ms", "p95_ms", "standard_deviation_ms")
             ):
                 raise ValueError(f"Benchmark report has invalid {name} summary")
+    for backend in ("local", "bundled", "isolated"):
+        if set(report["initialization"].get(backend, {})) != {
+            "absent_configuration_ms",
+            "configured_configuration_ms",
+        }:
+            raise ValueError("Benchmark report has invalid initialization groups")
+    if set(report["logging_initialization"]) != {
+        "isolated_disabled_ms",
+        "isolated_centralized_ms",
+        "isolated_worker_file_ms",
+    }:
+        raise ValueError("Benchmark report has invalid logging groups")
+    if set(report["output_paths"]) != {
+        "known_preallocated_call_ms",
+        "dynamic_planned_call_ms",
+    }:
+        raise ValueError("Benchmark report has invalid output-path groups")
 
 
 def render_table(report: dict[str, Any]) -> str:
@@ -480,8 +515,8 @@ def render_table(report: dict[str, Any]) -> str:
         ]
     )
 
-    startup = report["worker_startup_ms"]
-    rpc = report["rpc_startup_control_round_trip_ms"]
+    initialization = report["initialization"]
+    startup_control = report["startup_control_round_trip_ms"]
     ring = report["ring_control"]["round_trip_ms"]
     pressure = report["ring_capacity_pressure"]
     high_frequency = report["high_frequency_add_scalar"]
@@ -494,11 +529,23 @@ def render_table(report: dict[str, Any]) -> str:
                 ("measurement", "samples", "median", "p95", "stddev"),
                 (
                     (
-                        "worker startup",
-                        startup["count"],
-                        _number(startup["median_ms"]),
-                        _number(startup["p95_ms"]),
-                        _number(startup["standard_deviation_ms"]),
+                        "isolated initialization (absent config)",
+                        initialization["isolated"]["absent_configuration_ms"]["count"],
+                        _number(
+                            initialization["isolated"]["absent_configuration_ms"][
+                                "median_ms"
+                            ]
+                        ),
+                        _number(
+                            initialization["isolated"]["absent_configuration_ms"][
+                                "p95_ms"
+                            ]
+                        ),
+                        _number(
+                            initialization["isolated"]["absent_configuration_ms"][
+                                "standard_deviation_ms"
+                            ]
+                        ),
                     ),
                     (
                         "ring round trip",
@@ -509,10 +556,10 @@ def render_table(report: dict[str, Any]) -> str:
                     ),
                     (
                         "fixed startup/control ping",
-                        rpc["count"],
-                        _number(rpc["median_ms"]),
-                        _number(rpc["p95_ms"]),
-                        _number(rpc["standard_deviation_ms"]),
+                        startup_control["count"],
+                        _number(startup_control["median_ms"]),
+                        _number(startup_control["p95_ms"]),
+                        _number(startup_control["standard_deviation_ms"]),
                     ),
                     (
                         "capacity-1 backpressure wait",
@@ -527,6 +574,40 @@ def render_table(report: dict[str, Any]) -> str:
             ),
             "",
             "Transport diagnostics (median milliseconds per invocation)",
+        ]
+    )
+    lines.extend(
+        [
+            "",
+            "Initialization microgroups (median milliseconds)",
+            *_table(
+                ("backend", "absent config", "configured"),
+                tuple(
+                    (
+                        backend,
+                        _number(values["absent_configuration_ms"]["median_ms"]),
+                        _number(values["configured_configuration_ms"]["median_ms"]),
+                    )
+                    for backend, values in initialization.items()
+                ),
+            ),
+            *_table(
+                ("isolated logging", "median"),
+                tuple(
+                    (
+                        name.removeprefix("isolated_").removesuffix("_ms"),
+                        _number(values["median_ms"]),
+                    )
+                    for name, values in report["logging_initialization"].items()
+                ),
+            ),
+            *_table(
+                ("output path", "median"),
+                tuple(
+                    (name.removesuffix("_call_ms"), _number(values["median_ms"]))
+                    for name, values in report["output_paths"].items()
+                ),
+            ),
         ]
     )
     if high_frequency is not None:
@@ -592,6 +673,8 @@ def render_table(report: dict[str, Any]) -> str:
                 case["tier"],
                 _median(diagnostics, "scalar_binding_ms"),
                 _median(diagnostics, "output_plan_evaluation_ms"),
+                _median(diagnostics, "isolated_direct_call_ms"),
+                _median(diagnostics, "isolated_profiled_call_ms"),
                 _median(diagnostics, "ring_submission_queue_ms"),
                 _median(diagnostics, "ring_enqueue_ms"),
                 _median(diagnostics, "ring_command_wakeup_ms"),
@@ -612,6 +695,8 @@ def render_table(report: dict[str, Any]) -> str:
                     "tier",
                     "scalar bind",
                     "shape plan",
+                    "direct call",
+                    "profiled call",
                     "submit queue",
                     "enqueue",
                     "wakeup",
@@ -628,7 +713,7 @@ def render_table(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _benchmark_startup(
+def _benchmark_isolated_initialization(
     manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
 ) -> list[int]:
     samples = []
@@ -645,13 +730,108 @@ def _benchmark_startup(
     return samples
 
 
-def _benchmark_rpc(
+def _benchmark_initialization(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> dict[str, dict[str, Any]]:
+    registry = OperationRegistry()
+    registry.register(metadata)
+    configured = replace(
+        manifest,
+        configuration_bytes=validate_and_canonicalize(
+            {"threads": config.threads}, manifest.configuration, plugin=manifest.name
+        ),
+    )
+    variants = {
+        "absent_configuration_ms": manifest,
+        "configured_configuration_ms": configured,
+    }
+    result: dict[str, dict[str, Any]] = {
+        "local": {},
+        "bundled": {},
+        "isolated": {},
+    }
+    for name, variant in variants.items():
+        for backend_name, factory in (
+            ("local", LocalBackend),
+            ("bundled", _bundled_backend_factory(config)),
+        ):
+            samples = []
+            for _ in range(config.startup_iterations):
+                backend = factory()
+                if not hasattr(backend, "initialize"):
+                    raise RuntimeError(
+                        "The benchmark requires packaged wmfs support for the "
+                        "bundled reference plugin"
+                    )
+                start = perf_counter_ns()
+                backend.initialize((variant,), registry)
+                samples.append(perf_counter_ns() - start)
+                backend.close()
+            result[backend_name][name] = summarize(samples)
+        result["isolated"][name] = summarize(
+            _benchmark_isolated_initialization(variant, metadata, config)
+        )
+    return result
+
+
+def _benchmark_logging_initialization(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> dict[str, Any]:
+    results = {}
+    with tempfile.TemporaryDirectory(prefix="wmfs-benchmark-logs-") as directory:
+        options = {
+            "disabled": LoggingOptions(),
+            "centralized": LoggingOptions(mode="centralized"),
+            "worker_file": LoggingOptions(
+                mode="worker_file", file=Path(directory) / "worker.log"
+            ),
+        }
+        for mode, logging_options in options.items():
+            configured = replace(manifest, logging=logging_options)
+            results[f"isolated_{mode}_ms"] = summarize(
+                _benchmark_isolated_initialization(configured, metadata, config)
+            )
+    return results
+
+
+def _benchmark_output_paths(
+    manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
+) -> dict[str, Any]:
+    generator = torch.Generator().manual_seed(config.seed)
+    source = torch.randn((8, 8), dtype=config.dtype, generator=generator)
+    with _benchmark_session(manifest, metadata, config) as (buffers, session):
+        managed = buffers.from_tensor(source).tensor
+        calls = {
+            "known_preallocated_call_ms": lambda: session.invoke(
+                "add_scalar", managed, 1.0
+            ),
+            "dynamic_planned_call_ms": lambda: session.invoke(
+                "nonzero", managed, order="rowMajor"
+            ),
+        }
+        results = {}
+        for name, call in calls.items():
+            for _ in range(config.warmups):
+                value = call()
+                del value
+                buffers.collect()
+            samples = []
+            for _ in range(config.diagnostic_iterations):
+                elapsed, value = _time_call(call)
+                samples.append(elapsed)
+                del value
+                buffers.collect()
+            results[name] = summarize(samples)
+        return results
+
+
+def _benchmark_startup_control(
     manifest: Any, metadata: PluginMetadata, config: BenchmarkConfig
 ) -> list[int]:
     with _benchmark_session(manifest, metadata, config) as (_buffers, session):
         for _ in range(config.warmups):
             session.ping()
-        return [_time_call(session.ping)[0] for _ in range(config.rpc_iterations)]
+        return [_time_call(session.ping)[0] for _ in range(config.control_iterations)]
 
 
 def _benchmark_ring(
@@ -660,7 +840,7 @@ def _benchmark_ring(
     with _benchmark_session(manifest, metadata, config) as (_buffers, session):
         for _ in range(config.warmups):
             session.ring_ping()
-        return [session.ring_ping() for _ in range(config.rpc_iterations)]
+        return [session.ring_ping() for _ in range(config.control_iterations)]
 
 
 def _benchmark_ring_pressure(
@@ -807,6 +987,8 @@ def _benchmark_diagnostics(
     config: BenchmarkConfig,
 ) -> dict[str, Any]:
     uncached_elapsed = []
+    direct_elapsed = []
+    profiled_elapsed = []
     input_copy = []
     first_mapping = []
     cached_mapping = []
@@ -826,7 +1008,7 @@ def _benchmark_diagnostics(
     output_plan = []
     native_call = []
     native_queue_wait = []
-    native_rpc = []
+    native_handoff = []
     ring_round_trip = []
     ring_submission_queue = []
     ring_enqueue = []
@@ -869,7 +1051,19 @@ def _benchmark_diagnostics(
         uncached_retirement.append(delta.recipient_retirement_ns)
         uncached_reset.append(delta.buffer_reset_ns)
 
-        _result, metrics = session.invoke_profiled(operation, *managed_args, **kwargs)
+        elapsed, _result = _time_call(
+            lambda: session.invoke(operation, *managed_args, **kwargs)
+        )
+        direct_elapsed.append(elapsed)
+        del _result
+        buffers.collect()
+
+        elapsed, profiled = _time_call(
+            lambda: session.invoke_profiled(operation, *managed_args, **kwargs)
+        )
+        profiled_elapsed.append(elapsed)
+        _result, metrics = profiled
+        del profiled
         if any(item.fd_transferred for item in metrics.inputs):
             raise RuntimeError("Managed benchmark inputs were transferred again")
         cached_mapping.append(sum(item.mapping_ns for item in metrics.inputs))
@@ -883,7 +1077,7 @@ def _benchmark_diagnostics(
         output_plan.append(metrics.output_plan_ns)
         native_call.append(metrics.native_call_ns)
         native_queue_wait.append(metrics.native_queue_wait_ns)
-        native_rpc.append(metrics.native_rpc_ns)
+        native_handoff.append(metrics.native_rpc_ns)
         ring_round_trip.append(metrics.ring_round_trip_ns)
         ring_submission_queue.append(metrics.ring_submission_queue_ns)
         ring_enqueue.append(metrics.ring_enqueue_ns)
@@ -936,6 +1130,8 @@ def _benchmark_diagnostics(
         raise RuntimeError("Worker output allocation count changed between invocations")
     return {
         "isolated_uncached_call_ms": summarize(uncached_elapsed),
+        "isolated_direct_call_ms": summarize(direct_elapsed),
+        "isolated_profiled_call_ms": summarize(profiled_elapsed),
         "input_shared_preparation_ms": summarize(input_copy),
         "first_use_fd_transfer_mmap_ms": summarize(first_mapping),
         "cached_ensure_mapped_ms": summarize(cached_mapping),
@@ -961,7 +1157,7 @@ def _benchmark_diagnostics(
         "output_plan_evaluation_ms": summarize(output_plan),
         "native_call_ms": summarize(native_call),
         "native_queue_wait_ms": summarize(native_queue_wait),
-        "native_rpc_ms": summarize(native_rpc),
+        "native_handoff_ms": summarize(native_handoff),
         "ring_round_trip_ms": summarize(ring_round_trip),
         "ring_submission_queue_ms": summarize(ring_submission_queue),
         "ring_enqueue_ms": summarize(ring_enqueue),
@@ -1228,6 +1424,12 @@ def _bundled_backend(
     return backend
 
 
+def _bundled_backend_factory(config: BenchmarkConfig) -> Callable[[], Any]:
+    if config.bundled_backend is None:
+        return BundledBackend
+    return type(config.bundled_backend)
+
+
 def _configure_threads(threads: int) -> tuple[dict[str, str | None], int]:
     variables = (
         "MKL_DYNAMIC",
@@ -1331,7 +1533,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--startup-iterations", type=int, default=3)
-    parser.add_argument("--rpc-iterations", type=int, default=50)
+    parser.add_argument("--control-iterations", type=int, default=50)
+    parser.add_argument(
+        "--rpc-iterations",
+        dest="control_iterations",
+        type=int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--backpressure-iterations", type=int, default=32)
     parser.add_argument("--diagnostic-iterations", type=int, default=5)
     parser.add_argument("--threads", type=int, default=1)
@@ -1362,7 +1571,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         iterations=arguments.iterations,
         warmups=arguments.warmups,
         startup_iterations=arguments.startup_iterations,
-        rpc_iterations=arguments.rpc_iterations,
+        control_iterations=arguments.control_iterations,
         backpressure_iterations=arguments.backpressure_iterations,
         diagnostic_iterations=arguments.diagnostic_iterations,
         threads=arguments.threads,
