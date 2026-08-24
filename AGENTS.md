@@ -734,6 +734,12 @@ Avoid counting worker startup in steady-state benchmarks. Report startup separat
 
 Use multiple iterations and report median plus a spread metric such as p95 or standard deviation.
 
+Save retained benchmark reports with explicit comparison names that identify
+the measured revision or role, such as `benchmark-old.json`,
+`benchmark-0.1.0.json`, and `benchmark-master.json`. Do not overwrite or reuse
+an ambiguous baseline name when results from multiple revisions are being
+compared.
+
 ## Process Isolation Demonstration
 
 The prototype must demonstrate that the worker can run with a runtime environment incompatible with the main process.

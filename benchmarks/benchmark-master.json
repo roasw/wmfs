@@ -1,0 +1,3126 @@
+{
+    "schema_version": 11,
+    "generated_at_utc": "2026-08-24T14:47:55.448643+00:00",
+    "environment": {
+        "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.42",
+        "machine": "x86_64",
+        "cpu_count": 32,
+        "wmfs_module": "/nix/store/0z2i46a2ygz7j1l418vn00iqgcm7kbf3-python3.14-wmfs-0.0.0+g7d052d2faf98/lib/python3.14/site-packages/wmfs/benchmark.py",
+        "python_version": "3.14.6",
+        "torch_version": "2.12.0",
+        "glibc_version": "2.42",
+        "dtype": "float32",
+        "threads": 1,
+        "worker": {
+            "plugin_name": "reference",
+            "plugin_version": "0.1.0",
+            "worker": "/nix/store/y7zkaz97f54ggvcl3lq06r4qmv1wd9a3-wmfs-reference-worker-0.0.0+g7d052d2faf98/bin/wmfs-reference-worker",
+            "python_version": "none",
+            "torch_version": "2.12.0",
+            "glibc_version": "2.42",
+            "executable": "/nix/store/y7zkaz97f54ggvcl3lq06r4qmv1wd9a3-wmfs-reference-worker-0.0.0+g7d052d2faf98/bin/wmfs-reference-worker"
+        }
+    },
+    "configuration": {
+        "plugin_directory": "/nix/store/y7zkaz97f54ggvcl3lq06r4qmv1wd9a3-wmfs-reference-worker-0.0.0+g7d052d2faf98/share/wmfs/plugins/reference",
+        "operations": [
+            "matmul",
+            "svd",
+            "add_scalar"
+        ],
+        "tiers": [
+            "small",
+            "medium",
+            "large"
+        ],
+        "iterations": 10,
+        "warmups": 2,
+        "startup_iterations": 3,
+        "control_iterations": 50,
+        "backpressure_iterations": 32,
+        "diagnostic_iterations": 5,
+        "threads": 1,
+        "dtype": "float32",
+        "seed": 1234,
+        "memory_mode": "pooled",
+        "control_mode": "native",
+        "high_frequency_iterations": 1000,
+        "arena_bytes": null,
+        "sizes": {
+            "matmul": {
+                "small": 64,
+                "medium": 256,
+                "large": 2048
+            },
+            "svd": {
+                "small": 32,
+                "medium": 128,
+                "large": 768
+            },
+            "add_scalar": {
+                "small": 64,
+                "medium": 256,
+                "large": 1024
+            }
+        }
+    },
+    "initialization": {
+        "local": {
+            "absent_configuration_ms": {
+                "count": 3,
+                "median_ms": 0.018608,
+                "p95_ms": 1.277868,
+                "standard_deviation_ms": 0.595541605655446
+            },
+            "configured_configuration_ms": {
+                "count": 3,
+                "median_ms": 0.011205,
+                "p95_ms": 0.040269,
+                "standard_deviation_ms": 0.014590477990799341
+            }
+        },
+        "bundled": {
+            "absent_configuration_ms": {
+                "count": 3,
+                "median_ms": 0.012508,
+                "p95_ms": 1.298909,
+                "standard_deviation_ms": 0.6079189083884645
+            },
+            "configured_configuration_ms": {
+                "count": 3,
+                "median_ms": 0.006243,
+                "p95_ms": 0.0187,
+                "standard_deviation_ms": 0.006369528100434303
+            }
+        },
+        "isolated": {
+            "absent_configuration_ms": {
+                "count": 3,
+                "median_ms": 109.829614,
+                "p95_ms": 119.647573,
+                "standard_deviation_ms": 5.333014058511523
+            },
+            "configured_configuration_ms": {
+                "count": 3,
+                "median_ms": 101.363551,
+                "p95_ms": 102.629163,
+                "standard_deviation_ms": 1.5783173232421364
+            }
+        }
+    },
+    "logging_initialization": {
+        "isolated_disabled_ms": {
+            "count": 3,
+            "median_ms": 94.767171,
+            "p95_ms": 99.336031,
+            "standard_deviation_ms": 2.356968884823802
+        },
+        "isolated_centralized_ms": {
+            "count": 3,
+            "median_ms": 94.032031,
+            "p95_ms": 95.300722,
+            "standard_deviation_ms": 0.7677267472933033
+        },
+        "isolated_worker_file_ms": {
+            "count": 3,
+            "median_ms": 98.300011,
+            "p95_ms": 110.133041,
+            "standard_deviation_ms": 6.189497588845497
+        }
+    },
+    "startup_control_round_trip_ms": {
+        "count": 50,
+        "median_ms": 0.140292,
+        "p95_ms": 0.26275,
+        "standard_deviation_ms": 0.12460622045564179
+    },
+    "ring_control": {
+        "round_trip_ms": {
+            "count": 50,
+            "median_ms": 0.1329775,
+            "p95_ms": 0.233854,
+            "standard_deviation_ms": 0.10611887472722088
+        },
+        "submission_queue_ms": {
+            "count": 50,
+            "median_ms": 0.0251525,
+            "p95_ms": 0.057506,
+            "standard_deviation_ms": 0.0124274956624575
+        },
+        "enqueue_ms": {
+            "count": 50,
+            "median_ms": 0.024386,
+            "p95_ms": 0.046163,
+            "standard_deviation_ms": 0.0065344745535964865
+        },
+        "backpressure_wait_ms": {
+            "count": 50,
+            "median_ms": 0.0,
+            "p95_ms": 0.0,
+            "standard_deviation_ms": 0.0
+        },
+        "command_wakeup_ms": {
+            "count": 50,
+            "median_ms": 0.0228835,
+            "p95_ms": 0.040898,
+            "standard_deviation_ms": 0.011138413121876922
+        },
+        "worker_queue_ms": {
+            "count": 50,
+            "median_ms": 1.9e-05,
+            "p95_ms": 2.3e-05,
+            "standard_deviation_ms": 1.6734395716607158e-06
+        },
+        "kernel_ms": {
+            "count": 50,
+            "median_ms": 2e-05,
+            "p95_ms": 3e-05,
+            "standard_deviation_ms": 4.512914800879804e-06
+        },
+        "completion_wakeup_ms": {
+            "count": 50,
+            "median_ms": 0.0472275,
+            "p95_ms": 0.070376,
+            "standard_deviation_ms": 0.00891967252809205
+        },
+        "result_materialization_ms": {
+            "count": 50,
+            "median_ms": 0.0281025,
+            "p95_ms": 0.043498,
+            "standard_deviation_ms": 0.09913133051684518
+        }
+    },
+    "ring_capacity_pressure": {
+        "round_trip_ms": {
+            "count": 32,
+            "median_ms": 10.574163,
+            "p95_ms": 39.093846,
+            "standard_deviation_ms": 11.629688603260227
+        },
+        "submission_queue_ms": {
+            "count": 32,
+            "median_ms": 5.8286705,
+            "p95_ms": 35.490185,
+            "standard_deviation_ms": 10.748780028501521
+        },
+        "enqueue_ms": {
+            "count": 32,
+            "median_ms": 1.123409,
+            "p95_ms": 3.233997,
+            "standard_deviation_ms": 5.624151449467445
+        },
+        "backpressure_wait_ms": {
+            "count": 32,
+            "median_ms": 1.070681,
+            "p95_ms": 3.200568,
+            "standard_deviation_ms": 5.6135338873162945
+        },
+        "command_wakeup_ms": {
+            "count": 32,
+            "median_ms": 1.0466165,
+            "p95_ms": 2.268566,
+            "standard_deviation_ms": 0.4851745212578633
+        },
+        "worker_queue_ms": {
+            "count": 32,
+            "median_ms": 1.9e-05,
+            "p95_ms": 4.1e-05,
+            "standard_deviation_ms": 9.876928213645172e-06
+        },
+        "kernel_ms": {
+            "count": 32,
+            "median_ms": 1.106978,
+            "p95_ms": 2.273697,
+            "standard_deviation_ms": 0.40189590422845617
+        },
+        "completion_wakeup_ms": {
+            "count": 32,
+            "median_ms": 0.106136,
+            "p95_ms": 31.613255,
+            "standard_deviation_ms": 7.7571562932100555
+        },
+        "result_materialization_ms": {
+            "count": 32,
+            "median_ms": 0.0313675,
+            "p95_ms": 0.325779,
+            "standard_deviation_ms": 0.13318870401706778
+        }
+    },
+    "ring_capacity_pressure_worker_hold_ns": 1000000,
+    "measurement_boundaries": {
+        "primary_calls": "Backend invocation through backend return; excludes result destruction, collection, buffer retirement, and allocator reset.",
+        "primary_cleanup": "Result destruction followed by collection, buffer retirement, and allocator reset made necessary by that invocation.",
+        "high_frequency_call_latency": "Each backend invocation through backend return; excludes per-call cleanup.",
+        "high_frequency_cleanup_inclusive_throughput": "Per-backend invocation and cleanup totals, including result destruction and reclamation when outputs are not reused.",
+        "diagnostics": "Each summary uses diagnostic_iterations samples. Component metrics are nested within and overlap their associated invocation; they must not be added to derive end-to-end time. Uncached and cached invocation metrics come from separate, equally sized sample populations."
+    },
+    "comparison_contract": {
+        "local": "In-process public PyTorch operation, including its ordinary Python dispatch, output allocation, and numerical kernel.",
+        "bundled": "In-process bundled plugin operation using the same transport-neutral C++ kernel as the reference worker, without rings or shared-memory transport.",
+        "isolated": "Python frontend binding and planning, runtime-owned shared outputs, native handoff, command/completion rings, worker dispatch, and the same transport-neutral C++ kernel."
+    },
+    "diagnostic_provenance": {
+        "frontend_python": {
+            "metrics": [
+                "scalar_binding_ms",
+                "output_plan_evaluation_ms"
+            ],
+            "boundary": "Direct timers around scalar binding and schema output-expression evaluation. Other Python bookkeeping remains included in isolated call latency and is not inferred by subtracting overlapping timers."
+        },
+        "ring_control": {
+            "metrics": [
+                "ring_round_trip_ms",
+                "ring_submission_queue_ms",
+                "ring_enqueue_ms",
+                "ring_backpressure_wait_ms",
+                "ring_command_wakeup_ms",
+                "ring_worker_queue_ms",
+                "ring_completion_wakeup_ms",
+                "ring_result_materialization_ms",
+                "native_call_ms",
+                "native_handoff_ms",
+                "worker_dispatch_ms"
+            ],
+            "boundary": "Ring ping is independent. Submission queue, publication/backpressure, worker wakeup/queue, completion wakeup, and caller materialization are measured at their owning ring boundary."
+        },
+        "startup_control": {
+            "metrics": [
+                "startup_control_round_trip_ms"
+            ],
+            "boundary": "Fixed control ping measures startup/liveness control separately."
+        },
+        "mapping_transport": {
+            "metrics": [
+                "input_shared_preparation_ms",
+                "first_use_fd_transfer_mmap_ms",
+                "cached_ensure_mapped_ms",
+                "output_ensure_mapped_ms",
+                "worker_input_views_ms",
+                "worker_output_views_ms"
+            ],
+            "boundary": "Input sharing, FD transfer and mmap, cached mapping checks, and worker tensor-view construction; first-use and cached samples are separate."
+        },
+        "allocation": {
+            "metrics": [
+                "shared_memory_allocation_ms",
+                "pooled_shared_memory_allocation_ms",
+                "output_preallocation_service_ms",
+                "output_shared_allocation_ms"
+            ],
+            "boundary": "Runtime-owned cold, pooled, and per-output allocation service. Output service is an envelope that includes its allocation and mapping work."
+        },
+        "reclamation": {
+            "metrics": [
+                "uncached_buffer_reclamation_ms",
+                "cached_buffer_reclamation_ms",
+                "uncached_recipient_retirement_ms",
+                "cached_recipient_retirement_ms",
+                "uncached_buffer_reset_ms",
+                "cached_buffer_reset_ms"
+            ],
+            "boundary": "Post-return collection, worker recipient retirement, and buffer reset; excluded from primary call latency."
+        },
+        "kernel": {
+            "metrics": [
+                "worker_kernel_ms"
+            ],
+            "boundary": "Worker-side transport-neutral numerical kernel execution."
+        },
+        "profiling_cost": {
+            "metrics": [
+                "isolated_direct_call_ms",
+                "isolated_profiled_call_ms"
+            ],
+            "boundary": "Paired direct and opt-in profiled invocations use the same cached inputs; both stop at backend return and are reported independently."
+        }
+    },
+    "output_paths": {
+        "known_preallocated_call_ms": {
+            "count": 5,
+            "median_ms": 0.753864,
+            "p95_ms": 1.17075,
+            "standard_deviation_ms": 0.1634669067198618
+        },
+        "dynamic_planned_call_ms": {
+            "count": 5,
+            "median_ms": 1.017437,
+            "p95_ms": 2.637715,
+            "standard_deviation_ms": 0.6634516157404095
+        }
+    },
+    "high_frequency_add_scalar": {
+        "iterations": 1000,
+        "backends": {
+            "local": {
+                "call_latency_ms": {
+                    "count": 1000,
+                    "median_ms": 0.0297175,
+                    "p95_ms": 0.037287,
+                    "standard_deviation_ms": 0.04344956334483977
+                },
+                "result_cleanup_ms": {
+                    "count": 1000,
+                    "median_ms": 0.000523,
+                    "p95_ms": 0.000722,
+                    "standard_deviation_ms": 0.00018452239200433102
+                },
+                "cleanup_inclusive_calls_per_second": 38144.3665862825
+            },
+            "bundled": {
+                "call_latency_ms": {
+                    "count": 1000,
+                    "median_ms": 0.017209,
+                    "p95_ms": 0.040486,
+                    "standard_deviation_ms": 0.019446543079429595
+                },
+                "result_cleanup_ms": {
+                    "count": 1000,
+                    "median_ms": 0.000298,
+                    "p95_ms": 0.000656,
+                    "standard_deviation_ms": 0.00017053730294571917
+                },
+                "cleanup_inclusive_calls_per_second": 46665.47420824906
+            },
+            "isolated": {
+                "call_latency_ms": {
+                    "count": 1000,
+                    "median_ms": 0.706956,
+                    "p95_ms": 1.250924,
+                    "standard_deviation_ms": 0.32640219264459286
+                },
+                "result_cleanup_ms": {
+                    "count": 1000,
+                    "median_ms": 0.068947,
+                    "p95_ms": 0.104182,
+                    "standard_deviation_ms": 0.09556719776207406
+                },
+                "cleanup_inclusive_calls_per_second": 1144.750278536345
+            }
+        }
+    },
+    "high_frequency_add_scalar_out": {
+        "iterations": 1000,
+        "backends": {
+            "local": {
+                "call_latency_ms": {
+                    "count": 1000,
+                    "median_ms": 0.0278225,
+                    "p95_ms": 0.037167,
+                    "standard_deviation_ms": 0.02144501014596169
+                },
+                "result_cleanup_ms": {
+                    "count": 1000,
+                    "median_ms": 9.3e-05,
+                    "p95_ms": 0.000131,
+                    "standard_deviation_ms": 2.668493020414331e-05
+                },
+                "cleanup_inclusive_calls_per_second": 41694.13267656736
+            },
+            "bundled": {
+                "call_latency_ms": {
+                    "count": 1000,
+                    "median_ms": 0.024778,
+                    "p95_ms": 0.048395,
+                    "standard_deviation_ms": 0.024147186682162355
+                },
+                "result_cleanup_ms": {
+                    "count": 1000,
+                    "median_ms": 8.4e-05,
+                    "p95_ms": 0.000135,
+                    "standard_deviation_ms": 3.1562083327942725e-05
+                },
+                "cleanup_inclusive_calls_per_second": 37556.830526492304
+            },
+            "isolated": {
+                "call_latency_ms": {
+                    "count": 1000,
+                    "median_ms": 0.6685275,
+                    "p95_ms": 1.186091,
+                    "standard_deviation_ms": 0.3257022150301215
+                },
+                "result_cleanup_ms": {
+                    "count": 1000,
+                    "median_ms": 0.0002115,
+                    "p95_ms": 0.000273,
+                    "standard_deviation_ms": 0.0005912832902010677
+                },
+                "cleanup_inclusive_calls_per_second": 1326.3053931381128
+            }
+        }
+    },
+    "operations": [
+        {
+            "operation": "matmul",
+            "tier": "small",
+            "shape": "64x64",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.024326,
+                        "p95_ms": 0.02973,
+                        "standard_deviation_ms": 0.008631101688660608
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0007365,
+                        "p95_ms": 0.000928,
+                        "standard_deviation_ms": 0.000267540725871782
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.0160505,
+                        "p95_ms": 0.029294,
+                        "standard_deviation_ms": 0.007870115501693732
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000292,
+                        "p95_ms": 0.000745,
+                        "standard_deviation_ms": 0.00021189440766570505
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.725432,
+                        "p95_ms": 0.897584,
+                        "standard_deviation_ms": 0.057463769039630526
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.068089,
+                        "p95_ms": 0.079619,
+                        "standard_deviation_ms": 0.004163136895419126
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 0.7093815,
+                    "percentage": 4419.68474502352
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 0.701106,
+                    "percentage": 2882.1261202006085
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 50,
+                "pool_hits": 45,
+                "pool_misses": 5,
+                "memfds_created": 5,
+                "buffers_reclaimed": 48,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 85,
+                "collection_noops": 52,
+                "collection_ns": 2444933,
+                "allocation_collection_calls": 50,
+                "stats_collection_calls": 1,
+                "allocations_drained": 48,
+                "recipient_notifications": 38,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 1270663,
+                "buffers_reset": 48,
+                "buffer_reset_ns": 627335,
+                "buffers_cached": 48,
+                "buffer_cache_ns": 26939,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 2,
+                "cached_buffers": 3,
+                "cached_bytes": 49152,
+                "pool_hit_rate": 0.9
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.945555,
+                    "p95_ms": 1.094313,
+                    "standard_deviation_ms": 0.07548780218180949
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.772709,
+                    "p95_ms": 1.73363,
+                    "standard_deviation_ms": 0.3910774687467433
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.758206,
+                    "p95_ms": 1.507578,
+                    "standard_deviation_ms": 0.3068693320163486
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.104356,
+                    "p95_ms": 0.134215,
+                    "standard_deviation_ms": 0.015600795384851377
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.16266,
+                    "p95_ms": 0.204876,
+                    "standard_deviation_ms": 0.020756046546488566
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.075233,
+                    "p95_ms": 0.138488,
+                    "standard_deviation_ms": 0.026201135369292684
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.028391,
+                    "p95_ms": 0.038671,
+                    "standard_deviation_ms": 0.004129533852627921
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01871,
+                    "p95_ms": 0.048532,
+                    "standard_deviation_ms": 0.011971185204481635
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.117953,
+                    "p95_ms": 0.161357,
+                    "standard_deviation_ms": 0.021263115434949787
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.060013,
+                    "p95_ms": 0.067571,
+                    "standard_deviation_ms": 0.003615209614946276
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.058101,
+                    "p95_ms": 0.100129,
+                    "standard_deviation_ms": 0.01847262541600408
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.036145,
+                    "p95_ms": 0.039798,
+                    "standard_deviation_ms": 0.0019342269360134556
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.040587,
+                    "p95_ms": 0.043791,
+                    "standard_deviation_ms": 0.0031735385675929636
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.015381,
+                    "p95_ms": 0.017557,
+                    "standard_deviation_ms": 0.0015303596962805836
+                },
+                "uncached_reclaimed_buffers_per_invocation": 3,
+                "cached_reclaimed_buffers_per_invocation": 1,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.17436,
+                    "p95_ms": 0.247332,
+                    "standard_deviation_ms": 0.03762410296286146
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.033694,
+                    "p95_ms": 0.045179,
+                    "standard_deviation_ms": 0.005419756289723737
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.137522,
+                    "p95_ms": 0.198819,
+                    "standard_deviation_ms": 0.03340084163370737
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.006748,
+                    "p95_ms": 0.007612,
+                    "standard_deviation_ms": 0.0006975604920005146
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.004965,
+                    "p95_ms": 0.00585,
+                    "standard_deviation_ms": 0.0005180376048126236
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 0.19567,
+                    "p95_ms": 0.203607,
+                    "standard_deviation_ms": 0.010229422439219137
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.028888,
+                    "p95_ms": 0.0309,
+                    "standard_deviation_ms": 0.0014063097809515512
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.039506,
+                    "p95_ms": 0.042497,
+                    "standard_deviation_ms": 0.0023368498967627337
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.027177,
+                    "p95_ms": 0.036309,
+                    "standard_deviation_ms": 0.004289611143215665
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2e-05,
+                    "p95_ms": 2.1e-05,
+                    "standard_deviation_ms": 1.3564659966250537e-06
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.050675,
+                    "p95_ms": 0.054779,
+                    "standard_deviation_ms": 0.002264164923321621
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.023525,
+                    "p95_ms": 0.02493,
+                    "standard_deviation_ms": 0.001782403702868685
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001415,
+                    "p95_ms": 0.001469,
+                    "standard_deviation_ms": 9.123595782365634e-05
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002796,
+                    "p95_ms": 0.003828,
+                    "standard_deviation_ms": 0.0004900605676852607
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.004386,
+                    "p95_ms": 0.00543,
+                    "standard_deviation_ms": 0.0005589123723805012
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.024971,
+                    "p95_ms": 0.042917,
+                    "standard_deviation_ms": 0.00855577658427334
+                }
+            }
+        },
+        {
+            "operation": "matmul",
+            "tier": "medium",
+            "shape": "256x256",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.2499555,
+                        "p95_ms": 0.28499,
+                        "standard_deviation_ms": 0.019588649529765956
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000999,
+                        "p95_ms": 0.001197,
+                        "standard_deviation_ms": 0.00026353170587236746
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.2339455,
+                        "p95_ms": 0.284704,
+                        "standard_deviation_ms": 0.020619399544118643
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000343,
+                        "p95_ms": 0.00116,
+                        "standard_deviation_ms": 0.0003401370312094818
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 1.28242,
+                        "p95_ms": 2.413548,
+                        "standard_deviation_ms": 0.3723894296963865
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.099645,
+                        "p95_ms": 0.200994,
+                        "standard_deviation_ms": 0.03367494208294945
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 1.0484745,
+                    "percentage": 448.17040721022636
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 1.0324645,
+                    "percentage": 413.05932455977154
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 50,
+                "pool_hits": 45,
+                "pool_misses": 5,
+                "memfds_created": 5,
+                "buffers_reclaimed": 48,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 85,
+                "collection_noops": 52,
+                "collection_ns": 3287710,
+                "allocation_collection_calls": 50,
+                "stats_collection_calls": 1,
+                "allocations_drained": 48,
+                "recipient_notifications": 38,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 1512394,
+                "buffers_reset": 48,
+                "buffer_reset_ns": 1195960,
+                "buffers_cached": 48,
+                "buffer_cache_ns": 27202,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 2,
+                "cached_buffers": 3,
+                "cached_bytes": 786432,
+                "pool_hit_rate": 0.9
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 1.731927,
+                    "p95_ms": 2.69737,
+                    "standard_deviation_ms": 0.44349715417062147
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 1.165487,
+                    "p95_ms": 2.079086,
+                    "standard_deviation_ms": 0.382354808099179
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 1.034226,
+                    "p95_ms": 1.380452,
+                    "standard_deviation_ms": 0.15175673447989055
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.288009,
+                    "p95_ms": 0.326486,
+                    "standard_deviation_ms": 0.02314528898415399
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.254588,
+                    "p95_ms": 0.656958,
+                    "standard_deviation_ms": 0.17658853418271525
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.070622,
+                    "p95_ms": 0.106685,
+                    "standard_deviation_ms": 0.01652790260135871
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.029084,
+                    "p95_ms": 0.040749,
+                    "standard_deviation_ms": 0.004784001647156907
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.02078,
+                    "p95_ms": 0.045101,
+                    "standard_deviation_ms": 0.010169837099973628
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.164262,
+                    "p95_ms": 0.205801,
+                    "standard_deviation_ms": 0.019841752718951014
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.074556,
+                    "p95_ms": 0.2062,
+                    "standard_deviation_ms": 0.05299788633898526
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.061128,
+                    "p95_ms": 0.080855,
+                    "standard_deviation_ms": 0.010169040918395402
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.037629,
+                    "p95_ms": 0.153258,
+                    "standard_deviation_ms": 0.04665562802492321
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.086246,
+                    "p95_ms": 0.099806,
+                    "standard_deviation_ms": 0.006649126228310002
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.028369,
+                    "p95_ms": 0.037655,
+                    "standard_deviation_ms": 0.004156714837464798
+                },
+                "uncached_reclaimed_buffers_per_invocation": 3,
+                "cached_reclaimed_buffers_per_invocation": 1,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.156589,
+                    "p95_ms": 0.218866,
+                    "standard_deviation_ms": 0.030804943951255617
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.032295,
+                    "p95_ms": 0.04601,
+                    "standard_deviation_ms": 0.005937454316455833
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.121946,
+                    "p95_ms": 0.170377,
+                    "standard_deviation_ms": 0.02500792841800376
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.0061,
+                    "p95_ms": 0.0085,
+                    "standard_deviation_ms": 0.0009625090960609151
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.004691,
+                    "p95_ms": 0.005416,
+                    "standard_deviation_ms": 0.0003579460294513685
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 0.515406,
+                    "p95_ms": 0.65553,
+                    "standard_deviation_ms": 0.05854189372270084
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.028929,
+                    "p95_ms": 0.054564,
+                    "standard_deviation_ms": 0.010461881582201167
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.037244,
+                    "p95_ms": 0.055917,
+                    "standard_deviation_ms": 0.007955912634010003
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.029879,
+                    "p95_ms": 0.03973,
+                    "standard_deviation_ms": 0.00587604311080169
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 1.9e-05,
+                    "p95_ms": 2.1e-05,
+                    "standard_deviation_ms": 8.000000000000001e-07
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.090894,
+                    "p95_ms": 0.105775,
+                    "standard_deviation_ms": 0.013284990770038193
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.021966,
+                    "p95_ms": 0.034558,
+                    "standard_deviation_ms": 0.005920871050782985
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001315,
+                    "p95_ms": 0.001383,
+                    "standard_deviation_ms": 6.031782489447046e-05
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002865,
+                    "p95_ms": 0.003477,
+                    "standard_deviation_ms": 0.000300482545250136
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.004377,
+                    "p95_ms": 0.005279,
+                    "standard_deviation_ms": 0.00044381004945809864
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.301028,
+                    "p95_ms": 0.401536,
+                    "standard_deviation_ms": 0.0400365213973442
+                }
+            }
+        },
+        {
+            "operation": "matmul",
+            "tier": "large",
+            "shape": "2048x2048",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 120.911227,
+                        "p95_ms": 123.794689,
+                        "standard_deviation_ms": 1.4273380077942857
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0068415,
+                        "p95_ms": 0.014752,
+                        "standard_deviation_ms": 0.002455213410276182
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 120.168225,
+                        "p95_ms": 121.796034,
+                        "standard_deviation_ms": 1.1067770090041806
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0044855,
+                        "p95_ms": 0.005594,
+                        "standard_deviation_ms": 0.0004645813706983955
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 127.691886,
+                        "p95_ms": 129.602089,
+                        "standard_deviation_ms": 1.755827090100164
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.9010595,
+                        "p95_ms": 1.326153,
+                        "standard_deviation_ms": 0.13846096899704263
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 7.52366099999999,
+                    "percentage": 6.2609404441148975
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 6.780659,
+                    "percentage": 5.607964759136883
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 50,
+                "pool_hits": 45,
+                "pool_misses": 5,
+                "memfds_created": 5,
+                "buffers_reclaimed": 48,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 85,
+                "collection_noops": 52,
+                "collection_ns": 42725516,
+                "allocation_collection_calls": 50,
+                "stats_collection_calls": 1,
+                "allocations_drained": 48,
+                "recipient_notifications": 38,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 3427570,
+                "buffers_reset": 48,
+                "buffer_reset_ns": 38341718,
+                "buffers_cached": 48,
+                "buffer_cache_ns": 37596,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 2,
+                "cached_buffers": 3,
+                "cached_bytes": 50331648,
+                "pool_hit_rate": 0.9
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 143.813601,
+                    "p95_ms": 147.062708,
+                    "standard_deviation_ms": 2.226397476770399
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 128.375966,
+                    "p95_ms": 129.648659,
+                    "standard_deviation_ms": 1.2216036985236416
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 127.057697,
+                    "p95_ms": 135.360173,
+                    "standard_deviation_ms": 3.923300050925323
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 12.81437,
+                    "p95_ms": 15.29638,
+                    "standard_deviation_ms": 1.8736026942033364
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.362141,
+                    "p95_ms": 0.55401,
+                    "standard_deviation_ms": 0.08804480077869448
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.114791,
+                    "p95_ms": 0.159378,
+                    "standard_deviation_ms": 0.0256291216907642
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.030792,
+                    "p95_ms": 0.045093,
+                    "standard_deviation_ms": 0.006066939768944471
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.020722,
+                    "p95_ms": 0.090238,
+                    "standard_deviation_ms": 0.027545010934105652
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 3.857343,
+                    "p95_ms": 3.97204,
+                    "standard_deviation_ms": 0.1120497900496025
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.82841,
+                    "p95_ms": 0.884011,
+                    "standard_deviation_ms": 0.031168580388590047
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.394262,
+                    "p95_ms": 0.495446,
+                    "standard_deviation_ms": 0.0579964320330139
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.0524,
+                    "p95_ms": 0.061448,
+                    "standard_deviation_ms": 0.005733476899752889
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 3.329288,
+                    "p95_ms": 3.519811,
+                    "standard_deviation_ms": 0.0875925101035471
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.767628,
+                    "p95_ms": 0.805892,
+                    "standard_deviation_ms": 0.027496316294369324
+                },
+                "uncached_reclaimed_buffers_per_invocation": 3,
+                "cached_reclaimed_buffers_per_invocation": 1,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.241831,
+                    "p95_ms": 0.368137,
+                    "standard_deviation_ms": 0.06243927866207296
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.067171,
+                    "p95_ms": 0.080553,
+                    "standard_deviation_ms": 0.006308912318300199
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.172665,
+                    "p95_ms": 0.28637,
+                    "standard_deviation_ms": 0.05631649361244004
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.013861,
+                    "p95_ms": 0.014686,
+                    "standard_deviation_ms": 0.0004746600467703175
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.007102,
+                    "p95_ms": 0.00801,
+                    "standard_deviation_ms": 0.0004186686517999646
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 125.968812,
+                    "p95_ms": 134.428921,
+                    "standard_deviation_ms": 3.976267129157879
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.05485,
+                    "p95_ms": 0.064936,
+                    "standard_deviation_ms": 0.00826110707835215
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.065373,
+                    "p95_ms": 0.068481,
+                    "standard_deviation_ms": 0.007048789813861667
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.041516,
+                    "p95_ms": 0.048262,
+                    "standard_deviation_ms": 0.005488802805712736
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2e-05,
+                    "p95_ms": 4.5e-05,
+                    "standard_deviation_ms": 1.0059821071967435e-05
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.150143,
+                    "p95_ms": 0.192302,
+                    "standard_deviation_ms": 0.023087397925275168
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.051742,
+                    "p95_ms": 0.067853,
+                    "standard_deviation_ms": 0.007077434489982935
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002178,
+                    "p95_ms": 0.003304,
+                    "standard_deviation_ms": 0.0005873601961318114
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.006263,
+                    "p95_ms": 0.007765,
+                    "standard_deviation_ms": 0.0009704412604583546
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.008588,
+                    "p95_ms": 0.011645,
+                    "standard_deviation_ms": 0.001558790223217993
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 125.377746,
+                    "p95_ms": 133.851312,
+                    "standard_deviation_ms": 3.991521766786377
+                }
+            }
+        },
+        {
+            "operation": "svd",
+            "tier": "small",
+            "shape": "32x32",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.127361,
+                        "p95_ms": 0.160973,
+                        "standard_deviation_ms": 0.031078996199362684
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000882,
+                        "p95_ms": 0.001112,
+                        "standard_deviation_ms": 0.0002121292294805221
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.103858,
+                        "p95_ms": 0.197433,
+                        "standard_deviation_ms": 0.036761219736156744
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000632,
+                        "p95_ms": 0.001082,
+                        "standard_deviation_ms": 0.00017765441170992631
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 1.086014,
+                        "p95_ms": 2.746476,
+                        "standard_deviation_ms": 0.5273777258499738
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.095824,
+                        "p95_ms": 0.149996,
+                        "standard_deviation_ms": 0.017553409355450012
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 0.982156,
+                    "percentage": 945.6719751969034
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 0.958653,
+                    "percentage": 752.7053022510815
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 95,
+                "pool_hits": 90,
+                "pool_misses": 5,
+                "memfds_created": 5,
+                "buffers_reclaimed": 94,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 130,
+                "collection_noops": 97,
+                "collection_ns": 2862338,
+                "allocation_collection_calls": 95,
+                "stats_collection_calls": 1,
+                "allocations_drained": 94,
+                "recipient_notifications": 89,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 1270638,
+                "buffers_reset": 94,
+                "buffer_reset_ns": 816632,
+                "buffers_cached": 94,
+                "buffer_cache_ns": 50275,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 1,
+                "cached_buffers": 4,
+                "cached_bytes": 12416,
+                "pool_hit_rate": 0.9473684210526315
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 1.128025,
+                    "p95_ms": 1.89597,
+                    "standard_deviation_ms": 0.324406430284358
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.882748,
+                    "p95_ms": 0.925067,
+                    "standard_deviation_ms": 0.03584348796308752
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.915008,
+                    "p95_ms": 1.528158,
+                    "standard_deviation_ms": 0.24906483869707502
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.053559,
+                    "p95_ms": 0.080508,
+                    "standard_deviation_ms": 0.012678636907806769
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.191544,
+                    "p95_ms": 0.73048,
+                    "standard_deviation_ms": 0.2255217503032468
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.074305,
+                    "p95_ms": 0.098146,
+                    "standard_deviation_ms": 0.010289005685682168
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.014339,
+                    "p95_ms": 0.025034,
+                    "standard_deviation_ms": 0.0042271645816078654
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.010381,
+                    "p95_ms": 0.03447,
+                    "standard_deviation_ms": 0.009645602343036954
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.0987,
+                    "p95_ms": 0.105606,
+                    "standard_deviation_ms": 0.004627717078646879
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.089739,
+                    "p95_ms": 0.117141,
+                    "standard_deviation_ms": 0.01575605750941523
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.050407,
+                    "p95_ms": 0.054367,
+                    "standard_deviation_ms": 0.004069794520611575
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.04981,
+                    "p95_ms": 0.058943,
+                    "standard_deviation_ms": 0.007637321326224267
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.033238,
+                    "p95_ms": 0.035496,
+                    "standard_deviation_ms": 0.0019471688781407738
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.026441,
+                    "p95_ms": 0.030005,
+                    "standard_deviation_ms": 0.0027062372697160167
+                },
+                "uncached_reclaimed_buffers_per_invocation": 4,
+                "cached_reclaimed_buffers_per_invocation": 3,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.524557,
+                    "p95_ms": 0.680622,
+                    "standard_deviation_ms": 0.06567896528113092
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.059697,
+                    "p95_ms": 0.065987,
+                    "standard_deviation_ms": 0.004960040241772238
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.140088,
+                    "p95_ms": 0.189489,
+                    "standard_deviation_ms": 0.021557089942754334
+                },
+                "output_allocations_per_invocation": 3,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.008622,
+                    "p95_ms": 0.009271,
+                    "standard_deviation_ms": 0.0005328153901681144
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.009737,
+                    "p95_ms": 0.01094,
+                    "standard_deviation_ms": 0.0007466770118330951
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 0.303478,
+                    "p95_ms": 0.805317,
+                    "standard_deviation_ms": 0.2018203784253711
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.029696,
+                    "p95_ms": 0.039144,
+                    "standard_deviation_ms": 0.004196257837645346
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.039991,
+                    "p95_ms": 0.0464,
+                    "standard_deviation_ms": 0.0035994028949257683
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.027078,
+                    "p95_ms": 0.028898,
+                    "standard_deviation_ms": 0.0021385106406094875
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2e-05,
+                    "p95_ms": 2.2e-05,
+                    "standard_deviation_ms": 1.6000000000000001e-06
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.054916,
+                    "p95_ms": 0.096524,
+                    "standard_deviation_ms": 0.01724977175964946
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.028726,
+                    "p95_ms": 0.431728,
+                    "standard_deviation_ms": 0.16143692342509505
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001026,
+                    "p95_ms": 0.001171,
+                    "standard_deviation_ms": 7.433599397331013e-05
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.003994,
+                    "p95_ms": 0.00425,
+                    "standard_deviation_ms": 0.00012758840072671184
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.005367,
+                    "p95_ms": 0.005484,
+                    "standard_deviation_ms": 0.0001516772890053089
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.123254,
+                    "p95_ms": 0.164779,
+                    "standard_deviation_ms": 0.01812272272038614
+                }
+            }
+        },
+        {
+            "operation": "svd",
+            "tier": "medium",
+            "shape": "128x128",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.961419,
+                        "p95_ms": 1.148665,
+                        "standard_deviation_ms": 0.06833228726809897
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0011015,
+                        "p95_ms": 0.001653,
+                        "standard_deviation_ms": 0.0002561078874224689
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.988234,
+                        "p95_ms": 1.077834,
+                        "standard_deviation_ms": 0.051569605241459815
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0010405,
+                        "p95_ms": 0.001374,
+                        "standard_deviation_ms": 0.0001247158370055704
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 2.0232615,
+                        "p95_ms": 6.061865,
+                        "standard_deviation_ms": 1.2360810233551887
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.107236,
+                        "p95_ms": 0.360773,
+                        "standard_deviation_ms": 0.07671323923554527
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 1.0350275,
+                    "percentage": 104.73506274829647
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 1.0618424999999998,
+                    "percentage": 110.44534172925641
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 95,
+                "pool_hits": 90,
+                "pool_misses": 5,
+                "memfds_created": 5,
+                "buffers_reclaimed": 94,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 130,
+                "collection_noops": 97,
+                "collection_ns": 5029178,
+                "allocation_collection_calls": 95,
+                "stats_collection_calls": 1,
+                "allocations_drained": 94,
+                "recipient_notifications": 89,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 2172699,
+                "buffers_reset": 94,
+                "buffer_reset_ns": 1151995,
+                "buffers_cached": 94,
+                "buffer_cache_ns": 52651,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 1,
+                "cached_buffers": 4,
+                "cached_bytes": 197120,
+                "pool_hit_rate": 0.9473684210526315
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 2.023139,
+                    "p95_ms": 2.216398,
+                    "standard_deviation_ms": 0.10356014924168466
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 2.849746,
+                    "p95_ms": 4.409347,
+                    "standard_deviation_ms": 0.9821019339971998
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 2.145123,
+                    "p95_ms": 2.451314,
+                    "standard_deviation_ms": 0.17220103001201822
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.084699,
+                    "p95_ms": 0.118946,
+                    "standard_deviation_ms": 0.014836233745799506
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.164914,
+                    "p95_ms": 0.190756,
+                    "standard_deviation_ms": 0.013566205756953562
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.101792,
+                    "p95_ms": 0.227876,
+                    "standard_deviation_ms": 0.05426948346391368
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01904,
+                    "p95_ms": 0.02526,
+                    "standard_deviation_ms": 0.004553213616776616
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.011083,
+                    "p95_ms": 0.042469,
+                    "standard_deviation_ms": 0.012572527612218635
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.124136,
+                    "p95_ms": 0.14905,
+                    "standard_deviation_ms": 0.010822322578818282
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.089063,
+                    "p95_ms": 0.09792,
+                    "standard_deviation_ms": 0.0043156900444772444
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.055861,
+                    "p95_ms": 0.084373,
+                    "standard_deviation_ms": 0.011851266339087988
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.040684,
+                    "p95_ms": 0.042119,
+                    "standard_deviation_ms": 0.0007450805057173352
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.048767,
+                    "p95_ms": 0.0511,
+                    "standard_deviation_ms": 0.0018591947289081905
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.032038,
+                    "p95_ms": 0.039705,
+                    "standard_deviation_ms": 0.003520770222550742
+                },
+                "uncached_reclaimed_buffers_per_invocation": 4,
+                "cached_reclaimed_buffers_per_invocation": 3,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.660118,
+                    "p95_ms": 0.934308,
+                    "standard_deviation_ms": 0.14637538915268508
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.074338,
+                    "p95_ms": 0.08358,
+                    "standard_deviation_ms": 0.007806579507056852
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.173687,
+                    "p95_ms": 0.268808,
+                    "standard_deviation_ms": 0.04827641147144224
+                },
+                "output_allocations_per_invocation": 3,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.012603,
+                    "p95_ms": 0.013068,
+                    "standard_deviation_ms": 0.0018253297126820678
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01119,
+                    "p95_ms": 0.012626,
+                    "standard_deviation_ms": 0.0009629064336684017
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 1.359592,
+                    "p95_ms": 1.402807,
+                    "standard_deviation_ms": 0.027595740761211685
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.036064,
+                    "p95_ms": 0.042353,
+                    "standard_deviation_ms": 0.005616079750146004
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.050481,
+                    "p95_ms": 0.056356,
+                    "standard_deviation_ms": 0.0047593129924391395
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.034734,
+                    "p95_ms": 0.050712,
+                    "standard_deviation_ms": 0.0074880051655965086
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2.3e-05,
+                    "p95_ms": 8e-05,
+                    "standard_deviation_ms": 2.3289482604815418e-05
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.101469,
+                    "p95_ms": 0.13061,
+                    "standard_deviation_ms": 0.02073630522537706
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.033419,
+                    "p95_ms": 0.078479,
+                    "standard_deviation_ms": 0.021050217988419977
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.00182,
+                    "p95_ms": 0.004096,
+                    "standard_deviation_ms": 0.001034937370085746
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.006189,
+                    "p95_ms": 0.016262,
+                    "standard_deviation_ms": 0.004451593764035528
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.008551,
+                    "p95_ms": 0.020821,
+                    "standard_deviation_ms": 0.005534126706175059
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 1.085805,
+                    "p95_ms": 1.127154,
+                    "standard_deviation_ms": 0.03841753798150006
+                }
+            }
+        },
+        {
+            "operation": "svd",
+            "tier": "large",
+            "shape": "768x768",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 64.73508,
+                        "p95_ms": 66.776616,
+                        "standard_deviation_ms": 0.9742416737404791
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0031755,
+                        "p95_ms": 0.00364,
+                        "standard_deviation_ms": 0.00028767975250267437
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 63.8755865,
+                        "p95_ms": 66.860518,
+                        "standard_deviation_ms": 1.5844661752603115
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.00293,
+                        "p95_ms": 0.003709,
+                        "standard_deviation_ms": 0.0003504404228966744
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 69.045282,
+                        "p95_ms": 73.889354,
+                        "standard_deviation_ms": 2.1597499166460543
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.39556,
+                        "p95_ms": 0.560402,
+                        "standard_deviation_ms": 0.07767478187835483
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 5.169695500000003,
+                    "percentage": 8.093382438061845
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 4.310202000000004,
+                    "percentage": 6.658216843170664
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 95,
+                "pool_hits": 90,
+                "pool_misses": 5,
+                "memfds_created": 5,
+                "buffers_reclaimed": 94,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 130,
+                "collection_noops": 97,
+                "collection_ns": 12872085,
+                "allocation_collection_calls": 95,
+                "stats_collection_calls": 1,
+                "allocations_drained": 94,
+                "recipient_notifications": 89,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 3016157,
+                "buffers_reset": 94,
+                "buffer_reset_ns": 8809190,
+                "buffers_cached": 94,
+                "buffer_cache_ns": 59424,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 1,
+                "cached_buffers": 4,
+                "cached_bytes": 7080960,
+                "pool_hit_rate": 0.9473684210526315
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 68.069184,
+                    "p95_ms": 70.244517,
+                    "standard_deviation_ms": 1.1143367469908547
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 67.315183,
+                    "p95_ms": 71.024683,
+                    "standard_deviation_ms": 2.079989783239466
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 67.256938,
+                    "p95_ms": 68.327187,
+                    "standard_deviation_ms": 0.7358000372842067
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.81664,
+                    "p95_ms": 0.925297,
+                    "standard_deviation_ms": 0.0507798377839079
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.242524,
+                    "p95_ms": 0.503296,
+                    "standard_deviation_ms": 0.10867526173881524
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.108493,
+                    "p95_ms": 0.18341,
+                    "standard_deviation_ms": 0.03213922142554172
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.01876,
+                    "p95_ms": 0.042546,
+                    "standard_deviation_ms": 0.01039535347354769
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.011721,
+                    "p95_ms": 0.083544,
+                    "standard_deviation_ms": 0.028666398818128516
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.628025,
+                    "p95_ms": 0.958013,
+                    "standard_deviation_ms": 0.15285050714027743
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.331208,
+                    "p95_ms": 0.581974,
+                    "standard_deviation_ms": 0.09821233034278333
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.116088,
+                    "p95_ms": 0.445726,
+                    "standard_deviation_ms": 0.13903343496209822
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.054453,
+                    "p95_ms": 0.286375,
+                    "standard_deviation_ms": 0.0930707618784761
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.482077,
+                    "p95_ms": 0.499939,
+                    "standard_deviation_ms": 0.020377160463617105
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.260367,
+                    "p95_ms": 0.286624,
+                    "standard_deviation_ms": 0.011588749085211915
+                },
+                "uncached_reclaimed_buffers_per_invocation": 4,
+                "cached_reclaimed_buffers_per_invocation": 3,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.673872,
+                    "p95_ms": 1.022075,
+                    "standard_deviation_ms": 0.14038212775905629
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.10146,
+                    "p95_ms": 0.115699,
+                    "standard_deviation_ms": 0.010133378007357665
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.170241,
+                    "p95_ms": 0.284775,
+                    "standard_deviation_ms": 0.048970860890942075
+                },
+                "output_allocations_per_invocation": 3,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.017876,
+                    "p95_ms": 0.019203,
+                    "standard_deviation_ms": 0.0009646617230926083
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.014921,
+                    "p95_ms": 0.016472,
+                    "standard_deviation_ms": 0.000908470494842843
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 66.09673,
+                    "p95_ms": 67.417737,
+                    "standard_deviation_ms": 0.7817653084404808
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.043839,
+                    "p95_ms": 0.054099,
+                    "standard_deviation_ms": 0.004910658790834485
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.057918,
+                    "p95_ms": 0.080721,
+                    "standard_deviation_ms": 0.009777285623321023
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.036685,
+                    "p95_ms": 0.098638,
+                    "standard_deviation_ms": 0.025106251137117227
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2.2e-05,
+                    "p95_ms": 2.3e-05,
+                    "standard_deviation_ms": 8.944271909999158e-07
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.167605,
+                    "p95_ms": 0.188353,
+                    "standard_deviation_ms": 0.015547437087828977
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.054342,
+                    "p95_ms": 0.060734,
+                    "standard_deviation_ms": 0.002910137206387355
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002078,
+                    "p95_ms": 0.00241,
+                    "standard_deviation_ms": 0.00021848258511835675
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.006702,
+                    "p95_ms": 0.010289,
+                    "standard_deviation_ms": 0.0015561828170237585
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.009495,
+                    "p95_ms": 0.013174,
+                    "standard_deviation_ms": 0.001731965888809592
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 65.689532,
+                    "p95_ms": 66.969515,
+                    "standard_deviation_ms": 0.8025725828604913
+                }
+            }
+        },
+        {
+            "operation": "add_scalar",
+            "tier": "small",
+            "shape": "4096 elements",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.02834,
+                        "p95_ms": 0.039749,
+                        "standard_deviation_ms": 0.01149978598453032
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.00059,
+                        "p95_ms": 0.000761,
+                        "standard_deviation_ms": 0.00019484599046426385
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.0183365,
+                        "p95_ms": 0.047188,
+                        "standard_deviation_ms": 0.012656845711313699
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000303,
+                        "p95_ms": 0.000653,
+                        "standard_deviation_ms": 0.00014758265480739935
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.7078925,
+                        "p95_ms": 0.839965,
+                        "standard_deviation_ms": 0.059176489468791574
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0669445,
+                        "p95_ms": 0.081105,
+                        "standard_deviation_ms": 0.005192985154032313
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 0.6895560000000001,
+                    "percentage": 3760.5649933193363
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 0.6795525,
+                    "percentage": 2397.8563867325333
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 39,
+                "pool_hits": 36,
+                "pool_misses": 3,
+                "memfds_created": 3,
+                "buffers_reclaimed": 38,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 74,
+                "collection_noops": 41,
+                "collection_ns": 2199172,
+                "allocation_collection_calls": 39,
+                "stats_collection_calls": 1,
+                "allocations_drained": 38,
+                "recipient_notifications": 33,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 1181795,
+                "buffers_reset": 38,
+                "buffer_reset_ns": 545854,
+                "buffers_cached": 38,
+                "buffer_cache_ns": 22820,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 1,
+                "cached_buffers": 2,
+                "cached_bytes": 32768,
+                "pool_hit_rate": 0.9230769230769231
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.820059,
+                    "p95_ms": 1.464208,
+                    "standard_deviation_ms": 0.2630045954591669
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.747168,
+                    "p95_ms": 0.984193,
+                    "standard_deviation_ms": 0.13295277988910198
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.71417,
+                    "p95_ms": 1.150685,
+                    "standard_deviation_ms": 0.18531614257522197
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.059669,
+                    "p95_ms": 0.079348,
+                    "standard_deviation_ms": 0.009695820967819074
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.154889,
+                    "p95_ms": 0.245384,
+                    "standard_deviation_ms": 0.04147769424353288
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.080346,
+                    "p95_ms": 0.135747,
+                    "standard_deviation_ms": 0.023222524760240865
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.014372,
+                    "p95_ms": 0.022488,
+                    "standard_deviation_ms": 0.0032442635281370097
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.010465,
+                    "p95_ms": 0.032334,
+                    "standard_deviation_ms": 0.00869474883823564
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.083196,
+                    "p95_ms": 0.139913,
+                    "standard_deviation_ms": 0.02260681753454033
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.059656,
+                    "p95_ms": 0.080876,
+                    "standard_deviation_ms": 0.010026626359848061
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.045615,
+                    "p95_ms": 0.096213,
+                    "standard_deviation_ms": 0.019767850323188913
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.03519,
+                    "p95_ms": 0.040059,
+                    "standard_deviation_ms": 0.0029960517084990372
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.025242,
+                    "p95_ms": 0.028809,
+                    "standard_deviation_ms": 0.0018837505779693872
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.015229,
+                    "p95_ms": 0.030987,
+                    "standard_deviation_ms": 0.006603429823962696
+                },
+                "uncached_reclaimed_buffers_per_invocation": 2,
+                "cached_reclaimed_buffers_per_invocation": 1,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.153791,
+                    "p95_ms": 0.291144,
+                    "standard_deviation_ms": 0.056386991441643705
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.032158,
+                    "p95_ms": 0.04286,
+                    "standard_deviation_ms": 0.00544672996944038
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.119299,
+                    "p95_ms": 0.24452,
+                    "standard_deviation_ms": 0.05095624820804608
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.008183,
+                    "p95_ms": 0.010244,
+                    "standard_deviation_ms": 0.001036444962359314
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.010015,
+                    "p95_ms": 0.013684,
+                    "standard_deviation_ms": 0.001870579910081363
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 0.182188,
+                    "p95_ms": 0.306654,
+                    "standard_deviation_ms": 0.05579019247645593
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.028191,
+                    "p95_ms": 0.054456,
+                    "standard_deviation_ms": 0.010815364467275247
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.038273,
+                    "p95_ms": 0.063452,
+                    "standard_deviation_ms": 0.010301657392866452
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.026399,
+                    "p95_ms": 0.051328,
+                    "standard_deviation_ms": 0.011116764140702095
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2e-05,
+                    "p95_ms": 2.2e-05,
+                    "standard_deviation_ms": 1.4142135623730952e-06
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.052703,
+                    "p95_ms": 0.08253,
+                    "standard_deviation_ms": 0.01325788848044816
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.031068,
+                    "p95_ms": 0.05823,
+                    "standard_deviation_ms": 0.013651971256928429
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001054,
+                    "p95_ms": 0.001408,
+                    "standard_deviation_ms": 0.00017745128909083755
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.0029,
+                    "p95_ms": 0.003753,
+                    "standard_deviation_ms": 0.0003934989707737493
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.004133,
+                    "p95_ms": 0.005355,
+                    "standard_deviation_ms": 0.000582975608409134
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.02464,
+                    "p95_ms": 0.049346,
+                    "standard_deviation_ms": 0.010205908986464656
+                }
+            }
+        },
+        {
+            "operation": "add_scalar",
+            "tier": "medium",
+            "shape": "65536 elements",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.0411455,
+                        "p95_ms": 0.076495,
+                        "standard_deviation_ms": 0.020091875599107217
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0006775,
+                        "p95_ms": 0.000912,
+                        "standard_deviation_ms": 0.00023574910392194494
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.024833,
+                        "p95_ms": 0.058569,
+                        "standard_deviation_ms": 0.015500424182905446
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.000437,
+                        "p95_ms": 0.000989,
+                        "standard_deviation_ms": 0.00023395617110903488
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.888108,
+                        "p95_ms": 2.453482,
+                        "standard_deviation_ms": 0.4800222080994274
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.090669,
+                        "p95_ms": 0.179726,
+                        "standard_deviation_ms": 0.030891325398078987
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 0.863275,
+                    "percentage": 3476.321829823219
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 0.8469625000000001,
+                    "percentage": 2058.4571824379336
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 39,
+                "pool_hits": 36,
+                "pool_misses": 3,
+                "memfds_created": 3,
+                "buffers_reclaimed": 38,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 74,
+                "collection_noops": 41,
+                "collection_ns": 2897318,
+                "allocation_collection_calls": 39,
+                "stats_collection_calls": 1,
+                "allocations_drained": 38,
+                "recipient_notifications": 33,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 1389051,
+                "buffers_reset": 38,
+                "buffer_reset_ns": 1001965,
+                "buffers_cached": 38,
+                "buffer_cache_ns": 24367,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 1,
+                "cached_buffers": 2,
+                "cached_bytes": 524288,
+                "pool_hit_rate": 0.9230769230769231
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.977414,
+                    "p95_ms": 1.251303,
+                    "standard_deviation_ms": 0.12221949611514522
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.782401,
+                    "p95_ms": 0.894286,
+                    "standard_deviation_ms": 0.057862244779821666
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.823288,
+                    "p95_ms": 0.949755,
+                    "standard_deviation_ms": 0.061742992351845084
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 0.134741,
+                    "p95_ms": 0.191111,
+                    "standard_deviation_ms": 0.027652984847209534
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.144531,
+                    "p95_ms": 0.205929,
+                    "standard_deviation_ms": 0.02540287394764616
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.069198,
+                    "p95_ms": 0.145212,
+                    "standard_deviation_ms": 0.0309085555210851
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.015275,
+                    "p95_ms": 0.023907,
+                    "standard_deviation_ms": 0.003449095278475212
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.011157,
+                    "p95_ms": 0.035163,
+                    "standard_deviation_ms": 0.009544389690284026
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.118791,
+                    "p95_ms": 0.129275,
+                    "standard_deviation_ms": 0.006096481181796595
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.070583,
+                    "p95_ms": 0.073419,
+                    "standard_deviation_ms": 0.001419919631528489
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.048517,
+                    "p95_ms": 0.053483,
+                    "standard_deviation_ms": 0.002502612602861258
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.036263,
+                    "p95_ms": 0.036758,
+                    "standard_deviation_ms": 0.0007131021245235496
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.056833,
+                    "p95_ms": 0.062046,
+                    "standard_deviation_ms": 0.0040131475626993835
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.025094,
+                    "p95_ms": 0.027026,
+                    "standard_deviation_ms": 0.0008273784140283091
+                },
+                "uncached_reclaimed_buffers_per_invocation": 2,
+                "cached_reclaimed_buffers_per_invocation": 1,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.153181,
+                    "p95_ms": 0.222692,
+                    "standard_deviation_ms": 0.030526683392730368
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.028434,
+                    "p95_ms": 0.035901,
+                    "standard_deviation_ms": 0.0032756410914506493
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.120435,
+                    "p95_ms": 0.192471,
+                    "standard_deviation_ms": 0.029849008750040592
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.0078,
+                    "p95_ms": 0.008666,
+                    "standard_deviation_ms": 0.0006857228011376026
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.009316,
+                    "p95_ms": 0.012532,
+                    "standard_deviation_ms": 0.001562041023789068
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 0.276212,
+                    "p95_ms": 0.315469,
+                    "standard_deviation_ms": 0.019105068106656933
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.029755,
+                    "p95_ms": 0.035534,
+                    "standard_deviation_ms": 0.0030189319568350655
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.039581,
+                    "p95_ms": 0.04189,
+                    "standard_deviation_ms": 0.0022041737681045026
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.028123,
+                    "p95_ms": 0.030968,
+                    "standard_deviation_ms": 0.001699199458568652
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2e-05,
+                    "p95_ms": 2.3e-05,
+                    "standard_deviation_ms": 1.4696938456699068e-06
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.053478,
+                    "p95_ms": 0.060784,
+                    "standard_deviation_ms": 0.003810607982986442
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.025359,
+                    "p95_ms": 0.072701,
+                    "standard_deviation_ms": 0.019449547507332913
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001196,
+                    "p95_ms": 0.001233,
+                    "standard_deviation_ms": 5.178185010213521e-05
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.002914,
+                    "p95_ms": 0.003442,
+                    "standard_deviation_ms": 0.00022914187744713975
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.004294,
+                    "p95_ms": 0.004796,
+                    "standard_deviation_ms": 0.00024465273348156155
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 0.097738,
+                    "p95_ms": 0.099634,
+                    "standard_deviation_ms": 0.002669605319143637
+                }
+            }
+        },
+        {
+            "operation": "add_scalar",
+            "tier": "large",
+            "shape": "1048576 elements",
+            "backends": {
+                "local": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.1760485,
+                        "p95_ms": 0.306224,
+                        "standard_deviation_ms": 0.04326274310350651
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.0009965,
+                        "p95_ms": 0.001124,
+                        "standard_deviation_ms": 0.00025393520827171644
+                    }
+                },
+                "bundled": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 0.1800955,
+                        "p95_ms": 0.255497,
+                        "standard_deviation_ms": 0.03677246636887442
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.00081,
+                        "p95_ms": 0.001133,
+                        "standard_deviation_ms": 0.00023587708663623942
+                    }
+                },
+                "isolated": {
+                    "call_ms": {
+                        "count": 10,
+                        "median_ms": 2.2002055,
+                        "p95_ms": 3.036495,
+                        "standard_deviation_ms": 0.2955067504956359
+                    },
+                    "cleanup_ms": {
+                        "count": 10,
+                        "median_ms": 0.253736,
+                        "p95_ms": 0.321763,
+                        "standard_deviation_ms": 0.022649609710544683
+                    }
+                }
+            },
+            "overhead": {
+                "isolated_vs_bundled": {
+                    "absolute_ms": 2.02011,
+                    "percentage": 1121.6882154190416
+                },
+                "isolated_vs_local": {
+                    "absolute_ms": 2.024157,
+                    "percentage": 1149.7723638656394
+                }
+            },
+            "memory_pool": {
+                "allocation_requests": 39,
+                "pool_hits": 36,
+                "pool_misses": 3,
+                "memfds_created": 3,
+                "buffers_reclaimed": 38,
+                "buffers_evicted": 0,
+                "buffers_quarantined": 0,
+                "collection_calls": 74,
+                "collection_noops": 41,
+                "collection_ns": 9723214,
+                "allocation_collection_calls": 39,
+                "stats_collection_calls": 1,
+                "allocations_drained": 38,
+                "recipient_notifications": 33,
+                "recipient_notification_batches": 28,
+                "recipient_retirement_ns": 1564546,
+                "buffers_reset": 38,
+                "buffer_reset_ns": 7476909,
+                "buffers_cached": 38,
+                "buffer_cache_ns": 24882,
+                "buffer_eviction_ns": 0,
+                "buffer_quarantine_ns": 0,
+                "mode": "pooled",
+                "active_buffers": 1,
+                "cached_buffers": 2,
+                "cached_bytes": 8388608,
+                "pool_hit_rate": 0.9230769230769231
+            },
+            "diagnostics": {
+                "isolated_uncached_call_ms": {
+                    "count": 5,
+                    "median_ms": 3.877995,
+                    "p95_ms": 4.240236,
+                    "standard_deviation_ms": 0.23477441684561798
+                },
+                "isolated_direct_call_ms": {
+                    "count": 5,
+                    "median_ms": 2.26414,
+                    "p95_ms": 5.326853,
+                    "standard_deviation_ms": 1.2435622405125366
+                },
+                "isolated_profiled_call_ms": {
+                    "count": 5,
+                    "median_ms": 2.196321,
+                    "p95_ms": 4.483202,
+                    "standard_deviation_ms": 0.926203922613028
+                },
+                "input_shared_preparation_ms": {
+                    "count": 5,
+                    "median_ms": 1.199738,
+                    "p95_ms": 1.360609,
+                    "standard_deviation_ms": 0.08271424135274408
+                },
+                "first_use_fd_transfer_mmap_ms": {
+                    "count": 5,
+                    "median_ms": 0.220825,
+                    "p95_ms": 0.245316,
+                    "standard_deviation_ms": 0.014583723757669028
+                },
+                "cached_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.08246,
+                    "p95_ms": 0.103772,
+                    "standard_deviation_ms": 0.010366996537088263
+                },
+                "shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.015654,
+                    "p95_ms": 0.026917,
+                    "standard_deviation_ms": 0.004443251557136958
+                },
+                "pooled_shared_memory_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.011148,
+                    "p95_ms": 0.041372,
+                    "standard_deviation_ms": 0.012041645346048022
+                },
+                "uncached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.625185,
+                    "p95_ms": 0.773277,
+                    "standard_deviation_ms": 0.06912793846022026
+                },
+                "cached_buffer_reclamation_ms": {
+                    "count": 5,
+                    "median_ms": 0.247775,
+                    "p95_ms": 0.256872,
+                    "standard_deviation_ms": 0.009954771547353561
+                },
+                "uncached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.082618,
+                    "p95_ms": 0.185982,
+                    "standard_deviation_ms": 0.04846551460739894
+                },
+                "cached_recipient_retirement_ms": {
+                    "count": 5,
+                    "median_ms": 0.038863,
+                    "p95_ms": 0.039423,
+                    "standard_deviation_ms": 0.0018962226240607932
+                },
+                "uncached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.531285,
+                    "p95_ms": 0.582427,
+                    "standard_deviation_ms": 0.02225283128592854
+                },
+                "cached_buffer_reset_ms": {
+                    "count": 5,
+                    "median_ms": 0.197617,
+                    "p95_ms": 0.207615,
+                    "standard_deviation_ms": 0.007935079447617396
+                },
+                "uncached_reclaimed_buffers_per_invocation": 2,
+                "cached_reclaimed_buffers_per_invocation": 1,
+                "output_preallocation_service_ms": {
+                    "count": 5,
+                    "median_ms": 0.164796,
+                    "p95_ms": 2.245035,
+                    "standard_deviation_ms": 0.8327349471113603
+                },
+                "output_shared_allocation_ms": {
+                    "count": 5,
+                    "median_ms": 0.034788,
+                    "p95_ms": 1.70763,
+                    "standard_deviation_ms": 0.6685837129988734
+                },
+                "output_ensure_mapped_ms": {
+                    "count": 5,
+                    "median_ms": 0.127516,
+                    "p95_ms": 0.533521,
+                    "standard_deviation_ms": 0.16368233153935705
+                },
+                "output_allocations_per_invocation": 1,
+                "scalar_binding_ms": {
+                    "count": 5,
+                    "median_ms": 0.009417,
+                    "p95_ms": 0.010012,
+                    "standard_deviation_ms": 0.0006425928726651114
+                },
+                "output_plan_evaluation_ms": {
+                    "count": 5,
+                    "median_ms": 0.011502,
+                    "p95_ms": 0.034982,
+                    "standard_deviation_ms": 0.009379403477833758
+                },
+                "native_call_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_queue_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "native_handoff_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_round_trip_ms": {
+                    "count": 5,
+                    "median_ms": 1.585422,
+                    "p95_ms": 1.92185,
+                    "standard_deviation_ms": 0.17386821708823036
+                },
+                "ring_submission_queue_ms": {
+                    "count": 5,
+                    "median_ms": 0.029634,
+                    "p95_ms": 0.038932,
+                    "standard_deviation_ms": 0.004032355341484676
+                },
+                "ring_enqueue_ms": {
+                    "count": 5,
+                    "median_ms": 0.042593,
+                    "p95_ms": 0.048791,
+                    "standard_deviation_ms": 0.0025595743708671567
+                },
+                "ring_backpressure_wait_ms": {
+                    "count": 5,
+                    "median_ms": 0.0,
+                    "p95_ms": 0.0,
+                    "standard_deviation_ms": 0.0
+                },
+                "ring_command_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.031349,
+                    "p95_ms": 0.041189,
+                    "standard_deviation_ms": 0.004853754489052779
+                },
+                "ring_worker_queue_ms": {
+                    "count": 5,
+                    "median_ms": 2e-05,
+                    "p95_ms": 2.2e-05,
+                    "standard_deviation_ms": 1.3266499161421598e-06
+                },
+                "ring_completion_wakeup_ms": {
+                    "count": 5,
+                    "median_ms": 0.102203,
+                    "p95_ms": 0.465774,
+                    "standard_deviation_ms": 0.14890945126566008
+                },
+                "ring_result_materialization_ms": {
+                    "count": 5,
+                    "median_ms": 0.027099,
+                    "p95_ms": 0.040992,
+                    "standard_deviation_ms": 0.005772035155818094
+                },
+                "worker_input_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.001154,
+                    "p95_ms": 0.001277,
+                    "standard_deviation_ms": 5.904371262039676e-05
+                },
+                "worker_output_views_ms": {
+                    "count": 5,
+                    "median_ms": 0.003277,
+                    "p95_ms": 0.003719,
+                    "standard_deviation_ms": 0.00021236440379686987
+                },
+                "worker_dispatch_ms": {
+                    "count": 5,
+                    "median_ms": 0.004639,
+                    "p95_ms": 0.005297,
+                    "standard_deviation_ms": 0.0002737492283094146
+                },
+                "worker_kernel_ms": {
+                    "count": 5,
+                    "median_ms": 1.288919,
+                    "p95_ms": 1.454164,
+                    "standard_deviation_ms": 0.0872170148973238
+                }
+            }
+        }
+    ]
+}
