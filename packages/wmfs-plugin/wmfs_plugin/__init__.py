@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from wmfs_plugin.binding import PluginBinding
     from wmfs_plugin.invocation import InvocationContext, OutputSpec
     from wmfs_plugin.logging import Logger, LogLevel, LogValue
     from wmfs_plugin.worker import OperationHandler, OutputPlanner
@@ -15,6 +16,7 @@ __all__ = [
     "OperationHandler",
     "OutputPlanner",
     "OutputSpec",
+    "PluginBinding",
     "PROTOCOL_VERSION",
     "worker_main",
 ]
@@ -27,6 +29,10 @@ def __getattr__(name: str) -> Any:
         return version("wmfs-plugin")
     if name == "PROTOCOL_VERSION":
         return 11
+    if name == "PluginBinding":
+        from wmfs_plugin.binding import PluginBinding
+
+        return PluginBinding
     if name in {"InvocationContext", "OutputSpec"}:
         from wmfs_plugin.invocation import InvocationContext, OutputSpec
 

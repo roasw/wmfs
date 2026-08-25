@@ -81,7 +81,7 @@ test-all profile=build_type:
 _test-root-layer profile layer:
     env \
       PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
-      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs${PYTHONPATH:+:$PYTHONPATH}" \
+      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
       WMFS_REQUIRE_BUNDLED="$([[ "{{ profile }}" == "Debug" ]] && printf 1 || printf 0)" \
       pytest -q -m "{{ layer }}" \
         "{{ root }}/packages/wmfs/tests" \

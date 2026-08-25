@@ -55,8 +55,8 @@ C++ worker has no dependency on either Python package used by plugin authors.
 
 - `wmfs`, `wmfs-plugin`, and `wmfs-tool` have deliberately one-way, disjoint
   dependency roles.
-- The Python SDK is only for Python workers. It is not an application dependency
-  and is not used by C++ workers.
+- Every Python plugin uses the SDK facade. It is not a dependency of the main
+  runtime or C++ workers.
 - Runtime and worker environments may use different Python, Torch, libc, and
   toolchain versions.
 
@@ -65,9 +65,13 @@ C++ worker has no dependency on either Python package used by plugin authors.
 - [`pyproject.toml`](../pyproject.toml): application runtime package configuration
   at the repository root.
 - [`packages/wmfs-plugin/pyproject.toml`](../packages/wmfs-plugin/pyproject.toml):
-  independent worker SDK dependencies.
+  independent Python plugin SDK dependencies.
 - [`packages/wmfs-tool/pyproject.toml`](../packages/wmfs-tool/pyproject.toml):
   independent interface compiler dependencies.
+- [`plugins/reference/pyproject.toml`](../plugins/reference/pyproject.toml):
+  ordinary reference kernels and generated plugin artifacts.
+- [`plugins/reference/wmfs_reference/plugin.py`](../plugins/reference/wmfs_reference/plugin.py):
+  shared bundled/isolated Python plugin binding.
 - [`nix/packages.nix`](../nix/packages.nix): separately deployable package graph.
 
 ## 2. Interface Generation
@@ -135,7 +139,7 @@ startup.
 - Startup establishes two SPSC rings, four eventfds, an FD-control socket, a
   session generation, an optional independent log service, and bounded
   deadlines.
-- Disabled logging establishes no log socket or queue; local and bundled modes
+- Disabled logging establishes no log socket or queue; bundled mode
   establish none of the isolated transport resources.
 
 **Read the implementation**
@@ -350,17 +354,17 @@ by the bundled build before calling transport-neutral LibTorch kernels.
 ## Benchmarks and Cross-Boundary Tests
 
 The architecture is measured rather than inferred. `wmfs-benchmark` separates
-local/bundled/isolated initialization, fixed startup/control ping, logging-mode
+bundled Python/native and isolated initialization, fixed startup/control ping, logging-mode
 initialization, ring enqueue and wakeups,
 backpressure, first-use FD transfer and mapping, cached mappings, output
 allocation, known/dynamic output paths, direct/profiled calls, worker view
 construction, kernel time, result materialization, and reclamation. It compares
-local, bundled, and isolated execution using equivalent kernels where possible.
+bundled Python, bundled native, and isolated execution using equivalent kernels.
 
 **Read the implementation**
 
 - [`benchmark.py`](../packages/wmfs/wmfs/benchmark.py): measurement boundaries,
-  report schema, and local/bundled/isolated comparisons.
+  report schema and bundled/isolated comparisons.
 - {download}`benchmarks/README.md <../benchmarks/README.md>`: reproducible
   benchmark workflow and checked reports.
 - [`tests/integration/test_benchmark.py`](../tests/integration/test_benchmark.py):

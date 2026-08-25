@@ -46,7 +46,7 @@ class PluginManifest:
     root: Path
     configuration: ConfigurationMetadata | None = None
     configuration_bytes: bytes = EMPTY_CONFIGURATION_BYTES
-    local_provider: str | None = None
+    python_provider: str | None = None
     bundled_namespace: str | None = None
     entry_symbol: str | None = None
     interface_fingerprint: bytes = b""
@@ -195,7 +195,7 @@ def load_manifest(path: Path) -> PluginManifest:
         worker=_string(deployment["worker"], "deployment.worker"),
         root=root,
         configuration=configuration,
-        local_provider=(
+        python_provider=(
             _string(deployment["localProvider"], "deployment.localProvider")
             if "localProvider" in deployment
             else None

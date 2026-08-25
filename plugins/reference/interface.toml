@@ -11,7 +11,7 @@ python_module = "wmfs_reference"
 [deployment]
 root = ".."
 worker = "wmfs-reference-worker"
-local_provider = "wmfs_reference.kernels"
+python_provider = "wmfs_reference.plugin"
 bundled_namespace = "wmfs_reference"
 
 [lifecycle]

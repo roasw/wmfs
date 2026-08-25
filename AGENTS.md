@@ -4,9 +4,10 @@
 
 - The `wmfs` Python distribution is in `packages/wmfs`; its import package is
   `packages/wmfs/wmfs`.
-- The independent Python plugin SDK is in `packages/wmfs-plugin`; plugins may
-  depend on `wmfs_plugin` but must not depend on the main `wmfs` runtime. Only
-  Python worker distributions depend on this SDK.
+- The independent Python plugin SDK is in `packages/wmfs-plugin`; every Python
+  plugin depends on `wmfs_plugin` but must not depend on the main `wmfs` runtime.
+- The reference plugin and its Python worker entry point are both rooted at
+  `plugins/reference` and ship in the `wmfs-reference` distribution.
 - Runtime protocol metadata, schemas, and ring codecs live under
   `packages/wmfs/wmfs/protocol` and `packages/wmfs/wmfs/transport`. The runtime,
   C++ builds, and `wmfs-tool` must not depend on `packages/wmfs-plugin`.
@@ -62,7 +63,7 @@ than repeatedly rediscovering it in the operation hot path.
 
 Examples:
 
-- local and bundled execution bypass worker launch, rings, FD transfer, shared
+- bundled Python and native execution bypass worker launch, rings, FD transfer, shared
   allocation, isolated VJPs, and transport error translation;
 - disabled logging creates no channel or queue, performs no serialization or
   allocation, and allows expensive message construction to be skipped with
@@ -177,12 +178,11 @@ Workers should only receive capabilities to the inputs required for an operation
 
 Do not expose the complete object store to plugins.
 
-The same registered operation catalog must be executable through three
-adapters without changing application calls:
+The same registered operation catalog must be executable through two public
+backends without changing application calls:
 
 ```text
-                         +-> pure Torch / local
-Python frontend -> API --+-> bundled / unified process
+Python frontend -> API --+-> bundled Python or native provider
                          +-> isolated worker rings
 ```
 
@@ -211,7 +211,7 @@ Generated C++ and Python adapters depend only on the stable plugin ABI, not on
 private runtime implementation details.
 
 `wmfs-tool` output must be execution-mode-neutral. Do not generate separate
-local, bundled, and isolated interface files for one plugin. The same generated
+bundled and isolated interface files for one plugin. The same generated
 manifest, operation IDs, metadata, declarations, and plugin entry points must
 be usable in every mode. Ring-specific generation must not become the only way
 to invoke an operation.
@@ -222,7 +222,8 @@ Backend selection belongs in the runtime and build system:
   entry table into a worker executable;
 - a bundled target links the same implementation and generated entry table
   into the application-side extension or executable;
-- a pure-Python target imports the same ordinary Torch implementation directly.
+- a bundled Python target imports the same ordinary Torch implementation through
+  the `wmfs-plugin` facade.
 
 Mode-specific transport glue should be generic runtime code rather than a
 second set of per-plugin generated sources. If a language binding requires thin
@@ -375,8 +376,8 @@ pointer is local to the process and valid only for the initialization call. It
 is never placed in shared memory. The plugin may parse or copy the bytes using
 its own C++ library; no `std::string` crosses the generated interface.
 
-Local and bundled initialization receive the same logical configuration
-without creating a worker or transport. Pure Python receives a normal decoded
+Bundled initialization receives the same logical configuration without creating
+a worker or transport. Pure Python receives a normal decoded
 mapping; bundled C++ receives the same canonical JSON view.
 
 ### Logging
@@ -468,8 +469,8 @@ must remain explicit and opt-in.
 
 ## Output Allocation
 
-For isolated execution, output ownership must remain with the runtime. Local
-and bundled execution use normal Torch allocation and `out=` semantics.
+For isolated execution, output ownership must remain with the runtime. Bundled
+execution uses normal Torch allocation and `out=` semantics.
 
 Support an allocator capability exposed to workers.
 
@@ -531,7 +532,7 @@ Algorithms must not need to understand:
 
 Runtime adapters handle those concerns.
 
-## Unified And Pure-Torch Exit Route
+## Unified In-Process Exit Route
 
 Supporting degeneration to ordinary Torch is a hard requirement.
 
@@ -549,18 +550,15 @@ Generated or handwritten transport adapters may translate an
 `InvocationContext` or ring record into a call to that kernel, but transport
 concerns must stop at the adapter boundary.
 
-The execution modes are:
+The public execution modes are:
 
-- **Pure Torch/local:** call the ordinary Python Torch implementation in the
-  application process using native Torch allocation, views, exceptions, and
-  autograd.
-- **Bundled/unified:** call the same plugin entry points and implementation from
-  a directly linked or in-process build using native tensors. This mode bypasses
-  worker startup, fixed control channels, rings, and shared-memory transport.
+- **Bundled/unified:** call the same Python plugin facade or native plugin entry
+  points in process using native tensors. This mode bypasses worker startup,
+  fixed control channels, rings, and shared-memory transport.
 - **Isolated:** use the generated metadata, runtime-owned shared storage, and
   command/completion rings around the same mathematical kernel.
 
-Initialization for local or bundled execution must be small and bounded by the
+Initialization for bundled execution must be small and bounded by the
 number of plugins and operations. It may read manifests, validate generated
 metadata, build dispatch tables, and import the selected in-process
 implementation once. It must not launch workers, establish rings, map shared
@@ -568,18 +566,18 @@ arenas, perform per-operation discovery, or allocate tensors proportional to
 user data. Measure and report initialization separately from steady-state
 calls.
 
-After initialization, local and bundled calls should be indistinguishable from
+After initialization, bundled calls should be indistinguishable from
 regular Torch calls except for the dynamic `wmfs` function lookup:
 
 - inputs and outputs are ordinary Torch tensors;
 - output allocation follows Torch conventions;
 - views and `out=` preserve normal Torch behavior;
 - native Torch autograd is preferred over isolated VJP machinery;
-- algorithm exceptions propagate as ordinary local exceptions;
+- algorithm exceptions propagate as ordinary in-process exceptions;
 - no mandatory future, command, graph, or runtime tensor wrapper is exposed.
 
-Every public reference operation must have contract tests across all available
-local, bundled, and isolated modes. Tests cover signatures, values, dtypes,
+Every public reference operation must have contract tests across bundled Python,
+bundled native, and isolated implementations. Tests cover signatures, values, dtypes,
 shapes, multiple outputs, `out=`, views, errors, and first-order autograd where
 the operation supports it. A feature is incomplete if it works only through
 the isolated transport.
@@ -603,7 +601,6 @@ u, s, vh = svd(c)
 The backend selection should be configurable, for example:
 
 ```python
-runtime.use_backend("local")
 runtime.use_backend("bundled")
 runtime.use_backend("isolated")
 ```
@@ -651,20 +648,8 @@ overhead.
 
 ## Execution Modes
 
-Every benchmark operation must be available through local, bundled when built,
-and isolated adapters using equivalent numerical kernels.
-
-### Local
-
-```text
-Python
-  -> PyTorch/native function
-```
-
-Everything executes in one process.
-
-This is the pure-Torch exit route. It uses ordinary tensors and Torch semantics
-and must not initialize isolated transport resources.
+Every benchmark operation must be available through bundled Python, bundled
+native when built, and isolated adapters using equivalent numerical kernels.
 
 ### Bundled / Unified
 
@@ -696,9 +681,8 @@ Tensor payloads are shared through mapped memory.
 
 Measure separately:
 
-- local, bundled, and isolated initialization time;
-- local kernel execution time;
-- bundled end-to-end execution time;
+- bundled Python, bundled native, and isolated initialization time;
+- bundled Python and native end-to-end execution time;
 - isolated end-to-end execution time;
 - command/completion ring round-trip latency;
 - command enqueue and completion dequeue cost;
@@ -721,8 +705,8 @@ large    - computation dominates
 For matrix multiplication and SVD report:
 
 ```text
-local time
-bundled time
+bundled Python time
+bundled native time
 isolated time
 absolute overhead
 percentage overhead
@@ -825,14 +809,14 @@ Design interfaces so these can be added later, but do not block the prototype on
 
 Implementation status:
 
-- [x] Milestone 1: local PyTorch API.
+- [x] Milestone 1: original in-process PyTorch API.
 - [x] Milestone 2: Cap'n Proto worker RPC and dynamic plugin registration.
 - [x] Milestone 3: shared CPU tensor transport with `memfd_create`, FD passing,
   and `mmap`.
 - [x] Milestone 4: isolated execution with the same Python-facing API.
 - [x] Milestone 5: verified execution in a separately pinned glibc/toolchain
   environment.
-- [x] Milestone 6: local-versus-isolated benchmarking.
+- [x] Milestone 6: original in-process-versus-isolated benchmarking.
 - [x] Milestone 7: `wmfs-tool` interface compiler and stable generated plugin
   ABI.
 - [x] Milestone 8: startup-only registration and versioned ring handshake.
@@ -842,7 +826,7 @@ Implementation status:
   artifacts.
 - [x] Milestone 12: ring-versus-RPC benchmark and removal of per-call RPC.
 - [x] Milestone 13: verify every plugin interface and implementation can be
-  built for local, bundled, and isolated execution without mode-specific
+  built for bundled and isolated execution without mode-specific
   generated interface files.
 - [x] Milestone 14: implement mode-neutral initialization hooks, typed
   configuration schemas and introspection, canonical JSON configuration, and
@@ -851,7 +835,7 @@ Implementation status:
 
 ### Milestone 1
 
-Implement local Python API using PyTorch.
+Implement the initial in-process Python API using PyTorch.
 
 Required:
 
@@ -885,7 +869,7 @@ Run the plugin worker in a deliberately different glibc/toolchain environment.
 
 ### Milestone 6
 
-Benchmark local versus isolated execution.
+Benchmark bundled versus isolated execution.
 
 Implemented by `wmfs-benchmark`, with a reproducible reference report in
 `benchmarks/benchmark-master.json`. The benchmark covers small, medium, and

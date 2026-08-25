@@ -87,8 +87,9 @@ def _manifest(plugin: Plugin, document: dict[str, Any], fingerprint: str) -> str
         "root": plugin.deployment_root,
         "worker": plugin.worker,
     }
-    if plugin.local_provider is not None:
-        result["deployment"]["localProvider"] = plugin.local_provider
+    if plugin.python_provider is not None:
+        # Manifest v2 retains the legacy wire spelling for compatibility.
+        result["deployment"]["localProvider"] = plugin.python_provider
     if plugin.bundled_namespace is not None:
         result["deployment"]["bundledNamespace"] = plugin.bundled_namespace
     result["generator"] = _GENERATOR

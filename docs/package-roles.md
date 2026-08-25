@@ -3,11 +3,11 @@
 WMFS publishes three Python distributions with deliberately different users
 and lifetimes. They are not a stack that every environment should install.
 
-| Distribution  | Installed by                     | Used when                       | Purpose                                                                                                        |
-| ------------- | -------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `wmfs`        | Application/runtime environment  | Runtime                         | Public Python API, plugin discovery, worker lifecycle, rings, shared buffers, and tensor results               |
-| `wmfs-plugin` | Python plugin worker environment | Runtime, inside the worker only | Stable Python worker bootstrap, invocation context, FD receiver, mapped tensors, and worker-side ring endpoint |
-| `wmfs-tool`   | Plugin build and CI environment  | Build time only                 | Compiles `interface.toml` into manifests and C++/Python plugin-facing artifacts                                |
+| Distribution  | Installed by                    | Used when                         | Purpose                                                                                                       |
+| ------------- | ------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `wmfs`        | Application/runtime environment | Runtime                           | Public Python API, plugin discovery, worker lifecycle, rings, shared buffers, and tensor results              |
+| `wmfs-plugin` | Python plugin environment       | Bundled or isolated Python plugin | Transport-neutral plugin binding plus worker bootstrap, invocation context, mapped tensors, and ring endpoint |
+| `wmfs-tool`   | Plugin build and CI environment | Build time only                   | Compiles `interface.toml` into manifests and C++/Python plugin-facing artifacts                               |
 
 ## `wmfs`: Application Runtime
 
@@ -32,14 +32,14 @@ ring producer/completion dispatcher, shared-memory allocator, FD sender, and
 worker process lifecycle. It reads generated plugin manifests but does not
 import plugin implementations.
 
-`wmfs` does not depend on `wmfs-plugin` or `wmfs-tool`. A local, bundled, or C++
-isolated deployment therefore does not install the Python worker SDK or the
-interface compiler.
+`wmfs` does not depend on `wmfs-plugin` or `wmfs-tool`. Native bundled and C++
+isolated deployments therefore do not install the Python plugin SDK or the
+interface compiler; Python plugins bring the SDK as their own dependency.
 
-## `wmfs-plugin`: Python Worker SDK
+## `wmfs-plugin`: Python Plugin SDK
 
-Install `wmfs-plugin` only in an environment that executes a Python plugin
-worker:
+Python plugin distributions depend on `wmfs-plugin` for both in-process and
+isolated execution:
 
 ```console
 python -m pip install wmfs-plugin
@@ -121,7 +121,7 @@ the FD-control and optional logging channels, and shared tensor mappings.
 
 The same generated manifest, C++11 entry table, operation IDs, lifecycle hooks,
 configuration declarations, and Python metadata are execution-mode-neutral.
-Local, bundled, and isolated targets add generic mode adapters around those
+Bundled and isolated targets add generic mode adapters around those
 artifacts; they do not regenerate or maintain separate operation catalogs.
 
 ## Dependency Direction

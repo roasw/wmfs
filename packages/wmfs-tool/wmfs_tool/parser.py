@@ -79,7 +79,7 @@ def load_interface(path: Path) -> Plugin:
         {
             "root",
             "worker",
-            "local_provider",
+            "python_provider",
             "bundled_namespace",
         },
         "interface.deployment",
@@ -128,9 +128,9 @@ def load_interface(path: Path) -> Plugin:
             _required(deployment, "root", "interface.deployment"),
             "deployment.root",
         ),
-        local_provider=(
-            _dotted_name(deployment["local_provider"], "deployment.local_provider")
-            if "local_provider" in deployment
+        python_provider=(
+            _dotted_name(deployment["python_provider"], "deployment.python_provider")
+            if "python_provider" in deployment
             else None
         ),
         bundled_namespace=(

@@ -11,7 +11,7 @@ python_module = "wmfs_mode_neutral"
 [deployment]
 root = ".."
 worker = "wmfs-mode-neutral-worker"
-local_provider = "wmfs_mode_neutral.kernels"
+python_provider = "wmfs_mode_neutral.kernels"
 bundled_namespace = "wmfs_mode_neutral"
 
 [[operations]]

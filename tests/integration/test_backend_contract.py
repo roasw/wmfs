@@ -28,11 +28,24 @@ class BackendCapabilities:
     control_mode: Literal["python", "native"] | None
     out_storage: Literal["ordinary", "managed"]
     functional_autograd: tuple[str, ...]
+    bundled_implementation: Literal["python", "native"] | None = None
 
 
 BACKENDS = (
-    BackendCapabilities("local", None, "ordinary", ("matmul", "add_scalar", "svd")),
-    BackendCapabilities("bundled", None, "ordinary", ("matmul", "add_scalar", "svd")),
+    BackendCapabilities(
+        "bundled-python",
+        None,
+        "ordinary",
+        ("matmul", "add_scalar", "svd"),
+        "python",
+    ),
+    BackendCapabilities(
+        "bundled-native",
+        None,
+        "ordinary",
+        ("matmul", "add_scalar", "svd"),
+        "native",
+    ),
     BackendCapabilities(
         "isolated-python", "python", "managed", ("matmul", "add_scalar")
     ),
@@ -45,7 +58,7 @@ BACKENDS = (
 @pytest.fixture(params=BACKENDS, ids=lambda item: item.name)
 def backend(request: pytest.FixtureRequest) -> tuple[Runtime, BackendCapabilities]:
     capabilities: BackendCapabilities = request.param
-    if capabilities.name == "bundled" and not BUNDLED_AVAILABLE:
+    if capabilities.bundled_implementation == "native" and not BUNDLED_AVAILABLE:
         pytest.skip("bundled plugins were not compiled")
     if capabilities.control_mode == "native" and not NATIVE_AVAILABLE:
         pytest.skip("the native control extension was not compiled")
@@ -57,7 +70,9 @@ def backend(request: pytest.FixtureRequest) -> tuple[Runtime, BackendCapabilitie
         runtime.discover_plugins(PLUGIN_DIRECTORY)
         runtime.use_backend("isolated")
     else:
-        runtime.use_backend(capabilities.name)
+        assert capabilities.bundled_implementation is not None
+        runtime.configure_bundled(capabilities.bundled_implementation)
+        runtime.use_backend("bundled")
     try:
         yield runtime, capabilities
     finally:
@@ -183,17 +198,18 @@ def test_close_restores_reusable_unconfigured_runtime(
 
     assert runtime.backend_name is None
     runtime.load_plugins(PLUGIN_DIRECTORY)
-    runtime.use_backend("local")
+    runtime.configure_bundled("python")
+    runtime.use_backend("bundled")
     torch.testing.assert_close(
         runtime.invoke("add_scalar", torch.ones(2), 2.0), torch.full((2,), 3.0)
     )
 
 
-@pytest.mark.parametrize("name", ["local", "bundled"])
+@pytest.mark.parametrize("implementation", ["python", "native"])
 def test_in_process_initialization_and_calls_create_no_isolated_resources(
-    name: str, monkeypatch: pytest.MonkeyPatch
+    implementation: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if name == "bundled" and not BUNDLED_AVAILABLE:
+    if implementation == "native" and not BUNDLED_AVAILABLE:
         pytest.skip("bundled plugins were not compiled")
     calls: list[str] = []
 
@@ -213,24 +229,24 @@ def test_in_process_initialization_and_calls_create_no_isolated_resources(
 
     candidate = Runtime()
     candidate.load_plugins(PLUGIN_DIRECTORY)
-    provider = (
-        import_module("wmfs_reference.kernels")
-        if name == "local"
-        else import_module("wmfs._bundled")
+    provider = import_module(
+        "wmfs_reference.plugin" if implementation == "python" else "wmfs._bundled"
     )
+    lifecycle = provider.plugin if implementation == "python" else provider
     initialize_calls = 0
-    original_initialize = provider.initialize
+    original_initialize = lifecycle.initialize
 
     def initialize(*args: object, **kwargs: object) -> object:
         nonlocal initialize_calls
         initialize_calls += 1
         return original_initialize(*args, **kwargs)
 
-    monkeypatch.setattr(provider, "initialize", initialize)
+    monkeypatch.setattr(lifecycle, "initialize", initialize)
     started = time.perf_counter_ns()
-    candidate.use_backend(name)
+    candidate.configure_bundled(implementation)
+    candidate.use_backend("bundled")
     initialization_ns = time.perf_counter_ns() - started
-    candidate.use_backend(name)
+    candidate.use_backend("bundled")
     source = torch.arange(8.0).reshape(2, 4)[:, ::2]
     result = candidate.invoke("add_scalar", source, 1.0)
     large = torch.ones(1024, 1024)

@@ -90,7 +90,8 @@ def test_close_waits_for_accepted_call_and_rejects_calls_while_closing() -> None
         assert invocation.result(timeout=2) == 1
         closing.result(timeout=2)
 
-    candidate.use_backend("local")
+    candidate.configure_bundled("python")
+    candidate.use_backend("bundled")
     candidate.load_plugins(Path(__file__).parents[3] / "plugins/reference")
     torch.testing.assert_close(
         candidate.invoke("add_scalar", torch.ones(1), 2.0), torch.full((1,), 3.0)

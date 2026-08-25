@@ -47,7 +47,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     cp -R ${source}/packages/wmfs-plugin "$work/source/plugin"
     cp -R ${source}/packages/wmfs-tool "$work/source/tool"
     cp -R ${source}/plugins/reference "$work/source/reference"
-    cp -R ${source}/plugins/reference-worker "$work/source/reference-worker"
     chmod -R u+w "$work/source"
 
     python -m build --no-isolation --sdist \
@@ -58,8 +57,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
       --outdir "$work/sdist/tool" "$work/source/tool"
     python -m build --no-isolation --sdist \
       --outdir "$work/sdist/reference" "$work/source/reference"
-    python -m build --no-isolation --sdist \
-      --outdir "$work/sdist/reference-worker" "$work/source/reference-worker"
 
     python - "$work/sdist" <<'PY'
     import sys
@@ -102,11 +99,8 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "generated/python/wmfs_reference/interface.py",
             "generated/src/reference_plugin_stub.cpp",
             "pyproject.toml",
+            "wmfs_reference/plugin.py",
             "wmfs_reference/worker.py",
-        },
-        "reference-worker": {
-            "pyproject.toml",
-            "wmfs_reference_worker.py",
         },
     }
     for distribution, required in expected.items():
@@ -120,7 +114,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         assert "Version: ${releaseVersion}\n" in pkg_info
     PY
 
-    for distribution in runtime plugin tool reference reference-worker; do
+    for distribution in runtime plugin tool reference; do
       mkdir -p "$work/extracted/$distribution"
       tar -xf "$work"/sdist/"$distribution"/*.tar.gz \
         -C "$work/extracted/$distribution" --strip-components=1
@@ -132,8 +126,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
       --outdir "$work/wheel/tool" "$work/extracted/tool"
     python -m build --no-isolation --wheel \
       --outdir "$work/wheel/reference" "$work/extracted/reference"
-    python -m build --no-isolation --wheel \
-      --outdir "$work/wheel/reference-worker" "$work/extracted/reference-worker"
     CMAKE_ARGS=-DWMFS_VERSION=${versions.git} \
       python -m build --no-isolation --wheel \
       --outdir "$work/wheel/runtime" "$work/extracted/runtime"
@@ -156,14 +148,12 @@ pkgs.runCommand "wmfs-python-artifacts-check"
             "wmfs_tool-${releaseVersion}.dist-info/entry_points.txt",
         ),
         "reference": (
+            "wmfs_reference/plugin.py",
             "wmfs_reference/worker.py",
+            "wmfs_reference-${releaseVersion}.dist-info/entry_points.txt",
             "share/wmfs/plugins/reference/generated/manifest.json",
             "share/wmfs/plugins/reference/generated/include/wmfs/plugin_abi.h",
             "share/wmfs/plugins/reference/generated/python/wmfs_reference/interface.py",
-        ),
-        "reference-worker": (
-            "wmfs_reference_worker.py",
-            "wmfs_reference_worker-${releaseVersion}.dist-info/entry_points.txt",
         ),
         "runtime": (
             "wmfs/__init__.py",
@@ -202,12 +192,13 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     )
     PY
     "$work/venv-runtime/bin/python" -m pip install --no-index --no-deps \
-      "$work"/wheel/runtime/*.whl "$work"/wheel/reference/*.whl
+      "$work"/wheel/runtime/*.whl "$work"/wheel/plugin/*.whl \
+      "$work"/wheel/reference/*.whl
     "$work/venv-bundled/bin/python" -m pip install --no-index --no-deps \
-      "$work"/wheel/bundled/*.whl "$work"/wheel/reference/*.whl
+      "$work"/wheel/bundled/*.whl "$work"/wheel/plugin/*.whl \
+      "$work"/wheel/reference/*.whl
     "$work/venv-python-worker/bin/python" -m pip install --no-index --no-deps \
-      "$work"/wheel/plugin/*.whl "$work"/wheel/reference/*.whl \
-      "$work"/wheel/reference-worker/*.whl
+      "$work"/wheel/plugin/*.whl "$work"/wheel/reference/*.whl
 
     cd "$work/run"
     env -u PYTHONPATH "$work/venv-runtime/bin/python" - <<'PY'
@@ -234,10 +225,11 @@ pkgs.runCommand "wmfs-python-artifacts-check"
         if entry.group == "console_scripts"
     }
     assert scripts["wmfs-benchmark"] == "wmfs.benchmark:main"
-    assert importlib.util.find_spec("wmfs_plugin") is None
+    assert importlib.util.find_spec("wmfs_plugin") is not None
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     wmfs.runtime.load_plugins(Path(sys.prefix) / "share/wmfs/plugins/reference")
-    wmfs.runtime.use_backend("local")
+    wmfs.runtime.configure_bundled("python")
+    wmfs.runtime.use_backend("bundled")
     torch.testing.assert_close(wmfs.add_scalar(value, 2.0), value + 2.0)
     wmfs.runtime.close()
     PY
@@ -248,7 +240,6 @@ pkgs.runCommand "wmfs-python-artifacts-check"
 
     import wmfs_plugin
     import wmfs_reference
-    import wmfs_reference_worker
 
     assert importlib.util.find_spec("wmfs_plugin") is not None
     assert importlib.metadata.version("wmfs-plugin") == "${releaseVersion}"
@@ -257,10 +248,10 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     assert wmfs_reference.__version__ == "${releaseVersion}"
     scripts = {
         entry.name: entry.value
-        for entry in importlib.metadata.distribution("wmfs-reference-worker").entry_points
+        for entry in importlib.metadata.distribution("wmfs-reference").entry_points
         if entry.group == "console_scripts"
     }
-    assert scripts["wmfs-reference-worker"] == "wmfs_reference_worker:main"
+    assert scripts["wmfs-reference-worker"] == "wmfs_reference.worker:main"
     PY
 
     env -u PYTHONPATH "$work/venv-bundled/bin/python" - <<'PY'
@@ -274,7 +265,7 @@ pkgs.runCommand "wmfs-python-artifacts-check"
     import wmfs._native
 
     assert Path(wmfs.__file__).is_relative_to(Path(sys.prefix))
-    assert importlib.util.find_spec("wmfs_plugin") is None
+    assert importlib.util.find_spec("wmfs_plugin") is not None
     value = torch.arange(4, dtype=torch.float64).reshape(2, 2)
     wmfs.runtime.load_plugins(Path(sys.prefix) / "share/wmfs/plugins/reference")
     wmfs.runtime.use_backend("bundled")

@@ -124,7 +124,7 @@ def operation_context(
 
 
 class AsyncLogger:
-    """Bounded, non-throwing logger used by Python workers and local providers."""
+    """Bounded, non-throwing logger used by Python workers and plugin providers."""
 
     def __init__(
         self,

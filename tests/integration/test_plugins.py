@@ -78,7 +78,8 @@ def test_non_reference_fixture_loads_without_runtime_catalog_changes(
     monkeypatch.syspath_prepend(str(MODE_NEUTRAL_FIXTURE))
     candidate = Runtime()
     candidate.load_plugins(MODE_NEUTRAL_FIXTURE)
-    candidate.use_backend("local")
+    candidate.configure_bundled("python")
+    candidate.use_backend("bundled")
     source = torch.arange(6.0).reshape(2, 3).T
     output = torch.empty_like(source)
 

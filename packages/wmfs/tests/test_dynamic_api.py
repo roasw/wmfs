@@ -31,9 +31,10 @@ def test_operations_are_absent_before_discovery_or_backend_selection() -> None:
         exec("from wmfs import matmul", {})
 
 
-def test_selecting_local_backend_publishes_its_operations() -> None:
+def test_selecting_bundled_python_publishes_its_operations() -> None:
     wmfs.runtime.load_plugins(REFERENCE)
-    wmfs.runtime.use_backend("local")
+    wmfs.runtime.configure_bundled("python")
+    wmfs.runtime.use_backend("bundled")
 
     assert wmfs.runtime.operation_names == ("add_scalar", "matmul", "nonzero", "svd")
     assert {"add_scalar", "matmul", "nonzero", "svd"} <= set(dir(wmfs))
@@ -47,16 +48,17 @@ def test_selecting_local_backend_publishes_its_operations() -> None:
 
 def test_dynamic_operation_is_stable_until_catalog_changes() -> None:
     wmfs.runtime.load_plugins(REFERENCE)
-    wmfs.runtime.use_backend("local")
+    wmfs.runtime.configure_bundled("python")
+    wmfs.runtime.use_backend("bundled")
     operation = wmfs.matmul
 
     assert wmfs.matmul is operation
-    wmfs.runtime.use_backend("local")
+    wmfs.runtime.use_backend("bundled")
     assert wmfs.matmul is operation
 
     wmfs.runtime.close()
     wmfs.runtime.load_plugins(REFERENCE)
-    wmfs.runtime.use_backend("local")
+    wmfs.runtime.use_backend("bundled")
     assert wmfs.matmul is not operation
     with pytest.raises(RuntimeError, match="stale plugin catalog"):
         operation(torch.ones((1, 1)), torch.ones((1, 1)))

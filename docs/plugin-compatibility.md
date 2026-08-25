@@ -11,8 +11,9 @@ execution-mode-neutral deployment names, lifecycle features, enums, and the
 optional independently fingerprinted configuration schema. The runtime checks
 the manifest format, plugin ABI, protocol version, control ABI, interface and
 metadata fingerprints, configuration schema version/fingerprint, and advertised
-features before initialization. One v2 artifact set is consumed by local,
-bundled, and isolated builds.
+features before initialization. One v2 artifact set is consumed by bundled and
+isolated builds. The legacy `localProvider` deployment key names the Python
+bundled provider for format-v2 compatibility.
 
 Format v1 and plugin ABI v1 use exact integer versions. The v1 manifest is a
 closed schema: its generator identifier and field sets must match exactly, and

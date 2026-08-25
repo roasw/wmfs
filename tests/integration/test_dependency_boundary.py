@@ -1,5 +1,4 @@
 import ast
-import importlib.util
 import tomllib
 from pathlib import Path
 
@@ -28,7 +27,6 @@ def test_runtime_does_not_import_plugin_sdk() -> None:
 def test_runtime_distribution_does_not_depend_on_plugin_sdk() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     assert all(not item.startswith("wmfs-plugin") for item in project["dependencies"])
-    assert importlib.util.find_spec("wmfs_plugin") is None
 
 
 def test_sdk_and_tool_packages_are_independent() -> None:
@@ -51,6 +49,7 @@ def test_native_build_uses_runtime_owned_fixed_protocol() -> None:
 
 def test_reference_package_declares_generated_deployment_artifacts() -> None:
     reference = tomllib.loads((ROOT / "plugins/reference/pyproject.toml").read_text())
+    assert "wmfs-plugin" in reference["project"]["dependencies"]
     files = reference["tool"]["setuptools"]["data-files"]
     assert "generated/manifest.json" in files["share/wmfs/plugins/reference/generated"]
     assert (

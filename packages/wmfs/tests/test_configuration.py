@@ -180,7 +180,8 @@ def test_configuration_snapshot_and_close_reset() -> None:
     config["threads"] = 3
     assert candidate._plugin_configurations["reference"] == b'{"threads":2}'
 
-    candidate.use_backend("local")
+    candidate.configure_bundled("python")
+    candidate.use_backend("bundled")
     candidate.invoke("reference.add_scalar", __import__("torch").ones(1), 1.0)
     with pytest.raises(RuntimeError, match="before it is initialized"):
         candidate.configure_plugin("reference", {})
@@ -189,11 +190,12 @@ def test_configuration_snapshot_and_close_reset() -> None:
     assert candidate._plugin_configurations == {}
 
 
-def test_repeated_local_operations_bypass_configuration_work(
+def test_repeated_bundled_operations_bypass_configuration_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidate = _runtime_with_reference()
-    candidate.use_backend("local")
+    candidate.configure_bundled("python")
+    candidate.use_backend("bundled")
     source = __import__("torch").ones(4)
 
     monkeypatch.setattr(

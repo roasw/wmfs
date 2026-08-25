@@ -73,7 +73,7 @@ in
   bundled-package = packages.bundled-check;
   benchmark-package = benchmark;
   plugin-package = packages.wmfs-plugin;
-  reference-local-package = packages.reference-local;
+  reference-python-plugin-package = packages.reference-python-plugin;
   tool-package = packages.wmfs-tool;
   tool-tests =
     pkgs.runCommand "wmfs-tool-tests"

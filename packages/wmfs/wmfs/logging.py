@@ -367,7 +367,7 @@ _local_context: contextvars.ContextVar[LogContext] = contextvars.ContextVar(
 
 
 @contextmanager
-def local_operation_context(operation: int):
+def in_process_operation_context(operation: int):
     token = _local_context.set(LogContext(operation=operation))
     try:
         yield

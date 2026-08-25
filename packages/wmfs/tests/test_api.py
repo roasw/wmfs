@@ -9,10 +9,11 @@ from wmfs.runtime import Runtime
 
 
 @pytest.fixture(autouse=True)
-def local_runtime() -> None:
+def bundled_runtime() -> None:
     runtime.close()
     runtime.load_plugins(Path(__file__).parents[3] / "plugins/reference")
-    runtime.use_backend("local")
+    runtime.configure_bundled("python")
+    runtime.use_backend("bundled")
     try:
         yield
     finally:
@@ -73,8 +74,7 @@ def test_nonzero_matches_torch() -> None:
     torch.testing.assert_close(nonzero(a), torch.nonzero(a))
 
 
-def test_local_tensor_constructors_return_native_torch_tensors() -> None:
-    runtime.use_backend("local")
+def test_bundled_tensor_constructors_return_native_torch_tensors() -> None:
 
     uninitialized = empty(2, 3, dtype=torch.float64)
     zeroed = zeros((2, 3), dtype=torch.float64)
@@ -93,7 +93,6 @@ def test_local_tensor_constructors_return_native_torch_tensors() -> None:
 
 
 def test_tensor_constructors_support_scalar_shapes() -> None:
-    runtime.use_backend("local")
     scalar = ones(())
 
     assert scalar.shape == ()
@@ -102,7 +101,7 @@ def test_tensor_constructors_support_scalar_shapes() -> None:
         ones()
 
 
-def test_local_operations_support_reusable_outputs() -> None:
+def test_bundled_operations_support_reusable_outputs() -> None:
     a = torch.arange(6, dtype=torch.float64).reshape(2, 3)
     b = torch.arange(6, dtype=torch.float64).reshape(3, 2)
     product = torch.empty((2, 2), dtype=torch.float64)
@@ -124,10 +123,15 @@ def test_local_operations_support_reusable_outputs() -> None:
     torch.testing.assert_close(result[0] @ torch.diag(result[1]) @ result[2], a)
 
 
-def test_runtime_uses_explicitly_selected_local_backend() -> None:
-    assert runtime.backend_name == "local"
-    runtime.use_backend("local")
-    assert runtime.backend_name == "local"
+def test_runtime_uses_explicitly_selected_bundled_backend() -> None:
+    assert runtime.backend_name == "bundled"
+    runtime.use_backend("bundled")
+    assert runtime.backend_name == "bundled"
+
+
+def test_runtime_rejects_removed_local_backend() -> None:
+    with pytest.raises(ValueError, match="Unknown backend 'local'"):
+        runtime.use_backend("local")
 
 
 def test_runtime_rejects_unknown_backend() -> None:

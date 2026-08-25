@@ -171,17 +171,15 @@ in batches. In pooled mode it resets the whole region, advances its generation,
 and places it in the size-matched pool; in arena mode it returns and coalesces
 the allocation's subrange without recycling the arena mapping.
 
-## Local And Bundled Differences
+## Bundled And Isolated Differences
 
-- `LocalBackend.invoke` calls PyTorch directly and bypasses shared memory and
-  rings.
-- `BundledBackend.invoke` calls the same C++ reference kernels in process through
-  `wmfs._bundled`, bypassing shared memory and rings.
+- `BundledBackend.invoke` calls either a Python SDK provider or a native
+  `wmfs._bundled` provider in process, bypassing shared memory and rings.
 - Comparing isolated against bundled in `wmfs-benchmark` most directly measures
   process-isolation overhead for the same native kernels.
 
-All modes consume the same generated operation catalog and lifecycle contract.
-Local and bundled initialization receive the same logical canonical
+Both modes consume the same generated operation catalog and lifecycle contract.
+Bundled initialization receives the same logical canonical
 configuration and logger service but create no worker, rings, shared allocator,
 FD channel, or mappings. Disabled logging selects a null logger during
 initialization, so calls perform no socket, queue, serialization, or clock work.

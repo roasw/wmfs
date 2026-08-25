@@ -32,8 +32,9 @@ dependency graph.
 ## Development Build
 
 The `wmfs` Python distribution lives under `packages/wmfs` and owns the runtime
-protocol records and codecs. The independent Python worker SDK lives under
-`packages/wmfs-plugin` and carries compatible worker-side codecs.
+protocol records and codecs. The independent Python plugin SDK lives under
+`packages/wmfs-plugin` and supplies both in-process bindings and compatible
+worker-side codecs.
 Root-level CMake, C++ sources, tests, plugins, Nix definitions, and benchmarks
 remain shared repository infrastructure.
 
@@ -169,7 +170,7 @@ packages, checks, and development shells together.
 ```python
 import wmfs
 
-wmfs.runtime.use_backend("local")
+wmfs.runtime.use_backend("bundled")
 a = wmfs.randn(4, 4)
 b = wmfs.randn(4, 4)
 c = wmfs.matmul(a, b)
@@ -177,32 +178,27 @@ u, s, vh = wmfs.svd(c)
 d = wmfs.add_scalar(c, 1.0)
 ```
 
-The `local` backend is the direct Torch baseline. A new runtime has no selected
-backend: operation attributes do not exist until a backend is selected or
-plugin discovery publishes them. A runtime built with bundled plugins also
-exposes `bundled` without changing the public calls:
+A new runtime has no selected backend: operation attributes do not exist until
+bundled provider selection or plugin discovery publishes them. Bundled mode
+selects an in-process Python or native provider without changing public calls:
 
 ```python
 wmfs.runtime.use_backend("bundled")
 c = wmfs.matmul(a, b)
 ```
 
-The bundled extension is loaded lazily on its first invocation. It calls the
-same transport-neutral C++ kernels as the isolated worker but does not create a
-worker, allocate shared memory, or transfer file descriptors.
+Use `runtime.configure_bundled("python")` or `"native"` before selection to
+force an implementation; the default `"auto"` prefers a compiled native
+provider and otherwise uses the Python plugin facade. Neither creates a worker,
+shared memory, rings, or descriptor channels.
 Bundled plugins must use the application's compiler ABI, glibc, LibTorch, and
 dependency versions, and a plugin failure can terminate the application.
 
-The direct `local` backend is retained both as the benchmark reference and for
-Torch's unrestricted native operation semantics. Bundled dispatch has a small
-fixed custom-operator cost, so replacing `local` would not improve the existing
-three built-in operations.
-
 ## Plugin Discovery
 
-Only Python worker distributions depend on the standalone `wmfs-plugin`
-distribution; the main runtime, C++ workers, and generated C++ artifacts do not.
-The SDK source does not import `wmfs`. For v0.1 its invocation,
+Every Python plugin depends on the standalone `wmfs-plugin` distribution; the
+main runtime, C++ workers, and generated C++ artifacts do not. The SDK source
+does not import `wmfs`. For v0.1 its invocation,
 shared-memory transport, and worker layers deliberately target Torch CPU
 tensors. The fixed protocol and metadata model are Torch-independent and can be
 imported by control-plane tooling without loading Torch. Both layers remain in
@@ -226,8 +222,9 @@ The operation-scoped context carries metadata, an invocation ID, ordinary input
 tensors, writable output tensors, and scalar values. Its `input()`, `output()`,
 and `scalar()` accessors accept metadata names or positional indices. Plugin
 kernels do not receive runtime object-store, mapping-cache, RPC, memfd, or
-allocator internals. The reference Python worker under `plugins/reference`
-demonstrates the complete adapter.
+allocator internals. The reference implementation under `plugins/reference`
+contains the ordinary kernels, generated adapter, SDK binding, and Python worker
+entry point in one distribution.
 
 Plugin authors declare operation signatures, numeric IDs, access, and output
 shape/dtype expressions in `interface.toml`, then commit deterministic artifacts:
@@ -257,7 +254,7 @@ remains available only while exactly one plugin provides that name; collisions
 make the unqualified name ambiguous without preventing either plugin from
 registering. Internal operations remain available only to runtime machinery.
 Import or access dynamic operations after discovery; importing `wmfs.matmul`
-before discovery or explicit local/bundled selection fails.
+before discovery or explicit bundled selection fails.
 
 Discovery is eager: it starts one worker per plugin, validates its metadata, and
 retains that session for isolated execution. A discovery failure closes every
@@ -280,8 +277,8 @@ runtime.configure_plugin("reference", {"threads": 4})
 It enables worker-free schema introspection and configuration before choosing an
 execution mode. `configure_plugin` accepts `None` as canonical `{}`, validates
 without inserting defaults, and freezes the exact canonical bytes for that
-plugin initialization. Configuration must precede `use_backend("local")`,
-`use_backend("bundled")`, or `discover_plugins`; a replacement isolated worker
+plugin initialization. Configuration must precede `use_backend("bundled")` or
+`discover_plugins`; a replacement isolated worker
 receives the same bytes. Calling `close()` runs enabled shutdown hooks, closes
 logging services, and clears loaded manifests and configured snapshots.
 
@@ -305,7 +302,7 @@ runtime.configure_plugin(
 serializer, or sink thread. `centralized` uses a dedicated nonblocking
 `SOCK_SEQPACKET` channel and emits `wmfs.worker.<plugin>` Python log records;
 `worker_file` uses a bounded worker-local queue and file. Logs never share the
-command, completion, or FD-control channels. All three execution modes invoke
+command, completion, or FD-control channels. Both execution modes invoke
 the same logical generated `initialize`/`shutdown` contract once per initialized
 plugin session; configuration and logger services are not operation arguments.
 
@@ -440,19 +437,19 @@ process-level plugin isolation for that code.
 The packaged reference worker implements the server control plane in C++20 and
 constructs ATen tensor views directly over mapped memfds. It executes the
 reference kernels with LibTorch, removing asyncio and Python descriptor
-conversion, and Python-to-Torch dispatch from the worker hot path. The previous
-Python implementation remains available as the `reference-python-worker` Nix
-package for comparison and fallback testing.
+conversion, and Python-to-Torch dispatch from the worker hot path. The same
+`wmfs-reference` Python plugin package exposes a worker entry point for
+comparison and fallback testing.
 
 `matmul`, `svd`, `add_scalar`, and the dynamic-output `nonzero` operation expose
-the same generated catalog in local, bundled, and isolated modes. One generated
+the same generated catalog in bundled and isolated modes. One generated
 manifest and plugin entry table serve all modes; backend selection supplies the
 adapter and does not produce mode-specific interfaces. The current prototype
 supports contiguous CPU tensors and
 supports multiple in-flight ring submissions per worker. Repeated calls reuse
 the established rings and cached arena or read-only pooled mappings.
 
-Like PyTorch, these operations accept an optional `out=` argument. Local mode
+Like PyTorch, these operations accept an optional `out=` argument. Bundled mode
 accepts an ordinary compatible Torch tensor. Isolated mode requires a live
 managed result from the same runtime so the worker can write it without a copy:
 
@@ -470,7 +467,7 @@ Isolated operations that advertise a VJP participate in ordinary PyTorch
 autograd graphs. PyTorch schedules the graph in the main process; WMFS invokes
 the plugin's forward and VJP operations in its isolated worker. The reference
 plugin provides VJPs for `matmul` and `add_scalar`, so they can be chained with
-local Torch operations and with each other before calling `backward()`. `svd`
+ordinary Torch operations and with each other before calling `backward()`. `svd`
 currently raises when an isolated differentiable call is requested because it
 does not advertise a VJP. The initial contract supports first-order reverse
 mode only and rejects higher-order gradients, mutable differentiable inputs,
@@ -501,7 +498,7 @@ nix develop ./environments/nixos-25.05
 
 ## Benchmarking
 
-Run the local, bundled, and isolated benchmark with the packaged Release
+Run the bundled Python, bundled native, and isolated benchmark with the packaged Release
 runtime, bundled reference plugin, and worker. The recipe uses the packaged
 benchmark app, so it can be invoked from outside the checkout and does not use
 source files from the current directory:
@@ -518,9 +515,9 @@ requires an explicit `--plugin-directory`; it never defaults to `./plugins`.
 
 The default run covers small, medium, and large inputs for `matmul`, `svd`, and
 the deliberately cheap `add_scalar` operation. It instantiates and warms all
-three backends, verifies equivalent results, and rotates their measurement
+three implementations, verifies equivalent results, and rotates their measurement
 order. It reports backend-keyed median and standard deviation plus isolated
-overhead relative to both bundled and local execution. Every primary timer
+overhead relative to both bundled implementations. Every primary timer
 stops when its backend returns; result destruction, collection, buffer
 retirement, and allocator reset are excluded and reported as post-return
 cleanup. JSON output also records nearest-rank p95 and backend-keyed 1,000-call
@@ -532,8 +529,8 @@ cleanup-inclusive throughput includes per-call result destruction and
 reclamation when outputs are not reused. These are deliberately distinct
 boundaries and neither measurement is batched.
 
-Separate diagnostics report absent/configured initialization for local,
-bundled, and isolated execution; disabled/centralized/worker-file isolated
+Separate diagnostics report absent/configured initialization for bundled
+Python, bundled native, and isolated execution; disabled/centralized/worker-file isolated
 initialization; fixed startup-control and ring round trips; known and dynamic
 output paths; direct versus opt-in profiled calls; shared-memory
 allocation, uncached input preparation, first-use FD passing and worker mapping,
@@ -550,7 +547,7 @@ associated invocation, so adding components does not reconstruct end-to-end
 time.
 
 Profiled invocations additionally separate scalar binding, output-plan
-evaluation, local submission queue and enqueue, capacity backpressure, worker
+evaluation, runtime submission queue and enqueue, capacity backpressure, worker
 wakeup and queue, input/output view construction, kernel execution, completion
 wakeup, and result materialization. The JSON report groups diagnostics by
 provenance: Python frontend, ring/control, mapping/transport, allocation,
@@ -570,13 +567,11 @@ descriptors. Process scheduling and ring wakeups dominate cheap calls; larger
 improvements require output reuse, batching, or changing the eager execution
 model.
 
-Use the three backends as controlled comparisons on the same machine, build,
-dtype, thread count, operation shape, warmup, and iteration count. Local versus
-bundled measures plugin/native-kernel integration cost, although local PyTorch
-and the plugin entry point are not identical call paths. Bundled versus isolated
-is the primary isolation comparison because both use the same
-transport-neutral C++ kernel. Local versus isolated remains the user-facing
-end-to-end comparison. Compare medians together with p95 and standard deviation,
+Use the three implementations as controlled comparisons on the same machine,
+build, dtype, thread count, operation shape, warmup, and iteration count.
+Bundled Python versus bundled native measures provider integration cost. Bundled
+native versus isolated is the primary process-isolation comparison because both
+use the same transport-neutral C++ kernel. Compare medians together with p95 and standard deviation,
 repeat runs before attributing small differences, and use reusable `out=` runs
 to separate output lifetime from mandatory eager-call control cost.
 

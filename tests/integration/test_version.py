@@ -14,7 +14,6 @@ def test_distribution_versions_are_derived_from_git() -> None:
         ROOT / "pyproject.toml",
         ROOT / "packages/wmfs-plugin/pyproject.toml",
         ROOT / "plugins/reference/pyproject.toml",
-        ROOT / "plugins/reference-worker/pyproject.toml",
     )
     for project in projects:
         metadata = tomllib.loads(project.read_text())["project"]
@@ -28,13 +27,8 @@ def test_distribution_versions_are_derived_from_git() -> None:
     local_dependencies = tomllib.loads(projects[2].read_text())["project"][
         "dependencies"
     ]
-    worker_dependencies = tomllib.loads(projects[3].read_text())["project"][
-        "dependencies"
-    ]
-    assert "wmfs-plugin" not in local_dependencies
-    assert "wmfs-plugin" in worker_dependencies
-    assert "wmfs-reference" in worker_dependencies
-    assert not any(item.startswith("wmfs-plugin==") for item in worker_dependencies)
+    assert "wmfs-plugin" in local_dependencies
+    assert not any(item.startswith("wmfs-plugin==") for item in local_dependencies)
 
     root_metadata = tomllib.loads(projects[0].read_text())
     assert root_metadata["tool"]["dynamic-metadata"] == [
