@@ -73,12 +73,10 @@ def test_isolated_constructor_allocates_directly_in_shared_memory(
     torch.testing.assert_close(source.grad, torch.ones_like(source))
 
 
-@pytest.mark.parametrize("control_mode", ["native", "python"])
 def test_isolated_constructors_avoid_invocation_ingress_copy(
-    monkeypatch: pytest.MonkeyPatch, control_mode: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidate = Runtime()
-    candidate.configure_control(control_mode)
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
     try:
@@ -104,12 +102,10 @@ def test_isolated_constructors_avoid_invocation_ingress_copy(
         candidate.close()
 
 
-@pytest.mark.parametrize("control_mode", ["native", "python"])
 def test_isolated_managed_stride_views_are_zero_copy(
-    monkeypatch: pytest.MonkeyPatch, control_mode: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidate = Runtime()
-    candidate.configure_control(control_mode)
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
     try:
@@ -151,10 +147,8 @@ def test_isolated_add_scalar_matches_dtype_promotion(isolated_runtime: None) -> 
     assert result.dtype == torch.float32
 
 
-@pytest.mark.parametrize("control_mode", ["native", "python"])
-def test_isolated_nonzero_allocates_data_dependent_output(control_mode: str) -> None:
+def test_isolated_nonzero_allocates_data_dependent_output() -> None:
     candidate = Runtime()
-    candidate.configure_control(control_mode)
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
     try:
@@ -180,9 +174,8 @@ def test_isolated_nonzero_allocates_data_dependent_output(control_mode: str) -> 
         candidate.close()
 
 
-def test_python_reference_hot_path_does_not_call_operation_rpc() -> None:
+def test_reference_hot_path_does_not_call_operation_rpc() -> None:
     candidate = Runtime()
-    candidate.configure_control("python")
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
 
@@ -205,13 +198,11 @@ def test_python_reference_hot_path_does_not_call_operation_rpc() -> None:
         candidate.close()
 
 
-@pytest.mark.parametrize("control_mode", ["native", "python"])
 def test_concurrent_ring_submissions_are_matched_to_callers(
-    monkeypatch: pytest.MonkeyPatch, control_mode: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("WMFS_RING_CAPACITY", "2")
     candidate = Runtime()
-    candidate.configure_control(control_mode)
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
     source = torch.arange(16, dtype=torch.float64)
@@ -324,10 +315,8 @@ def test_isolated_out_upgrades_prior_read_only_mapping(
     torch.testing.assert_close(reusable, source + 2.0)
 
 
-@pytest.mark.parametrize("control_mode", ["native", "python"])
-def test_isolated_vjps_chain_with_torch_autograd(control_mode: str) -> None:
+def test_isolated_vjps_chain_with_torch_autograd() -> None:
     candidate = Runtime()
-    candidate.configure_control(control_mode)
     candidate.discover_plugins(PLUGIN_DIRECTORY)
     candidate.use_backend("isolated")
     a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)

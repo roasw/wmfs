@@ -38,7 +38,7 @@ def _backend(
     registry.register(metadata)
     manifest = PluginManifest("test", "1", metadata, Path(), "Test", "test", Path())
     monkeypatch.setattr(isolated_module, "WorkerSession", session_type)
-    return IsolatedBackend((manifest,), registry, control_mode="python")
+    return IsolatedBackend((manifest,), registry)
 
 
 def test_concurrent_first_calls_create_one_plugin_session(
@@ -139,9 +139,7 @@ def test_backend_propagates_deadlines_to_python_session(
     registry.register(metadata)
     manifest = PluginManifest("test", "1", metadata, Path(), "Test", "test", Path())
     monkeypatch.setattr(isolated_module, "WorkerSession", Session)
-    backend = IsolatedBackend(
-        (manifest,), registry, control_mode="python", deadlines=deadlines
-    )
+    backend = IsolatedBackend((manifest,), registry, deadlines=deadlines)
     try:
         backend._new_session("test")
         assert received == [deadlines]
@@ -326,6 +324,6 @@ def test_discovery_failure_closes_all_partial_sessions_and_buffers(
     monkeypatch.setattr(isolated_module, "BufferManager", Buffers)
 
     with pytest.raises(RuntimeError, match="metadata does not match|failed to start"):
-        IsolatedBackend.discover(manifests, control_mode="python")
+        IsolatedBackend.discover(manifests)
 
     assert closed == ["first", "buffers"]

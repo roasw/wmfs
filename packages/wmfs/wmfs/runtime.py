@@ -81,7 +81,6 @@ class Runtime:
         self._operation_generation = 0
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
-        self._control_mode = "auto"
         self._bundled_implementation = "auto"
         self._deadlines = DEFAULT_TRANSPORT_DEADLINES
 
@@ -280,7 +279,6 @@ class Runtime:
                 manifests,
                 memory_mode=self._memory_mode,
                 arena_bytes=self._arena_bytes,
-                control_mode=self._control_mode,
                 deadlines=self._deadlines,
             )
             try:
@@ -327,20 +325,6 @@ class Runtime:
                 raise ValueError("Memory mode must be 'pooled' or 'arena'")
             self._memory_mode = mode
             self._arena_bytes = arena_bytes
-
-    def configure_control(self, mode: str = "auto") -> None:
-        """Select the isolated control path before plugin discovery.
-
-        Args:
-            mode: ``"native"``, ``"python"``, or ``"auto"``.
-        """
-        with self._condition:
-            self._ensure_open()
-            if "isolated" in self._backends:
-                raise RuntimeError("Configure control before discovering plugins")
-            if mode not in {"auto", "native", "python"}:
-                raise ValueError("Control mode must be 'auto', 'native', or 'python'")
-            self._control_mode = mode
 
     def configure_bundled(self, implementation: str = "auto") -> None:
         """Select Python, native, or automatic in-process plugin providers."""
@@ -609,7 +593,6 @@ class Runtime:
             self._operation_generation += 1
             self._memory_mode = "pooled"
             self._arena_bytes = None
-            self._control_mode = "auto"
             self._bundled_implementation = "auto"
             self._deadlines = DEFAULT_TRANSPORT_DEADLINES
             self._state = "open"

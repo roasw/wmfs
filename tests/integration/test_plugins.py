@@ -146,9 +146,8 @@ def test_discovery_publishes_dynamic_module_operations() -> None:
         wmfs.runtime.close()
 
 
-@pytest.mark.parametrize("control_mode", ["python", "native"])
 def test_discovery_session_is_reused_for_first_invocation(
-    monkeypatch: pytest.MonkeyPatch, control_mode: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     starts = 0
     module = worker_process_module
@@ -161,7 +160,6 @@ def test_discovery_session_is_reused_for_first_invocation(
 
     monkeypatch.setattr(module, "_start_worker", counted_start)
     candidate = Runtime()
-    candidate.configure_control(control_mode)
     try:
         candidate.discover_plugins(PLUGIN_DIRECTORY)
         backend = candidate._backends["isolated"]

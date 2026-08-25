@@ -71,7 +71,7 @@ test-all profile=build_type:
     just _test-root-layer "{{ profile }}" contract
     just _test-root-layer "{{ profile }}" integration
     just _test-sdk
-    just _test-python-worker
+    just _test-python-worker "{{ profile }}"
     just _test-tool
     just _test-root-layer "{{ profile }}" native
     ctest --test-dir "{{ root }}/build/{{ profile }}" --output-on-failure
@@ -94,9 +94,10 @@ _test-sdk:
       pytest -q "{{ root }}/packages/wmfs-plugin/tests"
 
 [private]
-_test-python-worker:
+_test-python-worker profile=build_type:
     env \
-      PYTHONPATH="{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
+      PATH="{{ root }}/output/{{ profile }}/bin:$PATH" \
+      PYTHONPATH="{{ root }}/output/{{ profile }}:{{ root }}/packages/wmfs:{{ root }}/packages/wmfs-plugin${PYTHONPATH:+:$PYTHONPATH}" \
       pytest -q "{{ root }}/tests/python_worker"
 
 [private]
@@ -143,7 +144,6 @@ benchmark-help:
 _benchmark mode format output:
     #!/usr/bin/env bash
     arguments=(
-      --control-mode native
       --memory-mode "{{ mode }}"
       --format "{{ format }}"
     )

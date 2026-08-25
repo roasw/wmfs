@@ -16,7 +16,7 @@ user script
   -> Runtime.invoke
   -> IsolatedBackend.invoke
   -> bind_invocation / BufferManager
-  -> NativeWorkerSession or WorkerSession
+  -> WorkerSession with native transport
   -> batched SCM_RIGHTS mapping control
   -> command ring publication + eventfd
   -> reference worker ring consumer
@@ -72,7 +72,7 @@ Read next:
 
 The transport-neutral planner binds tensor and scalar arguments, applies access
 metadata, computes output shape/dtype plans, and validates reusable `out=`
-tensors. Python and native control paths consume the same plan.
+tensors. Bundled and isolated paths consume the same plan.
 
 ```{literalinclude} ../packages/wmfs/wmfs/invocation.py
 ---
@@ -120,17 +120,12 @@ liveness, shutdown, and transactional FD batches.
 
 Important implementations:
 
-- `packages/wmfs/wmfs/transport/native_worker.py`, `NativeWorkerSession`:
-  Python orchestration around the nanobind native control and ring path.
+- `packages/wmfs/wmfs/transport/worker_process.py`, `WorkerSession`: startup and
+  process orchestration around the mandatory native transport client.
 - `src/native_session.cpp`: native command publication, completion dispatch,
   concurrent submission matching, and benchmark timing boundaries.
-- `packages/wmfs/wmfs/transport/worker_process.py`, `_RingClient`: equivalent
-  Python-control submission and completion dispatch.
 - `src/ring.cpp`: native SPSC publication, backpressure, and eventfd waits.
-- `packages/wmfs/wmfs/transport/worker_process.py`, `WorkerSession`: equivalent
-  Python orchestration around the same ring protocol.
-- `packages/wmfs/wmfs/transport/fd_broker.py`, `FdSender.ensure_mapped_many`:
-  Python batched FD sender.
+- `src/native_session.cpp`: native batched FD sender and completion dispatcher.
 - `packages/wmfs/wmfs/protocol/control.py`: startup, lifecycle, and batched
   buffer-transfer protocol.
 - `inc/wmfs/protocol/control.h`: language-neutral fixed control ABI.

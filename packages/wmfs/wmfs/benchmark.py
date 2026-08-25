@@ -24,7 +24,6 @@ from wmfs.logging import LoggingOptions
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationRegistry, PluginMetadata
-from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import WorkerSession
 
 _TIERS = ("small", "medium", "large")
@@ -161,7 +160,6 @@ class BenchmarkConfig:
     seed: int = 1234
     memory_mode: str = "pooled"
     arena_bytes: int | None = None
-    control_mode: str = "native"
     high_frequency_iterations: int = 1000
     bundled_backend: object | None = field(default=None, repr=False, compare=False)
 
@@ -183,8 +181,6 @@ class BenchmarkConfig:
             raise ValueError("Unknown benchmark size tier")
         if self.memory_mode not in {"pooled", "arena"}:
             raise ValueError("Unknown benchmark memory mode")
-        if self.control_mode not in {"native", "python"}:
-            raise ValueError("Unknown benchmark control mode")
         if any(
             self.sizes[operation][tier] <= 0
             for operation in self.operations
@@ -293,7 +289,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     report = {
-        "schema_version": 12,
+        "schema_version": 13,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -329,7 +325,6 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "dtype": str(config.dtype).removeprefix("torch."),
             "seed": config.seed,
             "memory_mode": config.memory_mode,
-            "control_mode": config.control_mode,
             "high_frequency_iterations": config.high_frequency_iterations,
             "arena_bytes": config.arena_bytes,
             "sizes": config.sizes,
@@ -376,8 +371,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
 
 def validate_report(report: dict[str, Any]) -> None:
     """Validate the current benchmark report's required measurement groups."""
-    if report.get("schema_version") != 12:
-        raise ValueError("Benchmark report is not schema version 12")
+    if report.get("schema_version") != 13:
+        raise ValueError("Benchmark report is not schema version 13")
     if report.get("measurement_status") and not report.get("operations"):
         if not report.get("historical_report"):
             raise ValueError("Unmeasured report must identify its historical baseline")
@@ -449,7 +444,7 @@ def render_table(report: dict[str, Any]) -> str:
         (
             f"dtype: {environment['dtype']}; threads: {environment['threads']}; "
             f"memory: {report['configuration']['memory_mode']}; "
-            f"control: {report['configuration']['control_mode']}"
+            "transport: native"
         ),
         "",
         "Primary comparison (milliseconds; isolated inputs are already mapped)",
@@ -997,7 +992,7 @@ def _benchmark_case(
 def _benchmark_diagnostics(
     manifest: Any,
     metadata: PluginMetadata,
-    session: WorkerSession | NativeWorkerSession,
+    session: WorkerSession,
     buffers: BufferManager,
     operation: str,
     args: tuple[object, ...],
@@ -1301,9 +1296,7 @@ def _new_session(
     buffers: BufferManager,
     metadata: PluginMetadata | None,
     config: BenchmarkConfig,
-) -> WorkerSession | NativeWorkerSession:
-    if config.control_mode == "native":
-        return NativeWorkerSession(manifest, buffers, metadata)
+) -> WorkerSession:
     return WorkerSession(manifest, buffers, metadata)
 
 
@@ -1314,7 +1307,7 @@ def _benchmark_session(
     config: BenchmarkConfig,
     *,
     memory_mode: str | None = None,
-) -> Iterator[tuple[BufferManager, WorkerSession | NativeWorkerSession]]:
+) -> Iterator[tuple[BufferManager, WorkerSession]]:
     with BufferManager(
         mode=memory_mode or config.memory_mode,
         arena_bytes=config.arena_bytes,
@@ -1575,9 +1568,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--memory-mode", choices=("pooled", "arena"), default="pooled")
     parser.add_argument("--arena-bytes", type=int)
-    parser.add_argument(
-        "--control-mode", choices=("native", "python"), default="native"
-    )
     parser.add_argument("--high-frequency-iterations", type=int, default=1000)
     parser.add_argument("--format", choices=("table", "json"), default="table")
     parser.add_argument("--output", type=Path)
@@ -1606,7 +1596,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=arguments.seed,
         memory_mode=arguments.memory_mode,
         arena_bytes=arguments.arena_bytes,
-        control_mode=arguments.control_mode,
         high_frequency_iterations=arguments.high_frequency_iterations,
     )
     report = run_benchmarks(config)

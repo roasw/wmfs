@@ -35,7 +35,12 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "schema"), (("benchmark-0.1.0", 9), ("benchmark-master", 11))
+    ("name", "schema"),
+    (
+        ("benchmark-0.1.0", 9),
+        ("benchmark-a137cb1", 11),
+        ("benchmark-3b2c5c4", 12),
+    ),
 )
 def test_historical_reports_retain_their_original_schema(
     name: str, schema: int
@@ -130,13 +135,12 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
             backpressure_iterations=4,
             diagnostic_iterations=1,
             high_frequency_iterations=2,
-            control_mode="python",
             bundled_backend=BundledBackend("python"),
         )
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 12
+    assert report["schema_version"] == 13
     assert report["configuration"]["plugin_directory"] == str(
         PLUGIN_DIRECTORY.resolve()
     )
@@ -154,7 +158,6 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert report["ring_control"]["round_trip_ms"]["count"] == 1
     assert report["ring_capacity_pressure"]["round_trip_ms"]["count"] == 4
     assert report["ring_capacity_pressure"]["backpressure_wait_ms"]["p95_ms"] > 0
-    assert report["configuration"]["control_mode"] == "python"
     assert report["high_frequency_add_scalar"]["iterations"] == 2
     assert set(report["high_frequency_add_scalar"]["backends"]) == {
         "bundled_python",

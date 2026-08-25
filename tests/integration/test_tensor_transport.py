@@ -2,7 +2,6 @@ import gc
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -14,23 +13,19 @@ import wmfs.transport.ring as ring_module
 import wmfs.transport.worker_process as worker_process_module
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
-from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.ring import COMMAND_INVOKE, COMMAND_PLAN_OUTPUTS
 from wmfs.transport.worker_process import WorkerSession, inspect_plugin
 
 PLUGIN_DIRECTORY = Path(__file__).parents[2] / "plugins"
 
 
-@pytest.mark.parametrize("session_type", [WorkerSession, NativeWorkerSession])
 def test_normal_invocation_reads_no_optional_host_profile_clocks(
-    monkeypatch: pytest.MonkeyPatch, session_type: type[WorkerSession]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    if session_type is NativeWorkerSession and find_spec("wmfs._native") is None:
-        pytest.skip("native control extension was not compiled")
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
         source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
-        session = session_type(manifest, manager, inspect_plugin(manifest))
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
 
         def unexpected_clock() -> int:
             pytest.fail("normal invocation read an optional profiling clock")
@@ -149,16 +144,11 @@ def test_svd_outputs_are_transferred_in_one_mapping_batch() -> None:
             session.close()
 
 
-@pytest.mark.parametrize("session_type", [WorkerSession, NativeWorkerSession])
 @pytest.mark.parametrize("operation", ["matmul", "svd", "add_scalar"])
-def test_known_outputs_submit_exactly_one_invoke_command(
-    operation: str, session_type: type[WorkerSession]
-) -> None:
-    if session_type is NativeWorkerSession and find_spec("wmfs._native") is None:
-        pytest.skip("native control extension was not compiled")
+def test_known_outputs_submit_exactly_one_invoke_command(operation: str) -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
-        session = session_type(manifest, manager, inspect_plugin(manifest))
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         assert session._ring_client is not None
         submitted: list[int] = []
         original = session._ring_client.submit
@@ -181,15 +171,10 @@ def test_known_outputs_submit_exactly_one_invoke_command(
         assert submitted == [COMMAND_INVOKE]
 
 
-@pytest.mark.parametrize("session_type", [WorkerSession, NativeWorkerSession])
-def test_dynamic_output_submits_plan_then_invoke(
-    session_type: type[WorkerSession],
-) -> None:
-    if session_type is NativeWorkerSession and find_spec("wmfs._native") is None:
-        pytest.skip("native control extension was not compiled")
+def test_dynamic_output_submits_plan_then_invoke() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
-        session = session_type(manifest, manager, inspect_plugin(manifest))
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         assert session._ring_client is not None
         submitted: list[int] = []
         original = session._ring_client.submit
@@ -206,7 +191,7 @@ def test_dynamic_output_submits_plan_then_invoke(
         assert submitted == [COMMAND_PLAN_OUTPUTS, COMMAND_INVOKE]
 
 
-def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
+def test_session_reserves_reusable_output_for_exclusive_write() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
         source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
@@ -240,7 +225,7 @@ def test_python_session_reserves_reusable_output_for_exclusive_write() -> None:
             session.close()
 
 
-def test_python_session_close_waits_for_active_submission() -> None:
+def test_session_close_waits_for_active_submission() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
         session = WorkerSession(manifest, manager, inspect_plugin(manifest))

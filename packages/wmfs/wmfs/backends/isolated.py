@@ -1,4 +1,5 @@
 import threading
+from importlib.util import find_spec
 
 import torch
 
@@ -9,7 +10,6 @@ from wmfs.registry import EnvironmentMetadata, OperationRegistry
 from wmfs.tensors import TensorFactory
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.errors import WorkerTransportError
-from wmfs.transport.native_worker import NativeWorkerSession, native_available
 from wmfs.transport.worker_process import WorkerSession
 
 
@@ -23,15 +23,13 @@ class IsolatedBackend:
         *,
         memory_mode: str = "pooled",
         arena_bytes: int | None = None,
-        control_mode: str = "auto",
         deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> None:
         self._registry = registry
         self._buffers = BufferManager(mode=memory_mode, arena_bytes=arena_bytes)
         self._manifests = {manifest.name: manifest for manifest in manifests}
-        self._control_mode = control_mode
         self._deadlines = deadlines
-        self._sessions: dict[str, WorkerSession | NativeWorkerSession] = {}
+        self._sessions: dict[str, WorkerSession] = {}
         self._condition = threading.Condition()
         self._creating: set[str] = set()
         self._inflight = 0
@@ -49,7 +47,6 @@ class IsolatedBackend:
         *,
         memory_mode: str = "pooled",
         arena_bytes: int | None = None,
-        control_mode: str = "auto",
         deadlines: TransportDeadlines = DEFAULT_TRANSPORT_DEADLINES,
     ) -> tuple[OperationRegistry, "IsolatedBackend"]:
         registry = OperationRegistry()
@@ -58,7 +55,6 @@ class IsolatedBackend:
             registry,
             memory_mode=memory_mode,
             arena_bytes=arena_bytes,
-            control_mode=control_mode,
             deadlines=deadlines,
         )
         try:
@@ -205,7 +201,7 @@ class IsolatedBackend:
         if failures:
             raise failures[0]
 
-    def _acquire_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+    def _acquire_session(self, plugin_name: str) -> WorkerSession:
         with self._condition:
             while True:
                 if self._state != "open":
@@ -243,18 +239,10 @@ class IsolatedBackend:
                 self._condition.notify_all()
         raise RuntimeError("Isolated backend is closed")
 
-    def _new_session(self, plugin_name: str) -> WorkerSession | NativeWorkerSession:
+    def _new_session(self, plugin_name: str) -> WorkerSession:
         expected = self._registry.plugin(plugin_name)
-        use_native = self._control_mode == "native" or (
-            self._control_mode == "auto" and native_available()
-        )
-        if use_native:
-            return NativeWorkerSession(
-                self._manifests[plugin_name],
-                self._buffers,
-                expected,
-                self._deadlines,
-            )
+        if find_spec("wmfs._native") is None:
+            raise RuntimeError("Isolated execution requires the wmfs native extension")
         return WorkerSession(
             self._manifests[plugin_name],
             self._buffers,
@@ -265,7 +253,7 @@ class IsolatedBackend:
     def _evict_session(
         self,
         plugin_name: str,
-        session: WorkerSession | NativeWorkerSession,
+        session: WorkerSession,
     ) -> None:
         with self._condition:
             if self._sessions.get(plugin_name) is session:

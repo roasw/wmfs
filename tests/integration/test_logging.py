@@ -14,7 +14,6 @@ import wmfs.transport.worker_process as worker_process
 from wmfs.logging import LoggingOptions
 from wmfs.memory import BufferManager
 from wmfs.plugins import PluginManifest, find_manifests
-from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import WorkerSession
 
 ROOT = Path(__file__).parents[2]
@@ -95,14 +94,9 @@ def _manifest(
     )
 
 
-def _session_type(control_mode: str) -> type[WorkerSession] | type[NativeWorkerSession]:
-    return NativeWorkerSession if control_mode == "native" else WorkerSession
-
-
-@pytest.mark.parametrize("control_mode", ["python", "native"])
 @pytest.mark.parametrize("worker_kind", ["cpp", "python"])
 def test_centralized_worker_lifecycle_context_fields_and_filtering(
-    tmp_path: Path, control_mode: str, worker_kind: str
+    tmp_path: Path, worker_kind: str
 ) -> None:
     handler = _Records()
     logger = logging.getLogger("wmfs.worker.reference")
@@ -116,7 +110,7 @@ def test_centralized_worker_lifecycle_context_fields_and_filtering(
     )
     try:
         with BufferManager() as buffers:
-            session = _session_type(control_mode)(manifest, buffers, manifest.metadata)
+            session = WorkerSession(manifest, buffers, manifest.metadata)
             try:
                 source = torch.arange(4, dtype=torch.float64)
                 torch.testing.assert_close(
@@ -161,9 +155,7 @@ def test_centralized_worker_lifecycle_context_fields_and_filtering(
     )
     try:
         with BufferManager() as buffers:
-            session = _session_type(control_mode)(
-                info_manifest, buffers, info_manifest.metadata
-            )
+            session = WorkerSession(info_manifest, buffers, info_manifest.metadata)
             try:
                 session.invoke("add_scalar", torch.ones(1), 1.0)
             finally:
@@ -177,12 +169,11 @@ def test_centralized_worker_lifecycle_context_fields_and_filtering(
     assert "reference add_scalar" not in messages
 
 
-@pytest.mark.parametrize("control_mode", ["python", "native"])
 @pytest.mark.parametrize("worker_kind", ["cpp", "python"])
 def test_worker_file_is_jsonl_private_and_flushed_on_shutdown(
-    tmp_path: Path, control_mode: str, worker_kind: str
+    tmp_path: Path, worker_kind: str
 ) -> None:
-    output = tmp_path / f"{worker_kind}-{control_mode}.jsonl"
+    output = tmp_path / f"{worker_kind}.jsonl"
     handler = _Records()
     logger = logging.getLogger("wmfs.worker.reference")
     logger.addHandler(handler)
@@ -193,7 +184,7 @@ def test_worker_file_is_jsonl_private_and_flushed_on_shutdown(
     )
     try:
         with BufferManager() as buffers:
-            session = _session_type(control_mode)(manifest, buffers, manifest.metadata)
+            session = WorkerSession(manifest, buffers, manifest.metadata)
             try:
                 result = session.invoke("add_scalar", torch.ones(3), 4.0)
                 torch.testing.assert_close(result, torch.full((3,), 5.0))
@@ -220,9 +211,8 @@ def test_worker_file_is_jsonl_private_and_flushed_on_shutdown(
     assert by_message["reference plugin shutdown"]["operationId"] == 0
 
 
-@pytest.mark.parametrize("control_mode", ["python", "native"])
 def test_process_queue_saturation_reports_drops_and_synthetic_warning(
-    tmp_path: Path, control_mode: str
+    tmp_path: Path,
 ) -> None:
     handler = _Records()
     logger = logging.getLogger("wmfs.worker.reference")
@@ -236,7 +226,7 @@ def test_process_queue_saturation_reports_drops_and_synthetic_warning(
     )
     try:
         with BufferManager() as buffers:
-            session = _session_type(control_mode)(manifest, buffers, manifest.metadata)
+            session = WorkerSession(manifest, buffers, manifest.metadata)
             try:
                 result = session.invoke("add_scalar", torch.ones(2), 1.0)
                 torch.testing.assert_close(result, torch.full((2,), 2.0))
@@ -259,9 +249,8 @@ def test_process_queue_saturation_reports_drops_and_synthetic_warning(
     assert synthetic[0].dropped_before >= 7
 
 
-@pytest.mark.parametrize("control_mode", ["python", "native"])
 def test_log_socket_and_file_failures_do_not_change_operation_result(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, control_mode: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     class BrokenCollector:
         def __init__(self, sock: object, _plugin: str, _limit: int) -> None:
@@ -277,9 +266,7 @@ def test_log_socket_and_file_failures_do_not_change_operation_result(
         LoggingOptions(mode="centralized", level=logging.DEBUG),
     )
     with BufferManager() as buffers:
-        session = _session_type(control_mode)(
-            centralized, buffers, centralized.metadata
-        )
+        session = WorkerSession(centralized, buffers, centralized.metadata)
         try:
             result = session.invoke("add_scalar", torch.ones(2), 2.0)
             torch.testing.assert_close(result, torch.full((2,), 3.0))
@@ -292,9 +279,7 @@ def test_log_socket_and_file_failures_do_not_change_operation_result(
         LoggingOptions(mode="worker_file", level=logging.DEBUG, file=Path("/dev/full")),
     )
     with BufferManager() as buffers:
-        session = _session_type(control_mode)(
-            worker_file, buffers, worker_file.metadata
-        )
+        session = WorkerSession(worker_file, buffers, worker_file.metadata)
         try:
             result = session.invoke("add_scalar", torch.ones(2), 2.0)
             torch.testing.assert_close(result, torch.full((2,), 3.0))
@@ -302,12 +287,10 @@ def test_log_socket_and_file_failures_do_not_change_operation_result(
             session.close()
 
 
-@pytest.mark.parametrize("control_mode", ["python", "native"])
 @pytest.mark.parametrize("worker_kind", ["cpp", "python"])
 def test_disabled_logging_has_no_descriptor_collector_file_or_host_thread(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    control_mode: str,
     worker_kind: str,
 ) -> None:
     socketpairs = 0
@@ -347,7 +330,7 @@ def test_disabled_logging_has_no_descriptor_collector_file_or_host_thread(
     }
     manifest = _manifest(tmp_path, worker_kind, LoggingOptions())
     with BufferManager() as buffers:
-        session = _session_type(control_mode)(manifest, buffers, manifest.metadata)
+        session = WorkerSession(manifest, buffers, manifest.metadata)
         try:
             session.invoke("add_scalar", torch.ones(1), 1.0)
         finally:

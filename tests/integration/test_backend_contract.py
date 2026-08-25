@@ -25,7 +25,6 @@ if os.environ.get("WMFS_REQUIRE_BUNDLED") == "1" and not BUNDLED_AVAILABLE:
 @dataclass(frozen=True)
 class BackendCapabilities:
     name: str
-    control_mode: Literal["python", "native"] | None
     out_storage: Literal["ordinary", "managed"]
     functional_autograd: tuple[str, ...]
     bundled_implementation: Literal["python", "native"] | None = None
@@ -34,24 +33,17 @@ class BackendCapabilities:
 BACKENDS = (
     BackendCapabilities(
         "bundled-python",
-        None,
         "ordinary",
         ("matmul", "add_scalar", "svd"),
         "python",
     ),
     BackendCapabilities(
         "bundled-native",
-        None,
         "ordinary",
         ("matmul", "add_scalar", "svd"),
         "native",
     ),
-    BackendCapabilities(
-        "isolated-python", "python", "managed", ("matmul", "add_scalar")
-    ),
-    BackendCapabilities(
-        "isolated-native", "native", "managed", ("matmul", "add_scalar")
-    ),
+    BackendCapabilities("isolated", "managed", ("matmul", "add_scalar")),
 )
 
 
@@ -60,13 +52,12 @@ def backend(request: pytest.FixtureRequest) -> tuple[Runtime, BackendCapabilitie
     capabilities: BackendCapabilities = request.param
     if capabilities.bundled_implementation == "native" and not BUNDLED_AVAILABLE:
         pytest.skip("bundled plugins were not compiled")
-    if capabilities.control_mode == "native" and not NATIVE_AVAILABLE:
+    if capabilities.name == "isolated" and not NATIVE_AVAILABLE:
         pytest.skip("the native control extension was not compiled")
 
     runtime = Runtime()
     runtime.load_plugins(PLUGIN_DIRECTORY)
-    if capabilities.control_mode is not None:
-        runtime.configure_control(capabilities.control_mode)
+    if capabilities.name == "isolated":
         runtime.discover_plugins(PLUGIN_DIRECTORY)
         runtime.use_backend("isolated")
     else:

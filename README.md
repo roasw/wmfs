@@ -405,7 +405,7 @@ already accepted by the runtime, and then attempts to close every backend even
 if one fails. Calls arriving while close is in progress fail with
 `RuntimeError`; concurrent close calls wait for that close. After cleanup, the
 runtime has the same state as a new instance: no backend is selected, the plugin
-registry is empty, and memory and control modes are `pooled` and `auto`.
+registry is empty, and memory mode is `pooled`.
 Cleanup raises the first resource failure after attempting the rest, but the
 reset still completes.
 
@@ -413,13 +413,9 @@ Managed tensors already returned by isolated operations remain valid after
 close. Their shared storage is released only after the last Torch storage alias
 dies; close does not invalidate live tensor views.
 
-The default `auto` control mode uses the native extension when it is installed.
-Selection can be made explicit before discovery:
-
-```python
-runtime.configure_control("native")  # or "python"
-runtime.discover_plugins(Path("plugins"))
-```
+Isolated execution requires the native extension. Missing or incompatible native
+transport fails before a worker session is published; there is no Python client
+fallback.
 
 The fixed control ABI over private `SOCK_SEQPACKET` sockets owns startup
 identity/environment, canonical initialization JSON, lifecycle acceptance,
@@ -597,7 +593,7 @@ Compare the trusted single-FD arena with:
 just benchmark-json benchmarks/benchmark-master-arena.json arena
 ```
 
-Sizes, iteration counts, dtype, Torch thread count, control mode, and
+Sizes, iteration counts, dtype, Torch thread count, and
 high-frequency iteration count are configurable; run `just benchmark-help` for
 all underlying options. Packaged reference benchmarks require bundled plugin
 support and fail with a direct error when it is absent; source-tree smoke tests

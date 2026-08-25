@@ -117,7 +117,6 @@ in
         environment = inspect_worker_environment(manifest)
         assert environment.python_version != "none"
 
-        runtime.configure_control("python")
         runtime.discover_plugins(plugin_directory)
         runtime.use_backend("isolated")
         try:

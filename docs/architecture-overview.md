@@ -149,9 +149,7 @@ startup.
 - [`IsolatedBackend.discover`](../packages/wmfs/wmfs/backends/isolated.py): eager
   session creation per manifest.
 - [`WorkerSession._serve`](../packages/wmfs/wmfs/transport/worker_process.py):
-  Python control-mode startup and validation.
-- [`NativeWorkerSession.__init__`](../packages/wmfs/wmfs/transport/native_worker.py):
-  native control and ring-dispatch startup orchestrated from Python.
+  Python-orchestrated startup followed by mandatory native transport.
 - [`control.py`](../packages/wmfs/wmfs/protocol/control.py): fixed startup,
   lifecycle, and FD-control codec.
 
@@ -166,8 +164,8 @@ The public call is synchronous; private producer and consumer machinery permits
 multiple submissions to be in flight.
 ```
 
-The caller blocks for its tensor result, but `_RingClient` assigns submission
-IDs, queues commands, and independently consumes completions. The command and
+The caller blocks for its tensor result, but the native session assigns
+submission IDs, publishes commands, and independently consumes completions. The command and
 completion rings run in opposite directions. Numerical bytes remain in shared
 pages; records contain bounded fixed-width descriptors and scalar metadata.
 
@@ -188,8 +186,8 @@ pages; records contain bounded fixed-width descriptors and scalar metadata.
   public dispatch and lifecycle accounting.
 - [`bind_invocation`](../packages/wmfs/wmfs/invocation.py): transport-neutral
   argument, access, and output planning.
-- [`_RingClient`](../packages/wmfs/wmfs/transport/worker_process.py): producer,
-  consumer, pending waiters, deadlines, and profiling boundaries.
+- [`src/native_session.cpp`](../src/native_session.cpp): producer, completion
+  dispatcher, pending waiters, deadlines, and profiling boundaries.
 - [`src/ring.cpp`](../src/ring.cpp): native SPSC publication and eventfd waits.
 
 ## 5. Tensor and FD Transport
@@ -223,8 +221,8 @@ without copying; an unmanaged CPU tensor incurs one ingress copy.
 
 - [`BufferManager`](../packages/wmfs/wmfs/memory/buffers.py): allocation,
   access leases, aliases, pooling, arena mode, and reclamation.
-- [`FdSender`](../packages/wmfs/wmfs/transport/fd_broker.py): runtime-side
-  batched map and retirement protocol.
+- [`src/native_session.cpp`](../src/native_session.cpp): runtime-side batched map
+  and retirement protocol.
 - [`FdReceiver`](../packages/wmfs-plugin/wmfs_plugin/fd_transport.py): Python
   worker mapped-buffer endpoint.
 - [`MappedBufferCache`](../src/reference_mapped_buffers.cpp): C++ worker mapping
@@ -264,10 +262,8 @@ invoke command with writable descriptors.
   and dtype expression evaluation.
 - [`plan_outputs`](../packages/wmfs/wmfs/invocation.py): runtime validation and
   reusable `out=` handling.
-- [`NativeWorkerSession._plan_dynamic_outputs`](../packages/wmfs/wmfs/transport/native_worker.py):
-  native-control dynamic planning command.
 - [`WorkerSession._plan_dynamic_outputs`](../packages/wmfs/wmfs/transport/worker_process.py):
-  Python-control equivalent.
+  native ring dynamic planning command orchestration.
 - [`run_ring`](../src/reference_worker.cpp): C++ planning and invocation command
   handling.
 
@@ -300,8 +296,8 @@ the session, and a later invocation may create a fresh validated worker.
 
 - [`transport/errors.py`](../packages/wmfs/wmfs/transport/errors.py): operation
   versus worker-transport exception types.
-- [`_RingClient._fail`](../packages/wmfs/wmfs/transport/worker_process.py): one
-  fatal error propagated to all pending submissions.
+- [`Session::Impl::fail_ring`](../src/native_session.cpp): one fatal error
+  propagated to all pending submissions.
 - [`IsolatedBackend._evict_session`](../packages/wmfs/wmfs/backends/isolated.py):
   failed-session eviction and cleanup.
 - [`BufferManager._release_pooled_many`](../packages/wmfs/wmfs/memory/buffers.py):
@@ -320,10 +316,11 @@ Python and C++ workers share wire behavior but intentionally have different
 packaging and adapter boundaries.
 ```
 
-The application runtime remains Python-owned in both control modes. Native mode
-uses the nanobind `wmfs._native.Session` for startup and FD control, but ordinary
-ring submissions still flow through Python's `_RingClient`. A Python worker uses
-the standalone SDK and generated Python adapter. The current C++ reference
+Python orchestrates worker startup, but isolated steady-state transport requires
+the nanobind `wmfs._native.Session` for lifecycle, FD control, command
+publication, and completion dispatch. There is no host-side Python transport
+fallback. A Python worker uses the standalone SDK and generated Python adapter
+as the peer endpoint. The current C++ reference
 worker owns the ring loop and invokes the same generated plugin entry table used
 by the bundled build before calling transport-neutral LibTorch kernels.
 
@@ -338,10 +335,10 @@ by the bundled build before calling transport-neutral LibTorch kernels.
 
 **Read the implementation**
 
-- [`native_worker.py`](../packages/wmfs/wmfs/transport/native_worker.py): Python
-  orchestration combining native startup/FD control with `_RingClient`.
-- [`src/native_session.cpp`](../src/native_session.cpp): nanobind session's
-  fixed lifecycle and FD-control implementation.
+- [`worker_process.py`](../packages/wmfs/wmfs/transport/worker_process.py):
+  startup/process orchestration around the mandatory native client.
+- [`src/native_session.cpp`](../src/native_session.cpp): nanobind session's fixed
+  lifecycle, FD-control, and ring-dispatch implementation.
 - [`wmfs_plugin/worker.py`](../packages/wmfs-plugin/wmfs_plugin/worker.py): Python
   worker bootstrap and ring dispatch.
 - [`src/reference_worker.cpp`](../src/reference_worker.cpp): C++ reference

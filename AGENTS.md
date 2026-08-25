@@ -277,6 +277,11 @@ descriptors are transferred with `SCM_RIGHTS`. Cap'n Proto exists only in
 archived prototype history and schema 5 benchmark baselines. It is not a live
 runtime dependency, startup mechanism, plugin ABI, or operation path.
 
+Isolated execution requires the native host transport extension. Python may
+orchestrate process launch and the startup handshake, but lifecycle traffic, FD
+control, command publication, completion consumption, backpressure, and pending
+submission matching must use the native client without a Python fallback.
+
 Ring records use fixed-width, process-independent values. Never place raw
 pointers, process-local FD numbers, C++ object layouts, or Python object details
 in shared memory. Every command and completion carries a session generation,
