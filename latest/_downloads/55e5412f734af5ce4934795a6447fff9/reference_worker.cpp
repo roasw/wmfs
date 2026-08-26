@@ -911,7 +911,8 @@ void run_ring(RingConsumer commands, RingProducer completions,
             set_error(completion, WMFS_RING_STATUS_INTERNAL_ERROR,
                       "RuntimeError", error.what());
         }
-        buffers.finish_invocation(command.invocation_id);
+        if (command.kind == WMFS_RING_COMMAND_INVOKE)
+            buffers.finish_invocation(command.invocation_id);
         completion.profile.completion_published_ns =
             profiled ? steady_nanoseconds() : 0;
         if (completions.push(completion) != RingWaitResult::success)

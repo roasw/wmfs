@@ -1,5 +1,5 @@
+import asyncio
 import gc
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -61,6 +61,51 @@ def test_invoke_known_reads_cached_transferred_input() -> None:
             torch.testing.assert_close(second, source.tensor + 2.0)
             assert first_metrics.inputs[0].fd_transferred
             assert not second_metrics.inputs[0].fd_transferred
+        finally:
+            session.close()
+
+
+def test_native_invocation_uses_no_asyncio_scheduler_handoffs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    with BufferManager() as manager:
+        source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
+
+        def forbidden(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("native invocation used an asyncio scheduler handoff")
+
+        try:
+            with monkeypatch.context() as context:
+                context.setattr(asyncio, "to_thread", forbidden)
+                context.setattr(asyncio, "run_coroutine_threadsafe", forbidden)
+                direct = session.invoke("add_scalar", source.tensor, 1.0)
+                profiled, _metrics = session.invoke_profiled(
+                    "add_scalar", source.tensor, 2.0
+                )
+                dynamic = session.invoke("nonzero", source.tensor)
+            torch.testing.assert_close(direct, source.tensor + 1.0)
+            torch.testing.assert_close(profiled, source.tensor + 2.0)
+            torch.testing.assert_close(dynamic, torch.nonzero(source.tensor))
+        finally:
+            session.close()
+
+
+def test_completed_output_mapping_needs_no_retirement_round_trip() -> None:
+    manifest = find_manifests([PLUGIN_DIRECTORY])[0]
+    with BufferManager() as manager:
+        source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
+        session = WorkerSession(manifest, manager, inspect_plugin(manifest))
+        try:
+            assert session._fd_sender is not None
+            before = session._fd_sender.retirement_batch_count
+            result = session.invoke("add_scalar", source.tensor, 1.0)
+            assert session._fd_sender.retirement_batch_count == before
+            del result
+            gc.collect()
+            manager.collect()
+            assert session._fd_sender.retirement_batch_count == before
         finally:
             session.close()
 
@@ -151,13 +196,13 @@ def test_known_outputs_submit_exactly_one_invoke_command(operation: str) -> None
         session = WorkerSession(manifest, manager, inspect_plugin(manifest))
         assert session._ring_client is not None
         submitted: list[int] = []
-        original = session._ring_client.submit
+        original = session._ring_client.submit_invoke
 
         def submit(record: object, timeout: float) -> object:
             submitted.append(record.kind)  # type: ignore[attr-defined]
             return original(record, timeout)  # type: ignore[arg-type]
 
-        session._ring_client.submit = submit  # type: ignore[method-assign]
+        session._ring_client.submit_invoke = submit  # type: ignore[method-assign]
         try:
             a = torch.arange(6, dtype=torch.float64).reshape(2, 3)
             if operation == "matmul":
@@ -178,12 +223,18 @@ def test_dynamic_output_submits_plan_then_invoke() -> None:
         assert session._ring_client is not None
         submitted: list[int] = []
         original = session._ring_client.submit
+        original_invoke = session._ring_client.submit_invoke
 
         def submit(record: object, timeout: float) -> object:
             submitted.append(record.kind)  # type: ignore[attr-defined]
             return original(record, timeout)  # type: ignore[arg-type]
 
+        def submit_invoke(record: object, timeout: float) -> object:
+            submitted.append(record.kind)  # type: ignore[attr-defined]
+            return original_invoke(record, timeout)  # type: ignore[arg-type]
+
         session._ring_client.submit = submit  # type: ignore[method-assign]
+        session._ring_client.submit_invoke = submit_invoke  # type: ignore[method-assign]
         try:
             session.invoke("nonzero", torch.tensor([0.0, 1.0, 0.0, 2.0]))
         finally:
@@ -228,26 +279,34 @@ def test_session_reserves_reusable_output_for_exclusive_write() -> None:
 def test_session_close_waits_for_active_submission() -> None:
     manifest = find_manifests([PLUGIN_DIRECTORY])[0]
     with BufferManager() as manager:
+        source = manager.from_tensor(torch.arange(4, dtype=torch.float32))
+        output = session_output = None
         session = WorkerSession(manifest, manager, inspect_plugin(manifest))
-        session._submit_lock.acquire()
-        submit_lock_held = True
-        started = threading.Event()
-
-        def close() -> None:
-            started.set()
-            session.close()
-
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                closing = executor.submit(close)
-                assert started.wait(2)
+            output = session.invoke("add_scalar", source.tensor, 0.0)
+            session_output = manager.managed(output)
+            assert session_output is not None
+            output_reader = manager.reserve_access(reads=(session_output,))
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                invocation = executor.submit(
+                    session.invoke,
+                    "add_scalar",
+                    source.tensor,
+                    2.0,
+                    out=output,
+                )
+                _wait_for_access_waiter(manager)
+                closing = executor.submit(session.close)
+                with session._state_changed:
+                    assert session._state_changed.wait_for(
+                        lambda: session._close_started, timeout=2
+                    )
                 assert not closing.done()
-                session._submit_lock.release()
-                submit_lock_held = False
+                assert not invocation.done()
+                output_reader.release()
+                assert invocation.result(timeout=2) is output
                 closing.result(timeout=2)
         finally:
-            if submit_lock_held:
-                session._submit_lock.release()
             session.close()
 
 

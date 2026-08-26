@@ -7,7 +7,9 @@ Retained reports use explicit revision names:
   before removal of the public local backend.
 - `benchmark-3b2c5c4.json`: schema-12 report before native host transport became
   mandatory.
-- `benchmark-master.json`: schema-13 mandatory-native-client report.
+- `benchmark-8209176.json`: schema-13 report before whole-call scheduler and
+  mapping-lifetime optimization.
+- `benchmark-master.json`: optimized schema-13 mandatory-native-client report.
 
 The reports were generated on 2026-08-24 on the same WSL2 host with Python
 3.14.6, Torch 2.12.0, glibc 2.42, float32 tensors, and one Torch thread. Each
@@ -52,19 +54,21 @@ embedded `measurement_boundaries`, `comparison_contract`, and
 | Revision | Transport probe | Median (ms) | p95 (ms) |
 | -------- | --------------- | ----------: | -------: |
 | 0.1.0    | RPC round trip  |       0.092 |    0.196 |
-| master   | Ring round trip |       0.065 |    0.101 |
+| master   | Ring round trip |       0.061 |    0.117 |
 
-The native ring dispatcher is 30% faster at the median than the freshly
+The native ring dispatcher is 34% faster at the median than the freshly
 measured `0.1.0` RPC baseline. It publishes fixed-width records directly from
 C++, consumes completions on a native dispatcher, and does not serialize ring
 records through Python.
 
-The ring result does not imply that the complete cheap-operation path is faster.
-Sequential cleanup-inclusive `add_scalar` throughput is 2,367 calls/s in
-`0.1.0` and 1,130 calls/s on master; with reusable `out=`, it is 2,848 calls/s
-and 1,326 calls/s respectively. Mapping, allocation, reclamation, and Python
-orchestration remain outside the ring probe and are the next relevant
-optimization boundaries.
+Whole-call profiling identified repeated asyncio/executor handoffs and a
+redundant acknowledged output-mapping retirement as the dominant costs. Running
+native operations synchronously on caller threads, batching known mappings,
+locally completing validated mappings, and using a compact unprofiled completion
+reduced allocated `add_scalar` median latency from 0.734 ms to 0.281 ms and
+reusable-`out=` latency from 0.702 ms to 0.252 ms. Cleanup-inclusive throughput
+rose from 1,130 to 2,877 calls/s and from 1,326 to 3,499 calls/s respectively.
+Both optimized throughput values exceed the freshly measured `0.1.0` RPC path.
 
 These measurements characterize one host and are not performance thresholds.
 Regenerate explicitly named reports on the target system when evaluating the

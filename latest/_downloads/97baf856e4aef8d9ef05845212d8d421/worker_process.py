@@ -116,6 +116,10 @@ class _NativeRingClient:
         completion, metrics = self._session.submit_ring(record, timeout, True)
         return self._completion(completion), RingSubmissionMetrics(**metrics)
 
+    def submit_invoke(self, record: Record, timeout: float) -> tuple[int, str, str]:
+        status, error_type, error_message = self._session.submit_invoke(record, timeout)
+        return int(status), str(error_type), str(error_message)
+
     @staticmethod
     def _completion(value: dict[str, object]) -> Record:
         return Record(
@@ -155,6 +159,10 @@ class WorkerSession:
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._submit_lock = threading.RLock()
+        self._state_changed = threading.Condition(self._submit_lock)
+        self._active_calls = 0
+        self._close_started = False
+        self._next_invocation = 1
         self._loop: asyncio.AbstractEventLoop | None = None
         self._plugin: object | None = None
         self._operations: dict[str, OperationMetadata] = {}
@@ -210,49 +218,87 @@ class WorkerSession:
         return result, metrics
 
     def ping(self) -> None:
-        with self._submit_lock:
-            if self._closed or self._loop is None:
-                raise RuntimeError("Worker session is closed")
-            if threading.current_thread() is self._thread:
-                raise RuntimeError("Worker session cannot synchronously call itself")
-            future = asyncio.run_coroutine_threadsafe(self._ping(), self._loop)
-            future.result(timeout=self._deadlines.request)
+        self._begin_call()
+        try:
+            assert self._plugin is not None
+            self._plugin.ping()
+        finally:
+            self._end_call()
 
     def ring_ping(self, *, worker_hold_ns: int = 0) -> RingSubmissionMetrics:
         """Measure one benchmark-only command/completion ring round trip."""
         if not 0 <= worker_hold_ns <= 0xFFFFFFFF:
             raise ValueError("Ring ping worker hold must fit uint32 nanoseconds")
-        with self._submit_lock:
-            if self._closed or self._ring_client is None:
-                raise RuntimeError("Worker session is closed")
-            rings = self._ring_client
-        response, metrics = rings.submit_profiled(
-            Record(
-                COMMAND_PING,
-                rings.generation,
-                0,
-                secrets.randbits(64) or 1,
-                worker_hold_ns,
-            ),
-            self._deadlines.request,
-        )
-        _raise_ring_error(response)
-        return metrics
+        self._begin_call()
+        try:
+            assert self._ring_client is not None
+            response, metrics = self._ring_client.submit_profiled(
+                Record(
+                    COMMAND_PING,
+                    self._ring_client.generation,
+                    0,
+                    self._invocation_id(),
+                    worker_hold_ns,
+                ),
+                self._deadlines.request,
+            )
+            _raise_ring_error(response)
+            return metrics
+        finally:
+            self._end_call()
 
     def close(self) -> None:
-        with self._submit_lock:
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("Worker session cannot synchronously close itself")
+        with self._state_changed:
             if self._closed:
                 return
+            if self._close_started:
+                self._state_changed.wait_for(lambda: self._closed)
+                return
+            self._close_started = True
+            self._state_changed.wait_for(lambda: self._active_calls == 0)
+            self._request_shutdown_locked()
+        self._thread.join(timeout=self._deadlines.shutdown)
+        failure: BaseException | None = None
+        if self._thread.is_alive():
+            failure = RuntimeError("Worker session did not stop")
+        elif self._shutdown_error is not None:
+            failure = RuntimeError("Worker session did not complete shutdown")
+            failure.__cause__ = self._shutdown_error
+        with self._state_changed:
             self._closed = True
-            if self._loop is not None and self._shutdown is not None:
-                self._loop.call_soon_threadsafe(self._shutdown.set)
-            self._thread.join(timeout=self._deadlines.shutdown)
-            if self._thread.is_alive():
-                raise RuntimeError("Worker session did not stop")
-            if self._shutdown_error is not None:
-                raise RuntimeError("Worker session did not complete shutdown") from (
-                    self._shutdown_error
-                )
+            self._state_changed.notify_all()
+        if failure is not None:
+            raise failure
+
+    def _begin_call(self) -> None:
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("Worker session cannot synchronously call itself")
+        with self._state_changed:
+            if self._closed or self._close_started or self._invalidated:
+                raise RuntimeError("Worker session is closed")
+            if self._loop is None or self._plugin is None:
+                raise RuntimeError("Worker session is not ready")
+            self._active_calls += 1
+
+    def _end_call(self) -> None:
+        with self._state_changed:
+            self._active_calls -= 1
+            if self._active_calls == 0:
+                self._state_changed.notify_all()
+
+    def _request_shutdown_locked(self) -> None:
+        if self._loop is not None and self._shutdown is not None:
+            self._loop.call_soon_threadsafe(self._shutdown.set)
+
+    def _invocation_id(self) -> int:
+        with self._state_changed:
+            invocation_id = self._next_invocation
+            self._next_invocation += 1
+            if self._next_invocation > 0xFFFFFFFFFFFFFFFF:
+                self._next_invocation = 1
+            return invocation_id
 
     def _run(self) -> None:
         try:
@@ -283,11 +329,12 @@ class WorkerSession:
                     f"(expected fingerprint 0x{self._expected_metadata.fingerprint:016x}, "
                     f"received 0x{metadata.fingerprint:016x})"
                 )
-            self._metadata = metadata
-            self._plugin = plugin
-            self._operations = {item.name: item for item in metadata.operations}
-            self._fd_sender = fd_sender
-            self._ring_client = ring_client
+            with self._state_changed:
+                self._metadata = metadata
+                self._plugin = plugin
+                self._operations = {item.name: item for item in metadata.operations}
+                self._fd_sender = fd_sender
+                self._ring_client = ring_client
             self._ready.set()
             await self._shutdown.wait()
 
@@ -297,12 +344,12 @@ class WorkerSession:
             self._loop.call_soon_threadsafe(self._serve_task.cancel)
         self._thread.join(timeout=self._deadlines.shutdown)
 
-    async def _invoke_profiled(
+    def _invoke_profiled(
         self, invocation: BoundInvocation
     ) -> tuple[object, InvocationMetrics]:
         if self._plugin is None or self._fd_sender is None or self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
-        invocation_id = secrets.randbits(64) or 1
+        invocation_id = self._invocation_id()
         input_metrics: list[InputPreparationMetrics] = []
         output_metrics: list[OutputAllocationMetrics] = []
         shared_inputs = [
@@ -312,8 +359,7 @@ class WorkerSession:
         inputs = [item[0] for item in shared_inputs]
         mapping_start = perf_counter_ns()
         try:
-            input_transfers = await asyncio.to_thread(
-                self._fd_sender.ensure_mapped_many,
+            input_transfers = self._fd_sender.ensure_mapped_many(
                 tuple(
                     (managed.buffer, bound.writable)
                     for managed, bound in zip(
@@ -323,9 +369,7 @@ class WorkerSession:
                 invocation_id=invocation_id,
             )
         except Exception:
-            self._invalidated = True
-            if self._shutdown is not None:
-                self._shutdown.set()
+            self._invalidate()
             raise
         mapping_ns = perf_counter_ns() - mapping_start
         for index, ((managed, copy_ns), transferred) in enumerate(
@@ -339,7 +383,7 @@ class WorkerSession:
                     fd_transferred=transferred,
                 )
             )
-        return await self._invoke_known_profiled(
+        return self._invoke_known_profiled(
             invocation,
             inputs,
             invocation_id,
@@ -347,37 +391,36 @@ class WorkerSession:
             output_metrics,
         )
 
-    async def _invoke_direct(self, invocation: BoundInvocation) -> object:
+    def _invoke_direct(self, invocation: BoundInvocation) -> object:
         """Invoke without constructing optional profiling records or reading clocks."""
         if self._plugin is None or self._fd_sender is None or self._ring_client is None:
             raise RuntimeError("Worker session is not ready")
-        invocation_id = secrets.randbits(64) or 1
+        invocation_id = self._invocation_id()
         inputs = [
             share_input(self._buffers, item.tensor, collect_metrics=False)[0]
             for item in invocation.tensor_inputs
         ]
-        try:
-            await asyncio.to_thread(
-                self._fd_sender.ensure_mapped_many,
-                tuple(
-                    (managed.buffer, bound.writable)
-                    for managed, bound in zip(
-                        inputs, invocation.tensor_inputs, strict=True
-                    )
-                ),
-                invocation_id=invocation_id,
-            )
-        except Exception:
-            self._invalidate()
-            raise
+        dynamic_required = any(
+            plan.known is None for plan in invocation.operation.output_plans
+        )
+        input_mappings = tuple(
+            (managed.buffer, bound.writable)
+            for managed, bound in zip(inputs, invocation.tensor_inputs, strict=True)
+        )
+        if dynamic_required:
+            try:
+                self._fd_sender.ensure_mapped_many(
+                    input_mappings, invocation_id=invocation_id
+                )
+            except Exception:
+                self._invalidate()
+                raise
 
         outputs: list[ManagedTensor] = []
         dispatched = False
         completed = False
         try:
-            dynamic = await self._plan_dynamic_outputs(
-                invocation, inputs, invocation_id
-            )
+            dynamic = self._plan_dynamic_outputs(invocation, inputs, invocation_id)
             try:
                 output_plan = plan_outputs(
                     self._buffers,
@@ -396,9 +439,9 @@ class WorkerSession:
                 )
                 outputs.append(output)
             try:
-                await asyncio.to_thread(
-                    self._fd_sender.ensure_mapped_many,
-                    tuple((managed.buffer, True) for managed in outputs),
+                self._fd_sender.ensure_mapped_many(
+                    (() if dynamic_required else input_mappings)
+                    + tuple((managed.buffer, True) for managed in outputs),
                     invocation_id=invocation_id,
                 )
             except Exception:
@@ -407,8 +450,7 @@ class WorkerSession:
 
             mark_reused_outputs_dirty(output_plan)
             dispatched = True
-            response = await asyncio.to_thread(
-                self._ring_client.submit,
+            status, error_type, error_message = self._ring_client.submit_invoke(
                 _invocation_record(
                     self._ring_client.generation,
                     invocation_id,
@@ -420,24 +462,26 @@ class WorkerSession:
                 ),
                 self._deadlines.request,
             )
-            self._fd_sender.finish_invocation(invocation_id)
             completed = True
-            _raise_ring_error(response)
+            if status == STATUS_OPERATION_ERROR:
+                raise OperationError(error_type, error_message)
+            if status != STATUS_OK:
+                self._invalidate()
+                raise RingError(f"worker ring failure {error_type}: {error_message}")
             result = invocation_result(outputs)
             outputs.clear()
             return result
         finally:
             if not dispatched:
-                self._fd_sender.finish_invocation(invocation_id)
+                self._fd_sender.abort_invocation(invocation_id)
             elif not completed:
                 self._invalidate()
 
     def _invalidate(self) -> None:
-        self._invalidated = True
-        if self._shutdown is not None:
-            self._shutdown.set()
+        with self._state_changed:
+            self._invalidated = True
 
-    async def _invoke_known_profiled(
+    def _invoke_known_profiled(
         self,
         invocation: BoundInvocation,
         inputs: list[ManagedTensor],
@@ -451,9 +495,7 @@ class WorkerSession:
         dispatched = False
         completed = False
         try:
-            dynamic = await self._plan_dynamic_outputs(
-                invocation, inputs, invocation_id
-            )
+            dynamic = self._plan_dynamic_outputs(invocation, inputs, invocation_id)
             try:
                 output_plan = plan_outputs(
                     self._buffers,
@@ -464,9 +506,7 @@ class WorkerSession:
                 )
             except ValueError:
                 if dynamic:
-                    self._invalidated = True
-                    if self._shutdown is not None:
-                        self._shutdown.set()
+                    self._invalidate()
                 raise
             allocation_metrics: list[tuple[int, int]] = []
             for index in range(len(output_plan.specs)):
@@ -481,15 +521,12 @@ class WorkerSession:
                 allocation_metrics.append((allocation_ns, service_start))
             mapping_start = perf_counter_ns()
             try:
-                output_transfers = await asyncio.to_thread(
-                    self._fd_sender.ensure_mapped_many,
+                output_transfers = self._fd_sender.ensure_mapped_many(
                     tuple((managed.buffer, True) for managed in outputs),
                     invocation_id=invocation_id,
                 )
             except Exception:
-                self._invalidated = True
-                if self._shutdown is not None:
-                    self._shutdown.set()
+                self._invalidate()
                 raise
             output_mapping_ns = perf_counter_ns() - mapping_start
             for index, (managed, transferred, allocation_metric) in enumerate(
@@ -517,12 +554,15 @@ class WorkerSession:
                 invocation,
                 True,
             )
-            response, ring_metrics = await asyncio.to_thread(
-                self._ring_client.submit_profiled, command, self._deadlines.request
+            response, ring_metrics = self._ring_client.submit_profiled(
+                command, self._deadlines.request
             )
-            self._fd_sender.finish_invocation(invocation_id)
             completed = True
-            _raise_ring_error(response)
+            try:
+                _raise_ring_error(response)
+            except RingError:
+                self._invalidate()
+                raise
             result = invocation_result(outputs)
             outputs.clear()
             worker = response.profile
@@ -550,13 +590,11 @@ class WorkerSession:
             )
         finally:
             if not dispatched:
-                self._fd_sender.finish_invocation(invocation_id)
+                self._fd_sender.abort_invocation(invocation_id)
             elif not completed:
-                self._invalidated = True
-                if self._shutdown is not None:
-                    self._shutdown.set()
+                self._invalidate()
 
-    async def _plan_dynamic_outputs(
+    def _plan_dynamic_outputs(
         self,
         invocation: BoundInvocation,
         inputs: list[ManagedTensor],
@@ -577,15 +615,15 @@ class WorkerSession:
                 False,
                 kind=COMMAND_PLAN_OUTPUTS,
             )
-            response = await asyncio.to_thread(
-                self._ring_client.submit, command, self._deadlines.request
-            )
+            response = self._ring_client.submit(command, self._deadlines.request)
         except Exception:
-            self._invalidated = True
-            if self._shutdown is not None:
-                self._shutdown.set()
+            self._invalidate()
             raise
-        _raise_ring_error(response)
+        try:
+            _raise_ring_error(response)
+        except RingError:
+            self._invalidate()
+            raise
         return tuple(
             (
                 item.output,
@@ -595,11 +633,6 @@ class WorkerSession:
             for item in response.outputs
         )
 
-    async def _ping(self) -> None:
-        if self._plugin is None:
-            raise RuntimeError("Worker session is not ready")
-        await asyncio.to_thread(self._plugin.ping)
-
     def _submit_invocation_profiled(
         self,
         operation: str,
@@ -607,11 +640,9 @@ class WorkerSession:
         kwargs: dict[str, object],
         out: object | None,
     ) -> tuple[object, InvocationMetrics]:
-        if threading.current_thread() is self._thread:
-            raise RuntimeError("Worker session cannot synchronously invoke itself")
-        with self._submit_lock:
-            if self._closed or self._loop is None:
-                raise RuntimeError("Worker session is closed")
+        self._begin_call()
+        failure: tuple[WorkerTransportError, Exception] | None = None
+        try:
             invocation = bind_invocation(
                 self._operations[operation],
                 args,
@@ -619,23 +650,28 @@ class WorkerSession:
                 out,
                 collect_metrics=True,
             )
-        with reserve_invocation_access(self._buffers, invocation):
-            future = asyncio.run_coroutine_threadsafe(
-                self._invoke_profiled(invocation), self._loop
-            )
-            try:
-                return future.result()
-            except Exception as error:
-                if self._invalidated:
-                    try:
-                        self.close()
-                    except Exception:
-                        pass
-                    raise WorkerTransportError(
-                        "Worker transport failed during invocation: "
-                        f"{type(error).__name__}: {error}"
-                    ) from error
+            with reserve_invocation_access(self._buffers, invocation):
+                return self._invoke_profiled(invocation)
+        except Exception as error:
+            with self._state_changed:
+                invalidated = self._invalidated
+            if not invalidated:
                 raise
+            failure = (
+                WorkerTransportError(
+                    "Worker transport failed during invocation: "
+                    f"{type(error).__name__}: {error}"
+                ),
+                error,
+            )
+        finally:
+            self._end_call()
+        assert failure is not None
+        try:
+            self.close()
+        except Exception:
+            pass
+        raise failure[0] from failure[1]
 
     def _submit_invocation_direct(
         self,
@@ -644,11 +680,9 @@ class WorkerSession:
         kwargs: dict[str, object],
         out: object | None,
     ) -> object:
-        if threading.current_thread() is self._thread:
-            raise RuntimeError("Worker session cannot synchronously invoke itself")
-        with self._submit_lock:
-            if self._closed or self._loop is None:
-                raise RuntimeError("Worker session is closed")
+        self._begin_call()
+        failure: tuple[WorkerTransportError, Exception] | None = None
+        try:
             invocation = bind_invocation(
                 self._operations[operation],
                 args,
@@ -656,23 +690,28 @@ class WorkerSession:
                 out,
                 collect_metrics=False,
             )
-        with reserve_invocation_access(self._buffers, invocation):
-            future = asyncio.run_coroutine_threadsafe(
-                self._invoke_direct(invocation), self._loop
-            )
-            try:
-                return future.result()
-            except Exception as error:
-                if self._invalidated:
-                    try:
-                        self.close()
-                    except Exception:
-                        pass
-                    raise WorkerTransportError(
-                        "Worker transport failed during invocation: "
-                        f"{type(error).__name__}: {error}"
-                    ) from error
+            with reserve_invocation_access(self._buffers, invocation):
+                return self._invoke_direct(invocation)
+        except Exception as error:
+            with self._state_changed:
+                invalidated = self._invalidated
+            if not invalidated:
                 raise
+            failure = (
+                WorkerTransportError(
+                    "Worker transport failed during invocation: "
+                    f"{type(error).__name__}: {error}"
+                ),
+                error,
+            )
+        finally:
+            self._end_call()
+        assert failure is not None
+        try:
+            self.close()
+        except Exception:
+            pass
+        raise failure[0] from failure[1]
 
 
 def _invocation_record(
@@ -788,7 +827,7 @@ class _NativeSessionAdapter:
                 buffer.register_recipient(self)
         return result
 
-    def finish_invocation(self, invocation_id: int) -> None:
+    def abort_invocation(self, invocation_id: int) -> None:
         self._session.abort_invocation(invocation_id)
 
     def retire_buffers(self, buffers: tuple[object, ...]) -> None:
