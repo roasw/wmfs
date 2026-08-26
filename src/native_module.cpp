@@ -324,6 +324,22 @@ nb::tuple submit_ring(Session &session, nb::object record, double timeout,
                           ring_metrics_dict(result));
 }
 
+nb::tuple submit_invoke(Session &session, nb::object record, double timeout) {
+    auto command = ring_record_from_object(record);
+    if (command.kind != WMFS_RING_COMMAND_INVOKE)
+        throw std::invalid_argument("Native invoke requires an invoke command");
+    RingSubmissionResult result;
+    {
+        nb::gil_scoped_release release;
+        result = session.submit_ring(command, timeout, false);
+    }
+    const auto &completion = result.completion;
+    return nb::make_tuple(
+        completion.status,
+        std::string(completion.error.type, completion.error.type_length),
+        std::string(completion.error.message, completion.error.message_length));
+}
+
 Mapping mapping_from_buffer(nb::handle buffer, std::uint64_t invocation_id,
                             bool writable) {
     const bool arena = nb::cast<bool>(buffer.attr("arena"));
@@ -517,6 +533,7 @@ NB_MODULE(_native, module) {
              "inputs"_a, "scalars"_a)
         .def("submit_ring", &submit_ring, "record"_a, "timeout"_a,
              "profiled"_a = false)
+        .def("submit_invoke", &submit_invoke, "record"_a, "timeout"_a)
         .def("ping", &Session::ping, "nonce"_a,
              nb::call_guard<nb::gil_scoped_release>())
         .def_prop_ro("metadata", &metadata)

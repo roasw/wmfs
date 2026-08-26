@@ -79,9 +79,28 @@ struct Session::Impl {
         std::condition_variable ready;
         wmfs_ring_record_v1 completion{};
         std::exception_ptr error;
+        std::uint32_t expected_kind{};
+        std::uint32_t expected_flags{};
+        std::uint64_t invocation_id{};
+        std::uint32_t operation_id{};
         std::uint64_t completion_consumed_ns{};
         bool completed{};
     };
+
+    static std::uint32_t completion_kind(std::uint32_t command_kind) {
+        switch (command_kind) {
+        case WMFS_RING_COMMAND_INVOKE:
+            return WMFS_RING_COMPLETION_INVOKE;
+        case WMFS_RING_COMMAND_PLAN_OUTPUTS:
+            return WMFS_RING_COMPLETION_PLAN_OUTPUTS;
+        case WMFS_RING_COMMAND_PING:
+            return WMFS_RING_COMPLETION_PONG;
+        case WMFS_RING_COMMAND_SHUTDOWN:
+            return WMFS_RING_COMPLETION_SHUTDOWN;
+        default:
+            throw std::invalid_argument("Unknown native ring command kind");
+        }
+    }
 
     Impl(int lifecycle_fd, int fd_control, std::uint64_t,
          std::uint64_t ring_generation, std::uint32_t, double,
@@ -248,6 +267,18 @@ struct Session::Impl {
                         throw std::runtime_error(
                             "Native completion has unknown submission ID");
                     submission = item->second;
+                    if (completion.kind != submission->expected_kind ||
+                        completion.flags != submission->expected_flags ||
+                        completion.invocation_id != submission->invocation_id ||
+                        completion.operation_id != submission->operation_id ||
+                        completion.status < WMFS_RING_STATUS_OK ||
+                        completion.status > WMFS_RING_STATUS_INTERNAL_ERROR ||
+                        (completion.kind != WMFS_RING_COMPLETION_PLAN_OUTPUTS &&
+                         completion.planned_output_count != 0) ||
+                        completion.tensor_count != 0 ||
+                        completion.scalar_count != 0)
+                        throw std::runtime_error("Native completion identity "
+                                                 "does not match command");
                     pending.erase(item);
                 }
                 {
@@ -279,6 +310,9 @@ struct Session::Impl {
                 std::chrono::duration<double>(timeout_seconds));
         const auto submitted_ns = profiled ? monotonic_nanoseconds() : 0;
         auto submission = std::make_shared<PendingSubmission>();
+        submission->expected_kind = completion_kind(command.kind);
+        submission->invocation_id = command.invocation_id;
+        submission->operation_id = command.operation_id;
         {
             std::lock_guard lock(pending_mutex);
             if (ring_error)
@@ -289,6 +323,7 @@ struct Session::Impl {
             command.flags =
                 profiled ? command.flags | WMFS_RING_RECORD_FLAG_PROFILE
                          : command.flags & ~WMFS_RING_RECORD_FLAG_PROFILE;
+            submission->expected_flags = command.flags;
             pending.emplace(command.submission_id, submission);
         }
 
@@ -342,6 +377,17 @@ struct Session::Impl {
 
         RingSubmissionResult result;
         result.completion = submission->completion;
+        if (command.kind == WMFS_RING_COMMAND_INVOKE) {
+            std::lock_guard mapping_lock(mutex);
+            for (auto item = mappings.begin(); item != mappings.end();) {
+                const auto &mapping = item->second;
+                if (!mapping.arena && mapping.writable &&
+                    mapping.invocation_id == command.invocation_id)
+                    item = mappings.erase(item);
+                else
+                    ++item;
+            }
+        }
         if (profiled) {
             const auto returned_ns = monotonic_nanoseconds();
             const auto &worker = result.completion.profile;
@@ -548,12 +594,21 @@ void Session::retire_buffers(const std::vector<Mapping> &mappings) {
     if (mappings.empty())
         return;
     std::lock_guard lock(impl_->mutex);
-    std::vector<bool> maps(mappings.size(), false);
-    const auto batches = impl_->transfer_batched(mappings, maps, {});
-    for (const auto &mapping : mappings)
+    std::vector<Mapping> active;
+    for (const auto &mapping : mappings) {
+        const auto item = impl_->mappings.find(
+            MappingKey{mapping.buffer_id, mapping.generation});
+        if (item != impl_->mappings.end() && !item->second.arena)
+            active.push_back(item->second);
+    }
+    if (active.empty())
+        return;
+    std::vector<bool> maps(active.size(), false);
+    const auto batches = impl_->transfer_batched(active, maps, {});
+    for (const auto &mapping : active)
         impl_->mappings.erase(
             MappingKey{mapping.buffer_id, mapping.generation});
-    impl_->retirements += mappings.size();
+    impl_->retirements += active.size();
     impl_->retirement_batches += batches;
 }
 
@@ -603,12 +658,20 @@ void Session::ping(std::uint64_t) {
 std::vector<std::uint8_t> Session::metadata() { return {}; }
 std::vector<std::uint8_t> Session::environment() { return {}; }
 void Session::close() { impl_->close(); }
-std::uint64_t Session::transfer_count() const { return impl_->transfers; }
+std::uint64_t Session::transfer_count() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->transfers;
+}
 std::uint64_t Session::mapping_batch_count() const {
+    std::lock_guard lock(impl_->mutex);
     return impl_->mapping_batches;
 }
-std::uint64_t Session::retirement_count() const { return impl_->retirements; }
+std::uint64_t Session::retirement_count() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->retirements;
+}
 std::uint64_t Session::retirement_batch_count() const {
+    std::lock_guard lock(impl_->mutex);
     return impl_->retirement_batches;
 }
 
