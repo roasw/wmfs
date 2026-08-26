@@ -92,10 +92,15 @@ def worker_main(
     parser = argparse.ArgumentParser()
     parser.add_argument("--bootstrap-fd", type=int, required=True)
     arguments = parser.parse_args()
+    planners = (
+        output_planners
+        if output_planners is not None
+        else getattr(operations, "output_planners", {})
+    )
     _serve(
         arguments.bootstrap_fd,
         operations,
-        output_planners or {},
+        planners,
     )
 
 

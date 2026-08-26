@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Architecture Overview &#8212; WMFS e49fde4875b7</title>
+    <title>Architecture Overview &#8212; WMFS 8209176c5fcc</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=3e247dd8"></script>
+    <script src="_static/documentation_options.js?v=9172fd73"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -88,8 +88,8 @@ C++ worker has no dependency on either Python package used by plugin authors.</p
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">wmfs</span></code>, <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>, and <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> have deliberately one-way, disjoint
 dependency roles.</p></li>
-<li><p>The Python SDK is only for Python workers. It is not an application dependency
-and is not used by C++ workers.</p></li>
+<li><p>Every Python plugin uses the SDK facade. It is not a dependency of the main
+runtime or C++ workers.</p></li>
 <li><p>Runtime and worker environments may use different Python, Torch, libc, and
 toolchain versions.</p></li>
 </ul>
@@ -98,9 +98,13 @@ toolchain versions.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/079962c730e6e61f3f9971f670e9cf70/pyproject.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">pyproject.toml</span></code></span></a>: application runtime package configuration
 at the repository root.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/b7e2b82a44e2e2c526210e6a03f90727/pyproject.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/pyproject.toml</span></code></span></a>:
-independent worker SDK dependencies.</p></li>
+independent Python plugin SDK dependencies.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/d4bf46f0538a55f0114889434b39eb10/pyproject.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">packages/wmfs-tool/pyproject.toml</span></code></span></a>:
 independent interface compiler dependencies.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/08c47f1609f2baf0144be58973e985fe/pyproject.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">plugins/reference/pyproject.toml</span></code></span></a>:
+ordinary reference kernels and generated plugin artifacts.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/c8d64d6356571787e2b95d0af95b4228/plugin.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">plugins/reference/wmfs_reference/plugin.py</span></code></span></a>:
+shared bundled/isolated Python plugin binding.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/8cf9089e9ef3cc6775beae6b46f7080e/packages.nix"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">nix/packages.nix</span></code></span></a>: separately deployable package graph.</p></li>
 </ul>
 </section>
@@ -166,7 +170,7 @@ prior registry intact.</p></li>
 <li><p>Startup establishes two SPSC rings, four eventfds, an FD-control socket, a
 session generation, an optional independent log service, and bounded
 deadlines.</p></li>
-<li><p>Disabled logging establishes no log socket or queue; local and bundled modes
+<li><p>Disabled logging establishes no log socket or queue; bundled mode
 establish none of the isolated transport resources.</p></li>
 </ul>
 <p><strong>Read the implementation</strong></p>
@@ -176,9 +180,7 @@ discovery, publication, and previous-backend cleanup.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/6650245697a7021efb03165562480d38/isolated.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">IsolatedBackend.discover</span></code></span></a>: eager
 session creation per manifest.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/97baf856e4aef8d9ef05845212d8d421/worker_process.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">WorkerSession._serve</span></code></span></a>:
-Python control-mode startup and validation.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/14193a6595d87e4b7d4a507f179024d6/native_worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">NativeWorkerSession.__init__</span></code></span></a>:
-native control-mode startup orchestrated from Python.</p></li>
+Python-orchestrated startup followed by mandatory native transport.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/aafede7bb7b73519179c362028220f1f/control.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">control.py</span></code></span></a>: fixed startup,
 lifecycle, and FD-control codec.</p></li>
 </ul>
@@ -193,8 +195,8 @@ lifecycle, and FD-control codec.</p></li>
 multiple submissions to be in flight.</span><a class="headerlink" href="#id4" title="Link to this image">¶</a></p>
 </figcaption>
 </figure>
-<p>The caller blocks for its tensor result, but <code class="docutils literal notranslate"><span class="pre">_RingClient</span></code> assigns submission
-IDs, queues commands, and independently consumes completions. The command and
+<p>The caller blocks for its tensor result, but the native session assigns
+submission IDs, publishes commands, and independently consumes completions. The command and
 completion rings run in opposite directions. Numerical bytes remain in shared
 pages; records contain bounded fixed-width descriptors and scalar metadata.</p>
 <p><strong>Key invariants and nuances</strong></p>
@@ -214,8 +216,8 @@ dynamic operation publication.</p></li>
 public dispatch and lifecycle accounting.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/6845bb43df9e78f0d1717194eac1171d/invocation.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">bind_invocation</span></code></span></a>: transport-neutral
 argument, access, and output planning.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/97baf856e4aef8d9ef05845212d8d421/worker_process.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">_RingClient</span></code></span></a>: producer,
-consumer, pending waiters, deadlines, and profiling boundaries.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/ef8a7315ebf183fa2879e84fc6873307/native_session.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code></span></a>: producer, completion
+dispatcher, pending waiters, deadlines, and profiling boundaries.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/e3bb09a8896b78709eee4ab4966d1323/ring.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/ring.cpp</span></code></span></a>: native SPSC publication and eventfd waits.</p></li>
 </ul>
 </section>
@@ -248,8 +250,8 @@ not the cross-process transport.</p></li>
 <ul class="simple">
 <li><p><a class="reference download internal" download="" href="_downloads/9e7212161c22a14bb16ed4ec914b48bf/buffers.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">BufferManager</span></code></span></a>: allocation,
 access leases, aliases, pooling, arena mode, and reclamation.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/1af72f8e20983903718ea8aa6abd2648/fd_broker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">FdSender</span></code></span></a>: runtime-side
-batched map and retirement protocol.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/ef8a7315ebf183fa2879e84fc6873307/native_session.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code></span></a>: runtime-side batched map
+and retirement protocol.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/093a9b5153ee626874bb77400d68f121/fd_transport.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">FdReceiver</span></code></span></a>: Python
 worker mapped-buffer endpoint.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/beb33451f69c99e2ff618044af64b19d/reference_mapped_buffers.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">MappedBufferCache</span></code></span></a>: C++ worker mapping
@@ -288,10 +290,8 @@ violate runtime ownership and descriptor bounds.</p></li>
 and dtype expression evaluation.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/6845bb43df9e78f0d1717194eac1171d/invocation.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">plan_outputs</span></code></span></a>: runtime validation and
 reusable <code class="docutils literal notranslate"><span class="pre">out=</span></code> handling.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/14193a6595d87e4b7d4a507f179024d6/native_worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">NativeWorkerSession._plan_dynamic_outputs</span></code></span></a>:
-native-control dynamic planning command.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/97baf856e4aef8d9ef05845212d8d421/worker_process.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">WorkerSession._plan_dynamic_outputs</span></code></span></a>:
-Python-control equivalent.</p></li>
+native ring dynamic planning command orchestration.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/55e5412f734af5ce4934795a6447fff9/reference_worker.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">run_ring</span></code></span></a>: C++ planning and invocation command
 handling.</p></li>
 </ul>
@@ -323,8 +323,8 @@ and repeated close calls are safe.</p></li>
 <ul class="simple">
 <li><p><a class="reference download internal" download="" href="_downloads/42620031185dfdb4e060fe10267b7b87/errors.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">transport/errors.py</span></code></span></a>: operation
 versus worker-transport exception types.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/97baf856e4aef8d9ef05845212d8d421/worker_process.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">_RingClient._fail</span></code></span></a>: one
-fatal error propagated to all pending submissions.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/ef8a7315ebf183fa2879e84fc6873307/native_session.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">Session::Impl::fail_ring</span></code></span></a>: one fatal error
+propagated to all pending submissions.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/6650245697a7021efb03165562480d38/isolated.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">IsolatedBackend._evict_session</span></code></span></a>:
 failed-session eviction and cleanup.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/9e7212161c22a14bb16ed4ec914b48bf/buffers.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">BufferManager._release_pooled_many</span></code></span></a>:
@@ -343,10 +343,11 @@ recoverable errors, hostile workers, deadlines, FD failures, and reaping.</p></l
 packaging and adapter boundaries.</span><a class="headerlink" href="#id8" title="Link to this image">¶</a></p>
 </figcaption>
 </figure>
-<p>The application runtime remains Python-owned in both control modes. Native mode
-uses the nanobind <code class="docutils literal notranslate"><span class="pre">wmfs._native.Session</span></code> for startup and FD control, but ordinary
-ring submissions still flow through Python’s <code class="docutils literal notranslate"><span class="pre">_RingClient</span></code>. A Python worker uses
-the standalone SDK and generated Python adapter. The current C++ reference
+<p>Python orchestrates worker startup, but isolated steady-state transport requires
+the nanobind <code class="docutils literal notranslate"><span class="pre">wmfs._native.Session</span></code> for lifecycle, FD control, command
+publication, and completion dispatch. There is no host-side Python transport
+fallback. A Python worker uses the standalone SDK and generated Python adapter
+as the peer endpoint. The current C++ reference
 worker owns the ring loop and invokes the same generated plugin entry table used
 by the bundled build before calling transport-neutral LibTorch kernels.</p>
 <p><strong>Key invariants and nuances</strong></p>
@@ -360,10 +361,10 @@ generated scope, including lifecycle/config/log declarations, with GCC 4.8.5.</p
 </ul>
 <p><strong>Read the implementation</strong></p>
 <ul class="simple">
-<li><p><a class="reference download internal" download="" href="_downloads/14193a6595d87e4b7d4a507f179024d6/native_worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">native_worker.py</span></code></span></a>: Python
-orchestration combining native startup/FD control with <code class="docutils literal notranslate"><span class="pre">_RingClient</span></code>.</p></li>
-<li><p><a class="reference download internal" download="" href="_downloads/ef8a7315ebf183fa2879e84fc6873307/native_session.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code></span></a>: nanobind session’s
-fixed lifecycle and FD-control implementation.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/97baf856e4aef8d9ef05845212d8d421/worker_process.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">worker_process.py</span></code></span></a>:
+startup/process orchestration around the mandatory native client.</p></li>
+<li><p><a class="reference download internal" download="" href="_downloads/ef8a7315ebf183fa2879e84fc6873307/native_session.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code></span></a>: nanobind session’s fixed
+lifecycle, FD-control, and ring-dispatch implementation.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/3a29c808d22353ef5cd55e9ae77ca509/worker.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">wmfs_plugin/worker.py</span></code></span></a>: Python
 worker bootstrap and ring dispatch.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/55e5412f734af5ce4934795a6447fff9/reference_worker.cpp"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">src/reference_worker.cpp</span></code></span></a>: C++ reference
@@ -377,16 +378,16 @@ independent runtime/SDK protocol-copy parity.</p></li>
 <section id="benchmarks-and-cross-boundary-tests">
 <h2>Benchmarks and Cross-Boundary Tests<a class="headerlink" href="#benchmarks-and-cross-boundary-tests" title="Link to this heading">¶</a></h2>
 <p>The architecture is measured rather than inferred. <code class="docutils literal notranslate"><span class="pre">wmfs-benchmark</span></code> separates
-local/bundled/isolated initialization, fixed startup/control ping, logging-mode
+bundled Python/native and isolated initialization, fixed startup/control ping, logging-mode
 initialization, ring enqueue and wakeups,
 backpressure, first-use FD transfer and mapping, cached mappings, output
 allocation, known/dynamic output paths, direct/profiled calls, worker view
 construction, kernel time, result materialization, and reclamation. It compares
-local, bundled, and isolated execution using equivalent kernels where possible.</p>
+bundled Python, bundled native, and isolated execution using equivalent kernels.</p>
 <p><strong>Read the implementation</strong></p>
 <ul class="simple">
 <li><p><a class="reference download internal" download="" href="_downloads/1dd75b50f0ce50da20a82b6f01e204ad/benchmark.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">benchmark.py</span></code></span></a>: measurement boundaries,
-report schema, and local/bundled/isolated comparisons.</p></li>
+report schema and bundled/isolated comparisons.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/ec5c4808ac4ebcda39a7c330772b6513/README.md"><code class="xref download docutils literal notranslate"><span class="pre">benchmarks/README.md</span></code></a>: reproducible
 benchmark workflow and checked reports.</p></li>
 <li><p><a class="reference download internal" download="" href="_downloads/db574449bf6b4b707fe6711f7f299458/test_benchmark.py"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">tests/integration/test_benchmark.py</span></code></span></a>:

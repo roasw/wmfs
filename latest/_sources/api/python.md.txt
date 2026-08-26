@@ -35,8 +35,8 @@ public API does not expose command records or mandatory futures. `ping()` and
 Write a versioned `interface.toml`, run `wmfs-tool generate`, and commit the
 manifest, C/C++11 ABI files, and Python metadata/stubs. Package and runtime builds
 consume those committed files. CI runs the same command with `--check`; plugins
-do not depend on `wmfs-tool` at runtime. Python worker distributions depend on
-`wmfs-plugin`; C++ workers do not.
+do not depend on `wmfs-tool` at runtime. Every Python plugin distribution
+depends on `wmfs-plugin`; C++ workers do not.
 
 ## Runtime
 
@@ -57,7 +57,7 @@ do not depend on `wmfs-tool` at runtime. Python worker distributions depend on
 `Runtime.load_plugins` is the worker-free manifest path used before
 `list_configurable`, `validate_config`, and `configure_plugin`. Configuration is
 canonicalized without inserting defaults and becomes immutable at plugin
-initialization. Local and bundled plugins initialize when selected; isolated
+initialization. Bundled plugins initialize when selected; isolated
 plugins initialize during eager discovery. `Runtime.close` invokes enabled
 shutdown hooks and resets lifecycle state.
 
@@ -67,8 +67,8 @@ bounded local sink; neither shares operation or FD-control traffic.
 
 ## Plugin SDK
 
-`wmfs-plugin` is documented and tested as an independent Python-worker SDK.
-Core runtime documentation deliberately does not import it: runtime and worker
-SDK packages carry compatible protocol definitions but may be installed in
-different environments. See `packages/wmfs-plugin/README.md` and generated
-Python interface stubs for its worker-facing API.
+`wmfs-plugin` is documented and tested as an independent Python plugin SDK.
+The core runtime deliberately does not import it; Python plugin distributions
+bring the facade and compatible worker protocol definitions into bundled or
+isolated environments. See `packages/wmfs-plugin/README.md` and generated
+Python interface stubs.

@@ -1,109 +1,71 @@
-# Benchmark Baselines
+# Benchmark Reports
 
-The reports were generated on 2026-08-15 with:
+Retained reports use explicit revision names:
+
+- `benchmark-0.1.0.json`: packaged Release benchmark from tag `0.1.0`.
+- `benchmark-a137cb1.json`: schema-11 report after native ring optimization and
+  before removal of the public local backend.
+- `benchmark-3b2c5c4.json`: schema-12 report before native host transport became
+  mandatory.
+- `benchmark-master.json`: schema-13 mandatory-native-client report.
+
+The reports were generated on 2026-08-24 on the same WSL2 host with Python
+3.14.6, Torch 2.12.0, glibc 2.42, float32 tensors, and one Torch thread. Each
+operation was warmed up twice and measured ten times.
+
+Generate a comparable report with:
 
 ```console
-just benchmark-json benchmarks/baseline.json
-just benchmark-json benchmarks/arena.json arena
+just benchmark-json benchmarks/benchmark-master.json
 ```
 
-The recipes use the packaged Release runtime and worker. Use `just benchmark`
-or `just benchmark arena` for the same measurements rendered interactively.
+Use an explicit mode suffix when retaining an arena result:
 
-The runtime used Python 3.14.6 and Torch 2.12.0. The native runtime extension
-and C++ worker were built in Release mode by their Nix packages. The worker
-contained no Python runtime and linked directly to LibTorch 2.12.0. Both used
-glibc 2.42.
-Torch was limited to one CPU thread. Each operation was warmed up twice, then
-measured ten times. The checked report envelopes use schema 11 and explicitly
-contain no current operation samples because bundled measurements have not been
-generated on the reference host. Their `historical_report` links point to the
-earlier schema 5 numeric reports retained as `baseline.schema5.json` and
-`arena.schema5.json`, rather than relabeling or fabricating results. Those
-legacy boundaries included result destruction and safe-pool
-retirement/reset in isolated end-to-end samples. New schema 11 reports contain
-local, bundled, and isolated samples keyed by backend. All primary samples stop
-at backend return and post-return cleanup is measured separately.
-Known outputs are preallocated from schema metadata and each operation uses the
-command/completion rings. A fixed `SOCK_SEQPACKET` protocol owns startup/control
-and transfers descriptor roles with `SCM_RIGHTS`. The table reports
-medians; the JSON reports also contain p95, standard deviation, allocation
-statistics, and transport diagnostics. Pooled reclamation diagnostics use
-internal cumulative metric deltas and report the reclaimed-buffer population,
-recipient retirement, and memfd reset time for each sample.
+```console
+just benchmark-json benchmarks/benchmark-master-arena.json arena
+```
 
-| Mode   | Operation  | Size             | Local (ms) | Isolated (ms) | Overhead (ms) | Overhead |
-| ------ | ---------- | ---------------- | ---------: | ------------: | ------------: | -------: |
-| pooled | matmul     | 64 x 64          |      0.018 |         0.349 |         0.331 |  1793.1% |
-| arena  | matmul     | 64 x 64          |      0.015 |         0.279 |         0.264 |  1722.0% |
-| pooled | matmul     | 256 x 256        |      0.237 |         0.893 |         0.655 |   275.9% |
-| arena  | matmul     | 256 x 256        |      0.230 |         0.521 |         0.291 |   126.7% |
-| pooled | matmul     | 2048 x 2048      |    122.849 |       130.373 |         7.524 |     6.1% |
-| arena  | matmul     | 2048 x 2048      |    121.406 |       123.634 |         2.228 |     1.8% |
-| pooled | SVD        | 32 x 32          |      0.114 |         0.776 |         0.662 |   578.3% |
-| arena  | SVD        | 32 x 32          |      0.111 |         0.445 |         0.334 |   300.2% |
-| pooled | SVD        | 128 x 128        |      0.993 |         1.743 |         0.750 |    75.5% |
-| arena  | SVD        | 128 x 128        |      0.995 |         1.453 |         0.458 |    46.0% |
-| pooled | SVD        | 768 x 768        |     66.120 |        73.866 |         7.746 |    11.7% |
-| arena  | SVD        | 768 x 768        |     63.988 |        70.318 |         6.330 |     9.9% |
-| pooled | add_scalar | 4096 elements    |      0.019 |         0.412 |         0.392 |  2033.1% |
-| arena  | add_scalar | 4096 elements    |      0.018 |         0.266 |         0.248 |  1386.7% |
-| pooled | add_scalar | 1048576 elements |      0.177 |         2.001 |         1.824 |  1030.4% |
-| arena  | add_scalar | 1048576 elements |      0.187 |         0.645 |         0.459 |   245.7% |
+The recipes use the packaged Release runtime and worker. `just benchmark` and
+`just benchmark arena` render the same measurements interactively.
 
-Safe pooling reached 91.2% hit rates and bounded each case to three or five
-memfds. It preserves one-FD-per-buffer capabilities, so each reused generation
-still incurs acknowledged worker retirement and a new FD mapping. The arena
-reached 97.1% suballocation hit rates with one memfd.
+## Comparison Contract
 
-The historical Cap'n Proto RPC-only median latency was 0.082 ms pooled and 0.081
-ms in the arena. It remains labeled as the old RPC baseline rather than being
-reinterpreted as a ring measurement. The
-schema 5 1,000-call high-frequency `add_scalar` run measured 0.337 ms median and
-2,502 calls/s pooled, versus 0.226 ms and 4,107 calls/s in the arena. Reusing a
-managed `out=` tensor reduced these to 0.262 ms and 3,186 calls/s pooled, and
-0.183 ms and 4,675 calls/s in the arena. Current reports label backend-return
-call latency separately from cleanup-inclusive whole-loop throughput. These are
-sequential synchronous calls, not batched operations.
+Schema 9 through schema 13 primary backend samples stop at backend return.
+Result destruction, buffer retirement, collection, and allocator reset are
+measured separately. Cleanup-inclusive high-frequency throughput includes that
+work.
 
-The profile identified repeated worker tensor-view construction as the largest
-avoidable cheap-operation cost. Caching validated views per worker mapping
-reduced combined Python input/output view construction from about 0.070 ms to
-about 0.020 ms. Implementing the worker control plane and ATen views in C++
-reduced that to about 0.003 ms and removed pycapnp and asyncio from steady-state
-dispatch. Compared with the optimized Python worker report, arena small
-`add_scalar` fell from 0.431 ms to 0.198 ms and high-frequency latency fell from
-0.342 ms to 0.186 ms. Detailed JSON diagnostics separate scalar binding,
-output-plan evaluation, ring submission/enqueue, wakeup, worker queue, worker
-views, dispatch, kernel, completion, and materialization. Schema 11 also records
-an independent ring ping and a capacity-1 concurrent pressure probe. It
-separately measures absent and configured initialization for local, bundled,
-and isolated backends; isolated disabled, centralized, and worker-file logging
-startup; direct and opt-in profiled calls; and known preallocated versus dynamic
-planned outputs. These are reproducible microgroups, not values inferred by
-subtraction. The
-pressure probe holds each ping in the worker for a recorded 1 ms so the producer
-reliably reaches capacity and reports the actual eventfd backpressure wait, while
-retaining fixed-protocol ping as the startup/control comparison. Diagnostics are
-grouped by Python frontend, ring/control, mapping/transport, allocation,
-reclamation, and kernel provenance. It does not derive a residual Python
-bookkeeping value from overlapping component timers. Profiling is opt-in on
-each invocation, so ordinary calls do not execute the timing code.
+`benchmark-0.1.0.json` measures the fixed Cap'n Proto RPC operation path after
+dynamic output allocation support was added. `benchmark-a137cb1.json` preserves
+the former local/bundled/isolated schema. `benchmark-3b2c5c4.json` preserves the
+selectable-client schema. `benchmark-master.json` compares bundled Python,
+bundled native, and mandatory-native-client isolated execution and includes
+initialization, logging modes, ring pressure, direct/profiled calls, and known
+versus dynamic output paths.
 
-Protocol v7 separates ordinary completion from profiled metrics. The native
-client also caches value-only tensor descriptors and replaces its allocating
-promise/function queue with a synchronous semaphore handoff. These changes
-reduce allocation pressure but did not move ordinary end-to-end latency beyond
-run-to-run noise: RPC and thread wakeup dominated that historical implementation. Reusable
-outputs are the measurable remaining eager-path optimization, improving the
-high-frequency cheap-operation median by roughly 19-22% in this report.
+The reports are not interchangeable schemas. Compare fields using their
+embedded `measurement_boundaries`, `comparison_contract`, and
+`diagnostic_provenance` metadata rather than renaming old fields.
 
-These historical values characterize one WSL2 host and are not performance
-thresholds. Regenerate both schema 11 reports on the target system when
-evaluating the security and performance tradeoff. Compare local, bundled, and
-isolated under identical settings; bundled versus isolated is the focused
-isolation comparison because it holds the reference C++ kernel constant. Only
-consider moving scalar binding, output planning, or other Python bookkeeping to
-C++ after repeated profiles show that specific boundary is material relative to
-end-to-end latency and run-to-run spread. Already-small paths are not
-optimization targets by default.
+## Transport Result
+
+| Revision | Transport probe | Median (ms) | p95 (ms) |
+| -------- | --------------- | ----------: | -------: |
+| 0.1.0    | RPC round trip  |       0.092 |    0.196 |
+| master   | Ring round trip |       0.065 |    0.101 |
+
+The native ring dispatcher is 30% faster at the median than the freshly
+measured `0.1.0` RPC baseline. It publishes fixed-width records directly from
+C++, consumes completions on a native dispatcher, and does not serialize ring
+records through Python.
+
+The ring result does not imply that the complete cheap-operation path is faster.
+Sequential cleanup-inclusive `add_scalar` throughput is 2,367 calls/s in
+`0.1.0` and 1,130 calls/s on master; with reusable `out=`, it is 2,848 calls/s
+and 1,326 calls/s respectively. Mapping, allocation, reclamation, and Python
+orchestration remain outside the ring probe and are the next relevant
+optimization boundaries.
+
+These measurements characterize one host and are not performance thresholds.
+Regenerate explicitly named reports on the target system when evaluating the
+isolation tradeoff.

@@ -1,5 +1,6 @@
 #include "wmfs/native/session.hpp"
 #include "wmfs/protocol/control.h"
+#include "wmfs/ring.hpp"
 #include "wmfs/unique_fd.hpp"
 
 #include <sys/socket.h>
@@ -12,11 +13,14 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -56,16 +60,62 @@ void set_timeout(int fd, double seconds) {
         throw std::runtime_error("Cannot set native fixed-protocol deadline");
 }
 
+std::uint64_t monotonic_nanoseconds() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+std::uint64_t ordered_delta(std::uint64_t later, std::uint64_t earlier) {
+    return later > earlier ? later - earlier : 0;
+}
+
 } // namespace
 
 struct Session::Impl {
+    struct PendingSubmission {
+        std::mutex mutex;
+        std::condition_variable ready;
+        wmfs_ring_record_v1 completion{};
+        std::exception_ptr error;
+        std::uint64_t completion_consumed_ns{};
+        bool completed{};
+    };
+
     Impl(int lifecycle_fd, int fd_control, std::uint64_t,
          std::uint64_t ring_generation, std::uint32_t, double,
-         double request_timeout, double fd_timeout)
+         double request_timeout, double fd_timeout, int command_ring_fd,
+         int command_data_fd, int command_space_fd, int completion_ring_fd,
+         int completion_data_fd, int completion_space_fd)
         : lifecycle(lifecycle_fd), control(fd_control),
           generation(ring_generation) {
+        UniqueFd command_ring(command_ring_fd);
+        UniqueFd command_data(command_data_fd);
+        UniqueFd command_space(command_space_fd);
+        UniqueFd completion_ring(completion_ring_fd);
+        UniqueFd completion_data(completion_data_fd);
+        UniqueFd completion_space(completion_space_fd);
         set_timeout(lifecycle.get(), request_timeout);
         set_timeout(control.get(), fd_timeout);
+        const bool has_rings =
+            command_ring_fd >= 0 || command_data_fd >= 0 ||
+            command_space_fd >= 0 || completion_ring_fd >= 0 ||
+            completion_data_fd >= 0 || completion_space_fd >= 0;
+        if (has_rings) {
+            if (command_ring_fd < 0 || command_data_fd < 0 ||
+                command_space_fd < 0 || completion_ring_fd < 0 ||
+                completion_data_fd < 0 || completion_space_fd < 0)
+                throw std::invalid_argument(
+                    "Native ring dispatcher requires all six descriptors");
+            commands = std::make_unique<RingProducer>(RingProducer::borrow(
+                std::move(command_ring), std::move(command_data),
+                std::move(command_space), generation));
+            completions = std::make_unique<RingConsumer>(RingConsumer::borrow(
+                std::move(completion_ring), std::move(completion_data),
+                std::move(completion_space), generation));
+            completion_thread = std::thread([this] { consume_completions(); });
+        }
     }
 
     ~Impl() {
@@ -160,6 +210,157 @@ struct Session::Impl {
                             error.size));
     }
 
+    void fail_ring(std::exception_ptr error) {
+        std::vector<std::shared_ptr<PendingSubmission>> failed;
+        {
+            std::lock_guard lock(pending_mutex);
+            if (!ring_error)
+                ring_error = error;
+            for (const auto &item : pending)
+                failed.push_back(item.second);
+            pending.clear();
+        }
+        for (const auto &submission : failed) {
+            {
+                std::lock_guard lock(submission->mutex);
+                submission->error = ring_error;
+                submission->completed = true;
+            }
+            submission->ready.notify_one();
+        }
+    }
+
+    void consume_completions() {
+        try {
+            for (;;) {
+                wmfs_ring_record_v1 completion{};
+                const auto result = completions->pop(completion);
+                if (result != RingWaitResult::success)
+                    throw std::runtime_error(
+                        result == RingWaitResult::timeout
+                            ? "Native completion ring timed out"
+                            : "Native completion ring closed");
+                std::shared_ptr<PendingSubmission> submission;
+                {
+                    std::lock_guard lock(pending_mutex);
+                    const auto item = pending.find(completion.submission_id);
+                    if (item == pending.end())
+                        throw std::runtime_error(
+                            "Native completion has unknown submission ID");
+                    submission = item->second;
+                    pending.erase(item);
+                }
+                {
+                    std::lock_guard lock(submission->mutex);
+                    submission->completion = completion;
+                    if (completion.flags & WMFS_RING_RECORD_FLAG_PROFILE)
+                        submission->completion_consumed_ns =
+                            monotonic_nanoseconds();
+                    submission->completed = true;
+                }
+                submission->ready.notify_one();
+            }
+        } catch (...) {
+            fail_ring(std::current_exception());
+        }
+    }
+
+    RingSubmissionResult submit_ring(wmfs_ring_record_v1 command,
+                                     double timeout_seconds, bool profiled) {
+        if (!commands || !completions)
+            throw std::runtime_error("Native ring dispatcher is unavailable");
+        if (!std::isfinite(timeout_seconds) || timeout_seconds <= 0)
+            throw std::invalid_argument(
+                "Native ring deadline must be positive");
+
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(timeout_seconds));
+        const auto submitted_ns = profiled ? monotonic_nanoseconds() : 0;
+        auto submission = std::make_shared<PendingSubmission>();
+        {
+            std::lock_guard lock(pending_mutex);
+            if (ring_error)
+                std::rethrow_exception(ring_error);
+            if (next_submission == 0)
+                throw std::overflow_error("Native ring submission ID overflow");
+            command.submission_id = next_submission++;
+            command.flags =
+                profiled ? command.flags | WMFS_RING_RECORD_FLAG_PROFILE
+                         : command.flags & ~WMFS_RING_RECORD_FLAG_PROFILE;
+            pending.emplace(command.submission_id, submission);
+        }
+
+        RingSubmissionMetrics metrics{};
+        try {
+            std::lock_guard producer_lock(producer_mutex);
+            const auto producer_started_ns =
+                profiled ? monotonic_nanoseconds() : 0;
+            if (profiled)
+                command.profile.command_published_ns = monotonic_nanoseconds();
+            if (!commands->try_push(command)) {
+                const auto wait_started_ns =
+                    profiled ? monotonic_nanoseconds() : 0;
+                const auto result = commands->push(command, deadline);
+                if (result != RingWaitResult::success)
+                    throw std::runtime_error(
+                        result == RingWaitResult::timeout
+                            ? "Native command ring deadline expired"
+                            : "Native command ring closed");
+                if (profiled)
+                    metrics.backpressure_wait_ns =
+                        monotonic_nanoseconds() - wait_started_ns;
+            }
+            if (profiled) {
+                const auto published_ns = monotonic_nanoseconds();
+                metrics.submission_queue_ns =
+                    ordered_delta(producer_started_ns, submitted_ns);
+                metrics.enqueue_ns =
+                    ordered_delta(published_ns, producer_started_ns);
+            }
+        } catch (...) {
+            {
+                std::lock_guard lock(pending_mutex);
+                pending.erase(command.submission_id);
+            }
+            fail_ring(std::current_exception());
+            throw;
+        }
+
+        std::unique_lock lock(submission->mutex);
+        if (!submission->ready.wait_until(
+                lock, deadline, [&] { return submission->completed; })) {
+            lock.unlock();
+            const auto error = std::make_exception_ptr(
+                std::runtime_error("Native ring completion deadline expired"));
+            fail_ring(error);
+            std::rethrow_exception(error);
+        }
+        if (submission->error)
+            std::rethrow_exception(submission->error);
+
+        RingSubmissionResult result;
+        result.completion = submission->completion;
+        if (profiled) {
+            const auto returned_ns = monotonic_nanoseconds();
+            const auto &worker = result.completion.profile;
+            metrics.round_trip_ns = ordered_delta(returned_ns, submitted_ns);
+            metrics.command_wakeup_ns = ordered_delta(
+                worker.worker_dequeued_ns, worker.command_published_ns);
+            metrics.worker_queue_ns = ordered_delta(worker.worker_started_ns,
+                                                    worker.worker_dequeued_ns);
+            metrics.worker_kernel_ns = worker.worker_kernel_ns;
+            metrics.completion_wakeup_ns =
+                ordered_delta(submission->completion_consumed_ns,
+                              worker.completion_published_ns);
+            metrics.result_materialization_ns =
+                ordered_delta(returned_ns, submission->completion_consumed_ns);
+            result.metrics = metrics;
+        }
+        return result;
+    }
+
     std::size_t transfer_batched(const std::vector<Mapping> &values,
                                  const std::vector<bool> &maps,
                                  std::vector<int> fds) {
@@ -241,6 +442,12 @@ struct Session::Impl {
         }
         ::shutdown(lifecycle.get(), SHUT_RDWR);
         ::shutdown(control.get(), SHUT_RDWR);
+        if (commands)
+            commands->close();
+        if (completions)
+            completions->close();
+        if (completion_thread.joinable())
+            completion_thread.join();
         mappings.clear();
         if (error)
             std::rethrow_exception(error);
@@ -248,6 +455,9 @@ struct Session::Impl {
 
     UniqueFd lifecycle;
     UniqueFd control;
+    std::unique_ptr<RingProducer> commands;
+    std::unique_ptr<RingConsumer> completions;
+    std::thread completion_thread;
     std::uint64_t generation;
     std::uint64_t next_transfer{1};
     std::uint64_t next_request{1};
@@ -258,17 +468,28 @@ struct Session::Impl {
     std::uint64_t retirement_batches{};
     bool closed{};
     mutable std::mutex mutex;
+    std::mutex producer_mutex;
+    std::mutex pending_mutex;
+    std::unordered_map<std::uint64_t, std::shared_ptr<PendingSubmission>>
+        pending;
+    std::uint64_t next_submission{1};
+    std::exception_ptr ring_error;
 };
 
 Session::Session(int lifecycle_fd, int control_fd,
                  std::uint64_t expected_fingerprint,
                  double startup_timeout_seconds, double request_timeout_seconds,
                  double fd_transfer_timeout_seconds,
-                 std::uint64_t ring_generation, std::uint32_t ring_capacity)
+                 std::uint64_t ring_generation, std::uint32_t ring_capacity,
+                 int command_ring_fd, int command_data_fd, int command_space_fd,
+                 int completion_ring_fd, int completion_data_fd,
+                 int completion_space_fd)
     : impl_(std::make_unique<Impl>(
           lifecycle_fd, control_fd, expected_fingerprint, ring_generation,
           ring_capacity, startup_timeout_seconds, request_timeout_seconds,
-          fd_transfer_timeout_seconds)) {}
+          fd_transfer_timeout_seconds, command_ring_fd, command_data_fd,
+          command_space_fd, completion_ring_fd, completion_data_fd,
+          completion_space_fd)) {}
 
 Session::~Session() = default;
 
@@ -366,6 +587,12 @@ OutputPlanningResult
 Session::plan_outputs(std::uint64_t, std::uint32_t, const TensorDescriptors &,
                       const std::vector<ScalarArgument> &) {
     throw std::runtime_error("Output planning is available only through rings");
+}
+
+RingSubmissionResult Session::submit_ring(wmfs_ring_record_v1 command,
+                                          double timeout_seconds,
+                                          bool profiled) {
+    return impl_->submit_ring(command, timeout_seconds, profiled);
 }
 
 void Session::ping(std::uint64_t) {

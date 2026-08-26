@@ -49,7 +49,7 @@ let
         pkgs.python3Packages.numpy
         pkgs.python3Packages.torch
       ]
-      ++ pkgs.lib.optionals bundled [ workers.reference-local ];
+      ++ pkgs.lib.optionals bundled [ workers.reference-python-plugin ];
 
       nativeCheckInputs = [
         pkgs.python3Packages.pytest
@@ -61,7 +61,9 @@ let
       checkPhase = ''
         runHook preCheck
         cd "$NIX_BUILD_TOP/$sourceRoot"
-        python -c "import importlib.util; assert importlib.util.find_spec('wmfs_plugin') is None"
+        python -c "import importlib.util; assert (importlib.util.find_spec('wmfs_plugin') is not None) == ${
+          if bundled then "True" else "False"
+        }"
         for layer in ${if bundled then "contract package" else "unit contract integration native"}; do
           pytest -c pytest.ini -m "$layer" packages/wmfs/tests tests/integration
         done
@@ -85,7 +87,7 @@ let
         -p no:cacheprovider \
         -q ${source}/tests/integration/test_bundled.py
     env -u PYTHONPATH ${bundledTestPython}/bin/python3 -c \
-      "import importlib.util; assert importlib.util.find_spec('wmfs_plugin') is None"
+      "import importlib.util; assert importlib.util.find_spec('wmfs_plugin') is not None"
     touch "$out"
   '';
   benchmark = pkgs.writeShellApplication {

@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import os
-import queue
 import secrets
 import shutil
 import socket
@@ -12,7 +11,7 @@ import subprocess
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import TYPE_CHECKING
 
@@ -40,7 +39,6 @@ from wmfs.protocol.control import (
     decode_error,
     decode_frame,
     decode_startup,
-    encode_empty,
     encode_startup,
     recvmsg_strict,
     sendmsg_strict,
@@ -52,7 +50,6 @@ from wmfs.registry import (
 )
 from wmfs.transport.deadlines import DEFAULT_TRANSPORT_DEADLINES, TransportDeadlines
 from wmfs.transport.errors import OperationError, WorkerTransportError
-from wmfs.transport.fd_broker import FdSender
 from wmfs.transport.ring import (
     ABI_MAJOR,
     ABI_MINOR,
@@ -69,150 +66,17 @@ from wmfs.transport.ring import (
     TENSOR_INPUT,
     TENSOR_OUTPUT,
     Record,
-    RingEndpoint,
     RingError,
     RingOwner,
     scalar_arguments,
     tensor_from_descriptor,
 )
+from wmfs.transport.ring import (
+    PlannedOutput as RingPlannedOutput,
+)
 
 if TYPE_CHECKING:
     from wmfs.plugins import PluginManifest
-
-
-class _RingClient:
-    def __init__(
-        self,
-        commands: RingEndpoint,
-        completions: RingEndpoint,
-    ) -> None:
-        self._commands = commands
-        self._completions = completions
-        self.generation = commands.generation
-        self.handshake = (
-            ABI_MAJOR,
-            ABI_MINOR,
-            HEADER_SIZE,
-            RECORD_SIZE,
-            commands.capacity,
-            commands.generation,
-            CAPABILITIES,
-        )
-        self._outbound: queue.Queue[Record | None] = queue.Queue()
-        self._pending: dict[int, _PendingRingSubmission] = {}
-        self._lock = threading.Lock()
-        self._next_submission = 1
-        self._fatal: BaseException | None = None
-        self._producer = threading.Thread(target=self._produce, daemon=True)
-        self._consumer = threading.Thread(target=self._consume, daemon=True)
-        self._producer.start()
-        self._consumer.start()
-
-    def submit(self, record: Record, timeout: float) -> Record:
-        pending = _PendingRingSubmission()
-        self._enqueue(record, pending)
-        return self._wait(pending, timeout)
-
-    def submit_profiled(
-        self, record: Record, timeout: float
-    ) -> tuple[Record, "RingSubmissionMetrics"]:
-        submitted_ns = perf_counter_ns()
-        pending = _ProfiledRingSubmission(submitted_ns=submitted_ns)
-        record.flags |= FLAG_PROFILE
-        self._enqueue(record, pending)
-        result = self._wait(pending, timeout)
-        returned_ns = perf_counter_ns()
-        profile = result.profile
-        return result, RingSubmissionMetrics(
-            round_trip_ns=returned_ns - submitted_ns,
-            submission_queue_ns=max(0, pending.producer_started_ns - submitted_ns),
-            enqueue_ns=max(
-                0, pending.command_published_ns - pending.producer_started_ns
-            ),
-            backpressure_wait_ns=pending.backpressure_wait_ns,
-            command_wakeup_ns=_ordered_delta(profile[1], profile[0]),
-            worker_queue_ns=_ordered_delta(profile[2], profile[1]),
-            worker_kernel_ns=int(profile[6]),
-            completion_wakeup_ns=_ordered_delta(
-                pending.completion_consumed_ns, profile[7]
-            ),
-            result_materialization_ns=max(
-                0, returned_ns - pending.completion_consumed_ns
-            ),
-        )
-
-    def _enqueue(self, record: Record, pending: "_PendingRingSubmission") -> None:
-        with self._lock:
-            if self._fatal is not None:
-                raise RingError("ring dispatcher failed") from self._fatal
-            submission = self._next_submission
-            self._next_submission += 1
-            record.submission_id = submission
-            self._pending[submission] = pending
-        self._outbound.put(record)
-
-    def _wait(self, pending: "_PendingRingSubmission", timeout: float) -> Record:
-        try:
-            result = pending.waiter.get(timeout=timeout)
-        except queue.Empty:
-            self._fail(RingError("ring completion deadline expired"))
-            raise TimeoutError("ring completion deadline expired") from None
-        if isinstance(result, BaseException):
-            raise result
-        pending.produced.wait()
-        return result
-
-    def _produce(self) -> None:
-        try:
-            while (record := self._outbound.get()) is not None:
-                with self._lock:
-                    pending = self._pending.get(record.submission_id)
-                if pending is None:
-                    raise RingError("ring command has no pending submission")
-                if isinstance(pending, _ProfiledRingSubmission):
-                    pending.producer_started_ns = perf_counter_ns()
-                    pending.backpressure_wait_ns = self._commands.push_profiled(record)
-                    pending.command_published_ns = perf_counter_ns()
-                else:
-                    self._commands.push(record)
-                pending.produced.set()
-        except BaseException as error:
-            self._fail(error)
-
-    def _consume(self) -> None:
-        try:
-            while True:
-                completion = self._completions.pop()
-                with self._lock:
-                    pending = self._pending.pop(completion.submission_id, None)
-                if pending is None:
-                    raise RingError("completion has unknown submission ID")
-                if isinstance(pending, _ProfiledRingSubmission):
-                    pending.completion_consumed_ns = perf_counter_ns()
-                pending.waiter.put(completion)
-        except BaseException as error:
-            self._fail(error)
-
-    def _fail(self, error: BaseException) -> None:
-        with self._lock:
-            if self._fatal is not None:
-                return
-            self._fatal = error
-            pending = tuple(self._pending.values())
-            self._pending.clear()
-        for submission in pending:
-            submission.produced.set()
-            submission.waiter.put(error)
-
-    def close(self) -> None:
-        self._fail(RingError("ring dispatcher is closed"))
-        self._outbound.put(None)
-        self._commands.interrupt()
-        self._completions.interrupt()
-        self._producer.join(timeout=1)
-        self._consumer.join(timeout=1)
-        self._commands.close()
-        self._completions.close()
 
 
 @dataclass(frozen=True)
@@ -228,30 +92,54 @@ class RingSubmissionMetrics:
     result_materialization_ns: int
 
 
-@dataclass
-class _PendingRingSubmission:
-    waiter: queue.Queue[Record | BaseException] = field(
-        default_factory=lambda: queue.Queue(maxsize=1)
-    )
-    produced: threading.Event = field(default_factory=threading.Event)
+class _NativeRingClient:
+    def __init__(self, session: object, generation: int, capacity: int) -> None:
+        self._session = session
+        self.generation = generation
+        self.handshake = (
+            ABI_MAJOR,
+            ABI_MINOR,
+            HEADER_SIZE,
+            RECORD_SIZE,
+            capacity,
+            generation,
+            CAPABILITIES,
+        )
 
+    def submit(self, record: Record, timeout: float) -> Record:
+        completion, _metrics = self._session.submit_ring(record, timeout, False)
+        return self._completion(completion)
 
-@dataclass
-class _ProfiledRingSubmission(_PendingRingSubmission):
-    submitted_ns: int = 0
-    producer_started_ns: int = 0
-    command_published_ns: int = 0
-    backpressure_wait_ns: int = 0
-    completion_consumed_ns: int = 0
+    def submit_profiled(
+        self, record: Record, timeout: float
+    ) -> tuple[Record, RingSubmissionMetrics]:
+        completion, metrics = self._session.submit_ring(record, timeout, True)
+        return self._completion(completion), RingSubmissionMetrics(**metrics)
 
+    @staticmethod
+    def _completion(value: dict[str, object]) -> Record:
+        return Record(
+            kind=int(value["kind"]),
+            generation=int(value["generation"]),
+            submission_id=int(value["submission_id"]),
+            invocation_id=int(value["invocation_id"]),
+            operation_id=int(value["operation_id"]),
+            status=int(value["status"]),
+            flags=int(value["flags"]),
+            outputs=tuple(
+                RingPlannedOutput(int(output), tuple(shape), str(dtype))
+                for output, shape, dtype in value["outputs"]  # type: ignore[union-attr]
+            ),
+            profile=tuple(int(item) for item in value["profile"]),  # type: ignore[union-attr]
+            error_type=str(value["error_type"]),
+            error_message=str(value["error_message"]),
+        )
 
-def _ordered_delta(later: int, earlier: int) -> int:
-    return max(0, int(later) - int(earlier)) if later and earlier else 0
+    def close(self) -> None:
+        pass
 
 
 class WorkerSession:
-    _use_native_session = False
-
     def __init__(
         self,
         manifest: "PluginManifest",
@@ -270,8 +158,8 @@ class WorkerSession:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._plugin: object | None = None
         self._operations: dict[str, OperationMetadata] = {}
-        self._fd_sender: FdSender | _NativeSessionAdapter | None = None
-        self._ring_client: _RingClient | None = None
+        self._fd_sender: _NativeSessionAdapter | None = None
+        self._ring_client: _NativeRingClient | None = None
         self._startup_error: BaseException | None = None
         self._shutdown_error: BaseException | None = None
         self._shutdown: asyncio.Event | None = None
@@ -380,9 +268,7 @@ class WorkerSession:
         self._serve_task = asyncio.current_task()
         self._loop = asyncio.get_running_loop()
         self._shutdown = asyncio.Event()
-        async with _worker_connection(
-            self._manifest, self._deadlines, native=self._use_native_session
-        ) as (
+        async with _worker_connection(self._manifest, self._deadlines) as (
             plugin,
             fd_sender,
             ring_client,
@@ -869,34 +755,6 @@ async def _inspect_worker_environment(
         return plugin.environment
 
 
-class _ControlClient:
-    def __init__(self, sock: socket.socket, environment: EnvironmentMetadata) -> None:
-        self._socket = sock
-        self._lock = threading.Lock()
-        self.environment = environment
-
-    def ping(self) -> None:
-        self._round_trip(Kind.PING, Kind.PONG)
-
-    def shutdown(self) -> None:
-        self._round_trip(Kind.SHUTDOWN, Kind.SHUTDOWN_ACK)
-        self._socket.shutdown(socket.SHUT_RDWR)
-
-    def close(self) -> None:
-        self._socket.close()
-
-    def _round_trip(self, sent: Kind, expected: Kind) -> None:
-        request_id = secrets.randbits(64) or 1
-        with self._lock:
-            sendmsg_strict(self._socket, encode_empty(sent, request_id=request_id))
-            packet, fds = recvmsg_strict(self._socket)
-        if fds:
-            raise RuntimeError("lifecycle response carried file descriptors")
-        frame = decode_frame(packet)
-        if frame.kind != expected or frame.request_id != request_id or frame.payload:
-            raise RuntimeError("worker returned an invalid lifecycle response")
-
-
 class _NativeSessionAdapter:
     def __init__(self, session: object, environment: EnvironmentMetadata) -> None:
         self._session = session
@@ -953,9 +811,7 @@ class _NativeSessionAdapter:
 async def _worker_connection(
     manifest: "PluginManifest",
     deadlines: TransportDeadlines,
-    *,
-    native: bool = False,
-) -> AsyncIterator[tuple[object, object, _RingClient]]:
+) -> AsyncIterator[tuple[object, object, _NativeRingClient]]:
     if manifest.format_version == 1:
         raise RuntimeError(
             "Manifest v1 uses legacy control and cannot run isolated; regenerate it as v2"
@@ -980,9 +836,7 @@ async def _worker_connection(
     generation = secrets.randbits(64) or 1
     command_owner = RingOwner(capacity, generation)
     completion_owner = RingOwner(capacity, generation)
-    ring_client = _RingClient(
-        command_owner.endpoint(True), completion_owner.endpoint(False)
-    )
+    ring_client: _NativeRingClient | None = None
     try:
         process = _start_worker(
             manifest,
@@ -1000,13 +854,14 @@ async def _worker_connection(
             collector.close()
         command_owner.close()
         completion_owner.close()
-        ring_client.close()
+        if ring_client is not None:
+            ring_client.close()
         raise
     finally:
         bootstrap_child.close()
 
-    client: _ControlClient | _NativeSessionAdapter | None = None
-    fd_sender: FdSender | _NativeSessionAdapter | None = None
+    client: _NativeSessionAdapter | None = None
+    fd_sender: _NativeSessionAdapter | None = None
     try:
         configuration_fingerprint = (
             bytes.fromhex(manifest.configuration.fingerprint.removeprefix("sha256:"))
@@ -1126,25 +981,28 @@ async def _worker_connection(
             executable=str(environment_data["executable"]),
         )
         bootstrap_parent.settimeout(deadlines.request)
-        if native:
-            import importlib
+        import importlib
 
-            native_module = importlib.import_module("wmfs._native")
-            native_session = native_module.Session(
-                bootstrap_parent.detach(),
-                fd_parent.detach(),
-                manifest.metadata.fingerprint,
-                deadlines.startup,
-                deadlines.request,
-                deadlines.fd_transfer,
-                generation,
-                ring_client.handshake[4],
+        native_module = importlib.import_module("wmfs._native")
+        if not hasattr(native_module.Session, "submit_ring"):
+            raise RuntimeError(
+                "The installed wmfs native extension does not provide ring transport"
             )
-            client = _NativeSessionAdapter(native_session, environment)
-            fd_sender = client
-        else:
-            client = _ControlClient(bootstrap_parent, environment)
-            fd_sender = FdSender(fd_parent, generation, deadlines.fd_transfer)
+        native_session = native_module.Session(
+            bootstrap_parent.detach(),
+            fd_parent.detach(),
+            manifest.metadata.fingerprint,
+            deadlines.startup,
+            deadlines.request,
+            deadlines.fd_transfer,
+            generation,
+            capacity,
+            *(os.dup(fd) for fd in (*command_owner.fds, *completion_owner.fds)),
+        )
+        ring_client = _NativeRingClient(native_session, generation, capacity)
+        client = _NativeSessionAdapter(native_session, environment)
+        fd_sender = client
+        assert ring_client is not None
         yield client, fd_sender, ring_client
     finally:
         cleanup_error: BaseException | None = None
@@ -1170,7 +1028,8 @@ async def _worker_connection(
             fd_sender.worker_exited()
         command_owner.close()
         completion_owner.close()
-        ring_client.close()
+        if ring_client is not None:
+            ring_client.close()
         if log_child is not None:
             log_child.close()
         if log_file_fd is not None:

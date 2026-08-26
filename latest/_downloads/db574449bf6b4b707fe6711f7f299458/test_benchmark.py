@@ -6,7 +6,7 @@ import pytest
 import torch
 
 import wmfs.benchmark as benchmark
-from wmfs.backends.local import LocalBackend
+from wmfs.backends.bundled import BundledBackend
 from wmfs.benchmark import (
     BenchmarkConfig,
     _rotated_backend_names,
@@ -34,23 +34,22 @@ def test_summarize_reports_median_and_nearest_rank_p95() -> None:
     assert summary["standard_deviation_ms"] == pytest.approx(0.0000057663, rel=1e-5)
 
 
-@pytest.mark.parametrize("name", ("baseline", "arena"))
-def test_checked_reports_use_schema_11_without_fabricated_samples(name: str) -> None:
+@pytest.mark.parametrize(
+    ("name", "schema"),
+    (
+        ("benchmark-0.1.0", 9),
+        ("benchmark-a137cb1", 11),
+        ("benchmark-3b2c5c4", 12),
+    ),
+)
+def test_historical_reports_retain_their_original_schema(
+    name: str, schema: int
+) -> None:
     benchmark_directory = Path(__file__).parents[2] / "benchmarks"
     report = json.loads((benchmark_directory / f"{name}.json").read_text())
-    historical = json.loads(
-        (benchmark_directory / report["historical_report"]).read_text()
-    )
 
-    assert report["schema_version"] == 11
-    assert report["backends"] == ["local", "bundled", "isolated"]
-    assert report["operations"] == []
-    assert historical["schema_version"] == 5
-    assert historical["operations"]
-    assert report["historical_measurement_kind"] == (
-        "Cap'n Proto per-operation RPC baseline"
-    )
-    validate_report(report)
+    assert report["schema_version"] == schema
+    assert report["operations"]
 
 
 def test_sample_invocation_separates_call_return_from_cleanup(
@@ -82,20 +81,21 @@ def test_benchmark_order_rotates_each_backend_through_each_position() -> None:
     orders = [_rotated_backend_names(iteration) for iteration in range(3)]
 
     assert all(
-        {order[position] for order in orders} == {"local", "bundled", "isolated"}
+        {order[position] for order in orders}
+        == {"bundled_python", "bundled_native", "isolated"}
         for position in range(3)
     )
-    assert [order[0] for order in orders] == ["local", "bundled", "isolated"]
+    assert [order[0] for order in orders] == [
+        "bundled_python",
+        "bundled_native",
+        "isolated",
+    ]
 
 
-def test_benchmark_requires_bundled_reference_support(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_benchmark_requires_bundled_reference_support() -> None:
     class MissingBundledBackend:
         def invoke(self, *_args: object, **_kwargs: object) -> object:
             raise ModuleNotFoundError("wmfs._bundled")
-
-    monkeypatch.setattr(benchmark, "BundledBackend", MissingBundledBackend)
 
     with pytest.raises(RuntimeError, match="requires packaged wmfs support"):
         run_benchmarks(
@@ -111,6 +111,7 @@ def test_benchmark_requires_bundled_reference_support(
                 backpressure_iterations=2,
                 diagnostic_iterations=1,
                 high_frequency_iterations=1,
+                bundled_backend=MissingBundledBackend(),
             )
         )
 
@@ -134,13 +135,12 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
             backpressure_iterations=4,
             diagnostic_iterations=1,
             high_frequency_iterations=2,
-            control_mode="python",
-            bundled_backend=LocalBackend(),
+            bundled_backend=BundledBackend("python"),
         )
     )
 
     svd_case, add_scalar_case = report["operations"]
-    assert report["schema_version"] == 11
+    assert report["schema_version"] == 13
     assert report["configuration"]["plugin_directory"] == str(
         PLUGIN_DIRECTORY.resolve()
     )
@@ -158,11 +158,10 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert report["ring_control"]["round_trip_ms"]["count"] == 1
     assert report["ring_capacity_pressure"]["round_trip_ms"]["count"] == 4
     assert report["ring_capacity_pressure"]["backpressure_wait_ms"]["p95_ms"] > 0
-    assert report["configuration"]["control_mode"] == "python"
     assert report["high_frequency_add_scalar"]["iterations"] == 2
     assert set(report["high_frequency_add_scalar"]["backends"]) == {
-        "local",
-        "bundled",
+        "bundled_python",
+        "bundled_native",
         "isolated",
     }
     assert all(
@@ -175,14 +174,18 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
         values["cleanup_inclusive_calls_per_second"] > 0
         for values in report["high_frequency_add_scalar_out"]["backends"].values()
     )
-    assert set(svd_case["backends"]) == {"local", "bundled", "isolated"}
+    assert set(svd_case["backends"]) == {
+        "bundled_python",
+        "bundled_native",
+        "isolated",
+    }
     assert all(
         values["call_ms"]["count"] == 1 and values["cleanup_ms"]["count"] == 1
         for values in svd_case["backends"].values()
     )
     assert set(svd_case["overhead"]) == {
-        "isolated_vs_bundled",
-        "isolated_vs_local",
+        "isolated_vs_bundled_native",
+        "isolated_vs_bundled_python",
     }
     assert set(svd_case["diagnostics"]) == {
         "cached_buffer_reclamation_ms",
@@ -245,7 +248,11 @@ def test_benchmark_smoke_run_reports_all_measurement_groups() -> None:
     assert (
         "nested within and overlap" in report["measurement_boundaries"]["diagnostics"]
     )
-    assert set(report["comparison_contract"]) == {"local", "bundled", "isolated"}
+    assert set(report["comparison_contract"]) == {
+        "bundled_python",
+        "bundled_native",
+        "isolated",
+    }
     provenance = report["diagnostic_provenance"]
     assert "scalar_binding_ms" in provenance["frontend_python"]["metrics"]
     assert "worker_kernel_ms" in provenance["kernel"]["metrics"]

@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Data Flow And Reading Guide &#8212; WMFS e49fde4875b7</title>
+    <title>Data Flow And Reading Guide &#8212; WMFS 8209176c5fcc</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=3e247dd8"></script>
+    <script src="_static/documentation_options.js?v=9172fd73"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -48,7 +48,7 @@ page then provides the detailed source-level call trace.</p>
   -&gt; Runtime.invoke
   -&gt; IsolatedBackend.invoke
   -&gt; bind_invocation / BufferManager
-  -&gt; NativeWorkerSession or WorkerSession
+  -&gt; WorkerSession with native transport
   -&gt; batched SCM_RIGHTS mapping control
   -&gt; command ring publication + eventfd
   -&gt; reference worker ring consumer
@@ -142,7 +142,7 @@ declarations, validation, and fingerprints.</p></li>
 <h3>3. Invocation Planning<a class="headerlink" href="#invocation-planning" title="Link to this heading">¶</a></h3>
 <p>The transport-neutral planner binds tensor and scalar arguments, applies access
 metadata, computes output shape/dtype plans, and validates reusable <code class="docutils literal notranslate"><span class="pre">out=</span></code>
-tensors. Python and native control paths consume the same plan.</p>
+tensors. Bundled and isolated paths consume the same plan.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">bind_invocation</span><span class="p">(</span>
     <span class="n">operation</span><span class="p">:</span> <span class="n">OperationMetadata</span><span class="p">,</span>
     <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
@@ -223,15 +223,12 @@ control frame. The fixed control ABI handles startup identity/environment,
 liveness, shutdown, and transactional FD batches.</p>
 <p>Important implementations:</p>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/native_worker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">NativeWorkerSession</span></code>:
-Python orchestration around the nanobind native control path.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/worker_process.py</span></code>, <code class="docutils literal notranslate"><span class="pre">_RingClient</span></code>: asynchronous
-submission/completion dispatch and benchmark timing boundaries.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/worker_process.py</span></code>, <code class="docutils literal notranslate"><span class="pre">WorkerSession</span></code>: startup and
+process orchestration around the mandatory native transport client.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code>: native command publication, completion dispatch,
+concurrent submission matching, and benchmark timing boundaries.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">src/ring.cpp</span></code>: native SPSC publication, backpressure, and eventfd waits.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/worker_process.py</span></code>, <code class="docutils literal notranslate"><span class="pre">WorkerSession</span></code>: equivalent
-Python orchestration around the same ring protocol.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/transport/fd_broker.py</span></code>, <code class="docutils literal notranslate"><span class="pre">FdSender.ensure_mapped_many</span></code>:
-Python batched FD sender.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/native_session.cpp</span></code>: native batched FD sender and completion dispatcher.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">packages/wmfs/wmfs/protocol/control.py</span></code>: startup, lifecycle, and batched
 buffer-transfer protocol.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">inc/wmfs/protocol/control.h</span></code>: language-neutral fixed control ABI.</p></li>
@@ -274,18 +271,16 @@ and places it in the size-matched pool; in arena mode it returns and coalesces
 the allocation’s subrange without recycling the arena mapping.</p>
 </section>
 </section>
-<section id="local-and-bundled-differences">
-<h2>Local And Bundled Differences<a class="headerlink" href="#local-and-bundled-differences" title="Link to this heading">¶</a></h2>
+<section id="bundled-and-isolated-differences">
+<h2>Bundled And Isolated Differences<a class="headerlink" href="#bundled-and-isolated-differences" title="Link to this heading">¶</a></h2>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">LocalBackend.invoke</span></code> calls PyTorch directly and bypasses shared memory and
-rings.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">BundledBackend.invoke</span></code> calls the same C++ reference kernels in process through
-<code class="docutils literal notranslate"><span class="pre">wmfs._bundled</span></code>, bypassing shared memory and rings.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BundledBackend.invoke</span></code> calls either a Python SDK provider or a native
+<code class="docutils literal notranslate"><span class="pre">wmfs._bundled</span></code> provider in process, bypassing shared memory and rings.</p></li>
 <li><p>Comparing isolated against bundled in <code class="docutils literal notranslate"><span class="pre">wmfs-benchmark</span></code> most directly measures
 process-isolation overhead for the same native kernels.</p></li>
 </ul>
-<p>All modes consume the same generated operation catalog and lifecycle contract.
-Local and bundled initialization receive the same logical canonical
+<p>Both modes consume the same generated operation catalog and lifecycle contract.
+Bundled initialization receives the same logical canonical
 configuration and logger service but create no worker, rings, shared allocator,
 FD channel, or mappings. Disabled logging selects a null logger during
 initialization, so calls perform no socket, queue, serialization, or clock work.</p>
@@ -324,7 +319,7 @@ initialization, so calls perform no socket, queue, serialization, or clock work.
 <li class="toctree-l1"><a class="reference internal" href="package-roles.html">Package Roles</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Data Flow And Reading Guide</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#end-to-end-flow">End-To-End Flow</a></li>
-<li class="toctree-l2"><a class="reference internal" href="#local-and-bundled-differences">Local And Bundled Differences</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#bundled-and-isolated-differences">Bundled And Isolated Differences</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="ring-protocol.html">Command and Completion Ring Protocol</a></li>

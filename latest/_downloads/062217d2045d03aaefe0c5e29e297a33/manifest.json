@@ -99,7 +99,7 @@
     "deployment": {
         "bundledNamespace": "wmfs_reference",
         "entrySymbol": "wmfs_reference_plugin_get_api",
-        "localProvider": "wmfs_reference.kernels",
+        "localProvider": "wmfs_reference.plugin",
         "root": "..",
         "worker": "wmfs-reference-worker"
     },

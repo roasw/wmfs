@@ -19,13 +19,11 @@ from typing import Any
 import torch
 
 from wmfs.backends.bundled import BundledBackend
-from wmfs.backends.local import LocalBackend
 from wmfs.configuration import validate_and_canonicalize
 from wmfs.logging import LoggingOptions
 from wmfs.memory import BufferManager
 from wmfs.plugins import find_manifests
 from wmfs.registry import OperationRegistry, PluginMetadata
-from wmfs.transport.native_worker import NativeWorkerSession
 from wmfs.transport.worker_process import WorkerSession
 
 _TIERS = ("small", "medium", "large")
@@ -35,15 +33,15 @@ _DEFAULT_SIZES = {
     "add_scalar": {"small": 64, "medium": 256, "large": 1024},
 }
 _DTYPES = {"float32": torch.float32, "float64": torch.float64}
-_BACKEND_NAMES = ("local", "bundled", "isolated")
+_BACKEND_NAMES = ("bundled_python", "bundled_native", "isolated")
 _PRESSURE_WORKER_HOLD_NS = 1_000_000
 
 _COMPARISON_CONTRACT = {
-    "local": (
-        "In-process public PyTorch operation, including its ordinary Python dispatch, "
-        "output allocation, and numerical kernel."
+    "bundled_python": (
+        "In-process Python plugin operation through the transport-neutral SDK facade, "
+        "including ordinary Torch allocation and numerical dispatch."
     ),
-    "bundled": (
+    "bundled_native": (
         "In-process bundled plugin operation using the same transport-neutral C++ "
         "kernel as the reference worker, without rings or shared-memory transport."
     ),
@@ -162,7 +160,6 @@ class BenchmarkConfig:
     seed: int = 1234
     memory_mode: str = "pooled"
     arena_bytes: int | None = None
-    control_mode: str = "native"
     high_frequency_iterations: int = 1000
     bundled_backend: object | None = field(default=None, repr=False, compare=False)
 
@@ -184,8 +181,6 @@ class BenchmarkConfig:
             raise ValueError("Unknown benchmark size tier")
         if self.memory_mode not in {"pooled", "arena"}:
             raise ValueError("Unknown benchmark memory mode")
-        if self.control_mode not in {"native", "python"}:
-            raise ValueError("Unknown benchmark control mode")
         if any(
             self.sizes[operation][tier] <= 0
             for operation in self.operations
@@ -228,9 +223,9 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     registry.register(manifest.metadata)
     metadata = manifest.metadata
     initialization = _benchmark_initialization(manifest, metadata, config)
-    local = LocalBackend()
-    local.initialize(manifests, registry)
-    bundled = _bundled_backend(config, manifests, registry)
+    bundled_python = BundledBackend("python")
+    bundled_python.initialize(manifests, registry)
+    bundled_native = _bundled_backend(config, manifests, registry)
     with BufferManager(
         mode=config.memory_mode, arena_bytes=config.arena_bytes, profile=True
     ) as discovery_buffers:
@@ -262,13 +257,20 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
                         config.sizes[operation][tier],
                         config,
                         generator,
-                        local,
-                        bundled,
+                        bundled_python,
+                        bundled_native,
                     )
                 )
 
     high_frequency = (
-        _benchmark_high_frequency(manifest, metadata, config, generator, local, bundled)
+        _benchmark_high_frequency(
+            manifest,
+            metadata,
+            config,
+            generator,
+            bundled_python,
+            bundled_native,
+        )
         if "add_scalar" in config.operations
         else None
     )
@@ -278,8 +280,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             metadata,
             config,
             generator,
-            local,
-            bundled,
+            bundled_python,
+            bundled_native,
             reuse_output=True,
         )
         if "add_scalar" in config.operations
@@ -287,7 +289,7 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
     )
 
     report = {
-        "schema_version": 11,
+        "schema_version": 13,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": {
             "platform": platform.platform(),
@@ -323,7 +325,6 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
             "dtype": str(config.dtype).removeprefix("torch."),
             "seed": config.seed,
             "memory_mode": config.memory_mode,
-            "control_mode": config.control_mode,
             "high_frequency_iterations": config.high_frequency_iterations,
             "arena_bytes": config.arena_bytes,
             "sizes": config.sizes,
@@ -370,8 +371,8 @@ def _run_benchmarks_configured(config: BenchmarkConfig) -> dict[str, Any]:
 
 def validate_report(report: dict[str, Any]) -> None:
     """Validate the current benchmark report's required measurement groups."""
-    if report.get("schema_version") != 11:
-        raise ValueError("Benchmark report is not schema version 11")
+    if report.get("schema_version") != 13:
+        raise ValueError("Benchmark report is not schema version 13")
     if report.get("measurement_status") and not report.get("operations"):
         if not report.get("historical_report"):
             raise ValueError("Unmeasured report must identify its historical baseline")
@@ -408,7 +409,7 @@ def validate_report(report: dict[str, Any]) -> None:
                 for field in ("median_ms", "p95_ms", "standard_deviation_ms")
             ):
                 raise ValueError(f"Benchmark report has invalid {name} summary")
-    for backend in ("local", "bundled", "isolated"):
+    for backend in _BACKEND_NAMES:
         if set(report["initialization"].get(backend, {})) != {
             "absent_configuration_ms",
             "configured_configuration_ms",
@@ -431,7 +432,7 @@ def render_table(report: dict[str, Any]) -> str:
     environment = report["environment"]
     worker = environment["worker"]
     lines = [
-        "WMFS local, bundled, and isolated benchmark",
+        "WMFS bundled Python, bundled native, and isolated benchmark",
         (
             f"runtime: Python {environment['python_version']}, "
             f"Torch {environment['torch_version']}, glibc {environment['glibc_version']}"
@@ -443,7 +444,7 @@ def render_table(report: dict[str, Any]) -> str:
         (
             f"dtype: {environment['dtype']}; threads: {environment['threads']}; "
             f"memory: {report['configuration']['memory_mode']}; "
-            f"control: {report['configuration']['control_mode']}"
+            "transport: native"
         ),
         "",
         "Primary comparison (milliseconds; isolated inputs are already mapped)",
@@ -451,26 +452,26 @@ def render_table(report: dict[str, Any]) -> str:
     primary_rows = []
     for case in report["operations"]:
         backends = case["backends"]
-        local = backends["local"]["call_ms"]
-        bundled = backends["bundled"]["call_ms"]
+        bundled_python = backends["bundled_python"]["call_ms"]
+        bundled_native = backends["bundled_native"]["call_ms"]
         isolated = backends["isolated"]["call_ms"]
-        versus_bundled = case["overhead"]["isolated_vs_bundled"]
-        versus_local = case["overhead"]["isolated_vs_local"]
+        versus_native = case["overhead"]["isolated_vs_bundled_native"]
+        versus_python = case["overhead"]["isolated_vs_bundled_python"]
         primary_rows.append(
             (
                 case["operation"],
                 case["tier"],
                 case["shape"],
-                _number(local["median_ms"]),
-                _number(local["standard_deviation_ms"]),
-                _number(bundled["median_ms"]),
-                _number(bundled["standard_deviation_ms"]),
+                _number(bundled_python["median_ms"]),
+                _number(bundled_python["standard_deviation_ms"]),
+                _number(bundled_native["median_ms"]),
+                _number(bundled_native["standard_deviation_ms"]),
                 _number(isolated["median_ms"]),
                 _number(isolated["standard_deviation_ms"]),
-                _number(versus_bundled["absolute_ms"]),
-                f"{versus_bundled['percentage']:.1f}%",
-                _number(versus_local["absolute_ms"]),
-                f"{versus_local['percentage']:.1f}%",
+                _number(versus_native["absolute_ms"]),
+                f"{versus_native['percentage']:.1f}%",
+                _number(versus_python["absolute_ms"]),
+                f"{versus_python['percentage']:.1f}%",
             )
         )
     lines.extend(
@@ -479,16 +480,16 @@ def render_table(report: dict[str, Any]) -> str:
                 "operation",
                 "tier",
                 "shape",
-                "local med",
-                "local std",
-                "bundled med",
-                "bundled std",
+                "Python med",
+                "Python std",
+                "native med",
+                "native std",
                 "isolated med",
                 "isolated std",
-                "vs bundled",
-                "vs bundled %",
-                "vs local",
-                "vs local %",
+                "vs native",
+                "vs native %",
+                "vs Python",
+                "vs Python %",
             ),
             primary_rows,
         )
@@ -498,13 +499,27 @@ def render_table(report: dict[str, Any]) -> str:
             "",
             "Post-return cleanup (median milliseconds; excluded from primary calls)",
             *_table(
-                ("operation", "tier", "local", "bundled", "isolated+reclaim"),
+                (
+                    "operation",
+                    "tier",
+                    "bundled Python",
+                    "bundled native",
+                    "isolated+reclaim",
+                ),
                 tuple(
                     (
                         case["operation"],
                         case["tier"],
-                        _number(case["backends"]["local"]["cleanup_ms"]["median_ms"]),
-                        _number(case["backends"]["bundled"]["cleanup_ms"]["median_ms"]),
+                        _number(
+                            case["backends"]["bundled_python"]["cleanup_ms"][
+                                "median_ms"
+                            ]
+                        ),
+                        _number(
+                            case["backends"]["bundled_native"]["cleanup_ms"][
+                                "median_ms"
+                            ]
+                        ),
                         _number(
                             case["backends"]["isolated"]["cleanup_ms"]["median_ms"]
                         ),
@@ -746,14 +761,14 @@ def _benchmark_initialization(
         "configured_configuration_ms": configured,
     }
     result: dict[str, dict[str, Any]] = {
-        "local": {},
-        "bundled": {},
+        "bundled_python": {},
+        "bundled_native": {},
         "isolated": {},
     }
     for name, variant in variants.items():
         for backend_name, factory in (
-            ("local", LocalBackend),
-            ("bundled", _bundled_backend_factory(config)),
+            ("bundled_python", lambda: BundledBackend("python")),
+            ("bundled_native", _bundled_backend_factory(config)),
         ):
             samples = []
             for _ in range(config.startup_iterations):
@@ -891,8 +906,8 @@ def _benchmark_case(
     size: int,
     config: BenchmarkConfig,
     generator: torch.Generator,
-    local: object,
-    bundled: object,
+    bundled_python: object,
+    bundled_native: object,
 ) -> dict[str, Any]:
     args, kwargs = _make_arguments(operation, size, config.dtype, generator)
     tensor_shapes = [
@@ -901,8 +916,8 @@ def _benchmark_case(
     with _benchmark_session(manifest, metadata, config) as (buffers, session):
         managed_args = _manage_arguments(buffers, args)
         backends = {
-            "local": local,
-            "bundled": bundled,
+            "bundled_python": bundled_python,
+            "bundled_native": bundled_native,
             "isolated": session,
         }
         results = {
@@ -960,13 +975,13 @@ def _benchmark_case(
         "shape": _shape_label(operation, size),
         "backends": backend_summaries,
         "overhead": {
-            "isolated_vs_bundled": _overhead(
+            "isolated_vs_bundled_native": _overhead(
                 backend_summaries["isolated"]["call_ms"],
-                backend_summaries["bundled"]["call_ms"],
+                backend_summaries["bundled_native"]["call_ms"],
             ),
-            "isolated_vs_local": _overhead(
+            "isolated_vs_bundled_python": _overhead(
                 backend_summaries["isolated"]["call_ms"],
-                backend_summaries["local"]["call_ms"],
+                backend_summaries["bundled_python"]["call_ms"],
             ),
         },
         "memory_pool": pool_stats,
@@ -977,7 +992,7 @@ def _benchmark_case(
 def _benchmark_diagnostics(
     manifest: Any,
     metadata: PluginMetadata,
-    session: WorkerSession | NativeWorkerSession,
+    session: WorkerSession,
     buffers: BufferManager,
     operation: str,
     args: tuple[object, ...],
@@ -1202,8 +1217,8 @@ def _benchmark_high_frequency(
     metadata: PluginMetadata,
     config: BenchmarkConfig,
     generator: torch.Generator,
-    local: object,
-    bundled: object,
+    bundled_python: object,
+    bundled_native: object,
     *,
     reuse_output: bool = False,
 ) -> dict[str, Any]:
@@ -1211,7 +1226,11 @@ def _benchmark_high_frequency(
     args, kwargs = _make_arguments("add_scalar", size, config.dtype, generator)
     with _benchmark_session(manifest, metadata, config) as (buffers, session):
         managed_args = _manage_arguments(buffers, args)
-        backends = {"local": local, "bundled": bundled, "isolated": session}
+        backends = {
+            "bundled_python": bundled_python,
+            "bundled_native": bundled_native,
+            "isolated": session,
+        }
         reusable = {
             name: backend.invoke("add_scalar", *managed_args, **kwargs)
             if reuse_output
@@ -1277,9 +1296,7 @@ def _new_session(
     buffers: BufferManager,
     metadata: PluginMetadata | None,
     config: BenchmarkConfig,
-) -> WorkerSession | NativeWorkerSession:
-    if config.control_mode == "native":
-        return NativeWorkerSession(manifest, buffers, metadata)
+) -> WorkerSession:
     return WorkerSession(manifest, buffers, metadata)
 
 
@@ -1290,7 +1307,7 @@ def _benchmark_session(
     config: BenchmarkConfig,
     *,
     memory_mode: str | None = None,
-) -> Iterator[tuple[BufferManager, WorkerSession | NativeWorkerSession]]:
+) -> Iterator[tuple[BufferManager, WorkerSession]]:
     with BufferManager(
         mode=memory_mode or config.memory_mode,
         arena_bytes=config.arena_bytes,
@@ -1356,13 +1373,13 @@ def _validate_results(
                 torch.testing.assert_close(current_singular_values, singular_values)
             singular_values = current_singular_values
         return
-    local_result = results["local"]
-    if not isinstance(local_result, torch.Tensor):
+    reference_result = results["bundled_python"]
+    if not isinstance(reference_result, torch.Tensor):
         raise TypeError("Benchmark operation did not return a tensor")
     for result in results.values():
         if not isinstance(result, torch.Tensor):
             raise TypeError("Benchmark operation did not return a tensor")
-        torch.testing.assert_close(result, local_result)
+        torch.testing.assert_close(result, reference_result)
 
 
 def _time_call(call: Callable[[], Any]) -> tuple[int, Any]:
@@ -1409,7 +1426,7 @@ def _bundled_backend(
     manifests: tuple[Any, ...],
     registry: OperationRegistry,
 ) -> Any:
-    backend = config.bundled_backend or BundledBackend()
+    backend = config.bundled_backend or BundledBackend("native")
     initialize = getattr(backend, "initialize", None)
     if initialize is not None:
         initialize(manifests, registry)
@@ -1426,7 +1443,7 @@ def _bundled_backend(
 
 def _bundled_backend_factory(config: BenchmarkConfig) -> Callable[[], Any]:
     if config.bundled_backend is None:
-        return BundledBackend
+        return lambda: BundledBackend("native")
     return type(config.bundled_backend)
 
 
@@ -1507,7 +1524,10 @@ def _table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Benchmark local, bundled, and process-isolated wmfs operations"
+        description=(
+            "Benchmark bundled Python, bundled native, and process-isolated "
+            "wmfs operations"
+        )
     )
     parser.add_argument(
         "--plugin-directory",
@@ -1548,9 +1568,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--memory-mode", choices=("pooled", "arena"), default="pooled")
     parser.add_argument("--arena-bytes", type=int)
-    parser.add_argument(
-        "--control-mode", choices=("native", "python"), default="native"
-    )
     parser.add_argument("--high-frequency-iterations", type=int, default=1000)
     parser.add_argument("--format", choices=("table", "json"), default="table")
     parser.add_argument("--output", type=Path)
@@ -1579,7 +1596,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=arguments.seed,
         memory_mode=arguments.memory_mode,
         arena_bytes=arguments.arena_bytes,
-        control_mode=arguments.control_mode,
         high_frequency_iterations=arguments.high_frequency_iterations,
     )
     report = run_benchmarks(config)

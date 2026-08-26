@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Package Roles &#8212; WMFS e49fde4875b7</title>
+    <title>Package Roles &#8212; WMFS 8209176c5fcc</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
-    <script src="_static/documentation_options.js?v=3e247dd8"></script>
+    <script src="_static/documentation_options.js?v=9172fd73"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -52,9 +52,9 @@ and lifetimes. They are not a stack that every environment should install.</p>
 <td><p>Public Python API, plugin discovery, worker lifecycle, rings, shared buffers, and tensor results</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code></p></td>
-<td><p>Python plugin worker environment</p></td>
-<td><p>Runtime, inside the worker only</p></td>
-<td><p>Stable Python worker bootstrap, invocation context, FD receiver, mapped tensors, and worker-side ring endpoint</p></td>
+<td><p>Python plugin environment</p></td>
+<td><p>Bundled or isolated Python plugin</p></td>
+<td><p>Transport-neutral plugin binding plus worker bootstrap, invocation context, mapped tensors, and ring endpoint</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code></p></td>
 <td><p>Plugin build and CI environment</p></td>
@@ -82,14 +82,14 @@ and lifetimes. They are not a stack that every environment should install.</p>
 ring producer/completion dispatcher, shared-memory allocator, FD sender, and
 worker process lifecycle. It reads generated plugin manifests but does not
 import plugin implementations.</p>
-<p><code class="docutils literal notranslate"><span class="pre">wmfs</span></code> does not depend on <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> or <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>. A local, bundled, or C++
-isolated deployment therefore does not install the Python worker SDK or the
-interface compiler.</p>
+<p><code class="docutils literal notranslate"><span class="pre">wmfs</span></code> does not depend on <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> or <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>. Native bundled and C++
+isolated deployments therefore do not install the Python plugin SDK or the
+interface compiler; Python plugins bring the SDK as their own dependency.</p>
 </section>
-<section id="wmfs-plugin-python-worker-sdk">
-<h2><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>: Python Worker SDK<a class="headerlink" href="#wmfs-plugin-python-worker-sdk" title="Link to this heading">¶</a></h2>
-<p>Install <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> only in an environment that executes a Python plugin
-worker:</p>
+<section id="wmfs-plugin-python-plugin-sdk">
+<h2><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>: Python Plugin SDK<a class="headerlink" href="#wmfs-plugin-python-plugin-sdk" title="Link to this heading">¶</a></h2>
+<p>Python plugin distributions depend on <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> for both in-process and
+isolated execution:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">python -m pip install wmfs-plugin</span>
 </pre></div>
 </div>
@@ -165,7 +165,7 @@ generated manifest identity and plugin entry table, command/completion rings,
 the FD-control and optional logging channels, and shared tensor mappings.</p>
 <p>The same generated manifest, C++11 entry table, operation IDs, lifecycle hooks,
 configuration declarations, and Python metadata are execution-mode-neutral.
-Local, bundled, and isolated targets add generic mode adapters around those
+Bundled and isolated targets add generic mode adapters around those
 artifacts; they do not regenerate or maintain separate operation catalogs.</p>
 </section>
 </section>
@@ -220,7 +220,7 @@ wmfs-tool
 <li class="toctree-l1"><a class="reference internal" href="architecture-overview.html">Architecture Overview</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Package Roles</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#wmfs-application-runtime"><code class="docutils literal notranslate"><span class="pre">wmfs</span></code>: Application Runtime</a></li>
-<li class="toctree-l2"><a class="reference internal" href="#wmfs-plugin-python-worker-sdk"><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>: Python Worker SDK</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#wmfs-plugin-python-plugin-sdk"><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>: Python Plugin SDK</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#wmfs-tool-interface-compiler"><code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code>: Interface Compiler</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#plugin-workflows">Plugin Workflows</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#dependency-direction">Dependency Direction</a></li>

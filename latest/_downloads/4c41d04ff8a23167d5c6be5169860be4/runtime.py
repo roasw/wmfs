@@ -3,7 +3,6 @@ import keyword
 import threading
 from collections.abc import Mapping
 from dataclasses import replace
-from importlib.util import find_spec
 from pathlib import Path
 from typing import Protocol
 
@@ -11,7 +10,6 @@ import torch
 
 from wmfs.backends.bundled import BundledBackend
 from wmfs.backends.isolated import IsolatedBackend
-from wmfs.backends.local import LocalBackend
 from wmfs.configuration import (
     EMPTY_CONFIGURATION_BYTES,
     ConfigurationMetadata,
@@ -83,7 +81,7 @@ class Runtime:
         self._operation_generation = 0
         self._memory_mode = "pooled"
         self._arena_bytes: int | None = None
-        self._control_mode = "auto"
+        self._bundled_implementation = "auto"
         self._deadlines = DEFAULT_TRANSPORT_DEADLINES
 
     @property
@@ -155,7 +153,7 @@ class Runtime:
         configurations = {name: EMPTY_CONFIGURATION_BYTES for name in loaded}
         with self._condition:
             self._ensure_open()
-            if self._backend_name in {"local", "bundled"}:
+            if self._backend_name == "bundled":
                 initialize = getattr(self._backends[self._backend_name], "initialize")
                 initialize(
                     tuple(
@@ -281,7 +279,6 @@ class Runtime:
                 manifests,
                 memory_mode=self._memory_mode,
                 arena_bytes=self._arena_bytes,
-                control_mode=self._control_mode,
                 deadlines=self._deadlines,
             )
             try:
@@ -329,19 +326,18 @@ class Runtime:
             self._memory_mode = mode
             self._arena_bytes = arena_bytes
 
-    def configure_control(self, mode: str = "auto") -> None:
-        """Select the isolated control path before plugin discovery.
-
-        Args:
-            mode: ``"native"``, ``"python"``, or ``"auto"``.
-        """
+    def configure_bundled(self, implementation: str = "auto") -> None:
+        """Select Python, native, or automatic in-process plugin providers."""
         with self._condition:
             self._ensure_open()
-            if "isolated" in self._backends:
-                raise RuntimeError("Configure control before discovering plugins")
-            if mode not in {"auto", "native", "python"}:
-                raise ValueError("Control mode must be 'auto', 'native', or 'python'")
-            self._control_mode = mode
+            if self._backend_name == "bundled" or self._initialized_plugins:
+                raise RuntimeError("Configure bundled providers before initialization")
+            if implementation not in {"auto", "python", "native"}:
+                raise ValueError(
+                    "Bundled implementation must be 'auto', 'python', or 'native'"
+                )
+            self._bundled_implementation = implementation
+            self._backends["bundled"] = BundledBackend(implementation)
 
     def configure_deadlines(
         self,
@@ -377,8 +373,7 @@ class Runtime:
         """Select an available execution backend.
 
         Args:
-            name: ``"local"``, ``"bundled"``, or ``"isolated"`` when
-                available.
+            name: ``"bundled"`` or ``"isolated"`` when available.
         """
         with self._condition:
             self._ensure_open()
@@ -388,7 +383,7 @@ class Runtime:
                     f"Unknown backend {name!r}; available backends: {available}"
                 )
             previous_names = self._operation_names_locked()
-            if name in {"local", "bundled"}:
+            if name == "bundled":
                 self._initialize_in_process_backend_locked(name)
             self._backend_name = name
             if self._operation_names_locked() != previous_names:
@@ -598,7 +593,7 @@ class Runtime:
             self._operation_generation += 1
             self._memory_mode = "pooled"
             self._arena_bytes = None
-            self._control_mode = "auto"
+            self._bundled_implementation = "auto"
             self._deadlines = DEFAULT_TRANSPORT_DEADLINES
             self._state = "open"
             self._close_generation += 1
@@ -674,10 +669,7 @@ class Runtime:
 
 
 def _initial_backends() -> dict[str, Backend]:
-    backends: dict[str, Backend] = {"local": LocalBackend()}
-    if find_spec("wmfs._bundled") is not None:
-        backends["bundled"] = BundledBackend()
-    return backends
+    return {"bundled": BundledBackend()}
 
 
 def _configuration_for_manifest(

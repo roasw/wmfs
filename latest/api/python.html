@@ -5,11 +5,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Python API Reference &#8212; WMFS e49fde4875b7</title>
+    <title>Python API Reference &#8212; WMFS 8209176c5fcc</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=b08954a9" />
     <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
-    <script src="../_static/documentation_options.js?v=3e247dd8"></script>
+    <script src="../_static/documentation_options.js?v=9172fd73"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <link rel="index" title="Index" href="../genindex.html" />
@@ -141,8 +141,8 @@ public API does not expose command records or mandatory futures. <code class="do
 <p>Write a versioned <code class="docutils literal notranslate"><span class="pre">interface.toml</span></code>, run <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span> <span class="pre">generate</span></code>, and commit the
 manifest, C/C++11 ABI files, and Python metadata/stubs. Package and runtime builds
 consume those committed files. CI runs the same command with <code class="docutils literal notranslate"><span class="pre">--check</span></code>; plugins
-do not depend on <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> at runtime. Python worker distributions depend on
-<code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>; C++ workers do not.</p>
+do not depend on <code class="docutils literal notranslate"><span class="pre">wmfs-tool</span></code> at runtime. Every Python plugin distribution
+depends on <code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code>; C++ workers do not.</p>
 </section>
 <section id="runtime">
 <h2>Runtime<a class="headerlink" href="#runtime" title="Link to this heading">¶</a></h2>
@@ -334,12 +334,12 @@ one trusted persistent mapping.</p></li>
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="wmfs.runtime.Runtime.configure_control">
-<span class="sig-name descname"><span class="pre">configure_control</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'auto'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.configure_control" title="Link to this definition">¶</a></dt>
-<dd><p>Select the isolated control path before plugin discovery.</p>
+<dt class="sig sig-object py" id="wmfs.runtime.Runtime.configure_bundled">
+<span class="sig-name descname"><span class="pre">configure_bundled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">implementation</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'auto'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#wmfs.runtime.Runtime.configure_bundled" title="Link to this definition">¶</a></dt>
+<dd><p>Select Python, native, or automatic in-process plugin providers.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>mode</strong> (<em>str</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;native&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;python&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;auto&quot;</span></code>.</p>
+<dd class="field-odd"><p><strong>implementation</strong> (<em>str</em>)</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p>None</p>
@@ -373,8 +373,7 @@ one trusted persistent mapping.</p></li>
 <dd><p>Select an available execution backend.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>name</strong> (<em>str</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;local&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;bundled&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;isolated&quot;</span></code> when
-available.</p>
+<dd class="field-odd"><p><strong>name</strong> (<em>str</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;bundled&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">&quot;isolated&quot;</span></code> when available.</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p>None</p>
@@ -572,7 +571,7 @@ file logging writes inside the plugin process.</p>
 <p><code class="docutils literal notranslate"><span class="pre">Runtime.load_plugins</span></code> is the worker-free manifest path used before
 <code class="docutils literal notranslate"><span class="pre">list_configurable</span></code>, <code class="docutils literal notranslate"><span class="pre">validate_config</span></code>, and <code class="docutils literal notranslate"><span class="pre">configure_plugin</span></code>. Configuration is
 canonicalized without inserting defaults and becomes immutable at plugin
-initialization. Local and bundled plugins initialize when selected; isolated
+initialization. Bundled plugins initialize when selected; isolated
 plugins initialize during eager discovery. <code class="docutils literal notranslate"><span class="pre">Runtime.close</span></code> invokes enabled
 shutdown hooks and resets lifecycle state.</p>
 <p><code class="docutils literal notranslate"><span class="pre">LoggingOptions()</span></code> selects the zero-resource disabled path. Centralized mode
@@ -581,11 +580,11 @@ bounded local sink; neither shares operation or FD-control traffic.</p>
 </section>
 <section id="plugin-sdk">
 <h2>Plugin SDK<a class="headerlink" href="#plugin-sdk" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> is documented and tested as an independent Python-worker SDK.
-Core runtime documentation deliberately does not import it: runtime and worker
-SDK packages carry compatible protocol definitions but may be installed in
-different environments. See <code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/README.md</span></code> and generated
-Python interface stubs for its worker-facing API.</p>
+<p><code class="docutils literal notranslate"><span class="pre">wmfs-plugin</span></code> is documented and tested as an independent Python plugin SDK.
+The core runtime deliberately does not import it; Python plugin distributions
+bring the facade and compatible worker protocol definitions into bundled or
+isolated environments. See <code class="docutils literal notranslate"><span class="pre">packages/wmfs-plugin/README.md</span></code> and generated
+Python interface stubs.</p>
 </section>
 </section>
 

@@ -391,7 +391,6 @@ bool RingProducer::try_push(const wmfs_ring_record_v1 &record) {
     if (producer == std::numeric_limits<std::uint64_t>::max())
         corrupt("producer counter overflow");
     auto *slot = &impl_->records[producer % impl_->capacity];
-    std::memset(slot, 0, sizeof(*slot));
     std::memcpy(slot, &record, sizeof(record));
     release(&impl_->header->producer, producer + 1);
     notify(impl_->data_fd.get());
@@ -456,7 +455,8 @@ bool RingConsumer::try_pop(wmfs_ring_record_v1 &record) {
     std::memcpy(&record, slot, sizeof(record));
     validate_record_generation(record, impl_->generation);
     release(&impl_->header->consumer, consumer + 1);
-    notify(impl_->space_fd.get());
+    if (producer - consumer == impl_->capacity)
+        notify(impl_->space_fd.get());
     return true;
 }
 RingWaitResult RingConsumer::pop(wmfs_ring_record_v1 &record,

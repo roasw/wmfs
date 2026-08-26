@@ -195,7 +195,7 @@ finite numbers, and a 64 KiB limit. `None` and `{}` both become `b"{}"`; default
 remain metadata and are not inserted. Configuration is immutable after plugin
 initialization, and worker replacement replays the exact stored bytes.
 
-Local and bundled backends initialize when selected after manifest loading.
+Bundled providers initialize when selected after manifest loading.
 Isolated workers initialize during eager transactional discovery. Python hooks
 receive the decoded mapping and a logger; C++11 hooks receive borrowed
 fixed-width JSON and logger views from the generated entry table. Initialization
@@ -203,7 +203,7 @@ rejection prevents publication. `Runtime.close()` drains accepted work, invokes
 each enabled shutdown hook once, closes services, and resets the runtime.
 
 The generated manifest, entry table, lifecycle declarations, operation IDs, and
-configuration schema are mode-neutral. Local, bundled, and isolated adapters do
+configuration schema are mode-neutral. Bundled and isolated adapters do
 not maintain separate registries or generated interfaces.
 
 ## Logging modes
@@ -225,7 +225,7 @@ operation status.
 
 ## Optional bypasses
 
-- Local and bundled calls create no worker, rings, eventfds, shared allocator,
+- Bundled calls create no worker, rings, eventfds, shared allocator,
   mappings, or FD transfers.
 - Disabled logging uses the null function table and creates no logging resource.
 - Ordinary calls do not populate profiling timestamps or metric records.

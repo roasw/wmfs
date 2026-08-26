@@ -48,25 +48,25 @@ wmfs.runtime.discover_plugins(Path("plugins"))
 wmfs.runtime.use_backend("isolated")
 ```
 
-Configuration is canonicalized once and immutable after initialization. Local
-and bundled initialization occurs when that backend is selected; isolated
+Configuration is canonicalized once and immutable after initialization. Bundled
+initialization occurs when that backend is selected; isolated
 initialization occurs during eager discovery. The default disabled logger
 creates no logging transport or queue. See {doc}`ring-protocol`.
 
-Use `local` for direct PyTorch execution, `bundled` for the in-process reference
-plugin when it was compiled, and `isolated` for process isolation. Plugin
+Use `bundled` for in-process Python or native plugins and `isolated` for process
+isolation. Plugin
 discovery starts and validates persistent workers eagerly, so the first
 operation does not start a second process.
 
 Operation names are dynamic module attributes. Before plugin discovery or an
-explicit `local`/`bundled` backend selection, names such as `wmfs.matmul` do not
+explicit `bundled` backend selection, names such as `wmfs.matmul` do not
 exist. Import `wmfs` first, configure the runtime, and then access its published
 operations.
 
 `empty`, `zeros`, `ones`, and `randn` return ordinary Torch tensors. With the
 isolated backend selected, their storage is allocated directly in shared memory
-and avoids an ingress copy on the first worker invocation. With `local` or
-`bundled`, they delegate to the corresponding native Torch constructors.
+and avoids an ingress copy on the first worker invocation. With `bundled`, they
+delegate to native Torch constructors.
 
 Isolated autograd uses plugin-advertised first-order VJPs. The main process
 retains PyTorch graph scheduling; the plugin implements the mathematical VJP.
